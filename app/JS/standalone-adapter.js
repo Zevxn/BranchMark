@@ -145,6 +145,38 @@
         }
     }
 
+    function getMindMapExportBaseName() {
+        const title = String(document.title || sessionStorage.getItem('pageTitle') || '').trim();
+        const safeTitle = title
+            .replace(/[\\/:*?"<>|\u0000-\u001F]/g, '_')
+            .replace(/[.\s]+$/g, '')
+            .trim();
+        return safeTitle || '思维导图';
+    }
+
+    function installNamedMindMapExport() {
+        const exportButton = document.querySelector('#btn-export');
+        if (!exportButton) return;
+
+        // 原版将普通 JSON 导出名称写死为 mindmap.json；独立版改用当前收藏中的思维导图名称。
+        exportButton.onclick = () => {
+            const exportData = {
+                version: 'v36-final-fix',
+                data: state.data,
+                view: state.view,
+            };
+            const url = URL.createObjectURL(new Blob(
+                [JSON.stringify(exportData)],
+                { type: 'application/json' },
+            ));
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = `${getMindMapExportBaseName()}.json`;
+            anchor.click();
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+        };
+    }
+
     function applyImportedMindMap(content) {
         try {
             const imported = JSON.parse(content);
@@ -227,5 +259,6 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.standaloneMindmap = 'true';
+        installNamedMindMapExport();
     });
 })();
