@@ -200,7 +200,7 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
     }
 }
 
-.panel-actions { display: flex; gap: 12px; align-items: center; flex: 1; }
+.panel-actions { display: flex; justify-content: space-between; gap: 0; align-items: center; flex: 1; }
 .panel-actions button {
     background: rgba(72, 62, 62, 0.2); border: none; color: white;
     width: 32px; height: 32px; border-radius: 8px; cursor: pointer;

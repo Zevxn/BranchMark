@@ -1,20 +1,17 @@
 # DeepConvo 思维导图独立版
 
-本项目将 `ref` 中 DeepConvo 的原版思维导图功能迁移为独立网页应用。迁移以保留原实现为原则，不重新设计界面，不替换原交互，也不重新实现脑图组件。
+本项目以 `ref` 中 DeepConvo 的原版思维导图为地基，维护一套可直接修改的独立网页应用。`ref` 只作为原始参考，不参与运行；所有产品改动直接落在 `app`。
 
 ## 保留的原版代码
 
-以下文件从 `ref` 原样复制到 `app`，测试会逐字节检查它们没有被改写：
+以下未定制文件仍从 `ref` 原样复制到 `app`，测试会逐字节检查它们没有被改写：
 
-- `JS/MindMap.js`
-- `JS/BookMarks.js`
 - `JS/AI-Contents.js`
 - `JS/utils.js`
 - `JS/renderMD.js`
-- `CSS/BookMarks.css`
 - `CSS/AI-Contents.css`
 
-`HTML/MindMap.html` 也沿用原版文件，只增加了中文语言脚本、扩展兼容层、独立应用适配层和空 favicon。
+`HTML/MindMap.html`、`JS/MindMap.js`、`JS/BookMarks.js` 和 `CSS/BookMarks.css` 已作为独立应用正式源码维护，主题、导入导出和收藏夹精简等需求直接在这些文件中实现。
 
 原版 KaTeX、Mermaid、Marked、Highlight、Remix Icon、Font Awesome、字体与中英文语言包均已复制到 `app`，运行时不再引用 `ref`。
 
@@ -25,6 +22,7 @@
 - 付费状态检查在独立应用中直接放行。
 - 原收藏夹继续负责文件夹、脑图文件、搜索、移动、重命名、删除和列表/网格视图。
 - 独立版隐藏网页收藏、聊天预览等与思维导图无关的入口。
+- 亮暗主题、Quicker 原生导入和按导图名称导出均由正式思维导图代码直接实现，不再通过额外适配脚本覆盖。
 - 其余脑图 DOM、CSS、工具栏、卡片、编辑器、拖拽、缩放和右键交互保持原版。
 
 ## 运行
@@ -80,16 +78,15 @@ Quicker 打包时只保留现代 WebView2 实际使用的 `.woff2` 字体，排�
 
 ```text
 app/
-  HTML/MindMap.html          原版思维导图页面
-  JS/MindMap.js              原版脑图交互
-  JS/BookMarks.js            原版收藏夹与文件夹
-  JS/AI-Contents.js          原版目录面板
+  HTML/MindMap.html          独立版思维导图页面
+  JS/MindMap.js              脑图交互、主题与导入导出
+  JS/BookMarks.js            收藏夹与文件夹
+  JS/AI-Contents.js          原版共享内容与导出工具
   JS/utils.js                原版通用交互
   JS/renderMD.js             原版 Markdown 渲染
   JS/standalone-shim.js      Chrome 扩展兼容层
   JS/standalone-locale-zh-cn.js 独立版中文语言脚本
-  JS/standalone-adapter.js   独立脑图应用入口限制
-  CSS/                       原版样式
+  CSS/                       基于原版维护的应用样式
   libs/                      原版第三方资源
   locales/                   原版语言包
 ref/                         参考源代码，不参与运行

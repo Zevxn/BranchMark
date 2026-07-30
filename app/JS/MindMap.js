@@ -4,6 +4,102 @@ const $ = (sel) => document.querySelector(sel);
 if (typeof chrome.storage === 'undefined') {throw new Error('');}
 if (typeof marked !== 'undefined') marked.use({ breaks: true, gfm: true });
 
+const MINDMAP_THEME_STORAGE_KEY = 'mindmap_theme';
+
+function getMindMapExportBaseName() {
+    const title = String(document.title || sessionStorage.getItem('pageTitle') || '').trim();
+    const safeTitle = title
+        .replace(/[\\/:*?"<>|\u0000-\u001F]/g, '_')
+        .replace(/[.\s]+$/g, '')
+        .trim();
+    return safeTitle || '思维导图';
+}
+
+function applyMindMapTheme(theme) {
+    const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = normalizedTheme;
+    const themeButton = $('#btn-theme-toggle');
+    const themeIcon = themeButton?.querySelector('i');
+    const switchingToDark = normalizedTheme === 'light';
+    if (themeIcon) themeIcon.className = switchingToDark ? 'ri-moon-line' : 'ri-sun-line';
+    if (themeButton) {
+        themeButton.title = switchingToDark ? '切换到暗色模式' : '切换到亮色模式';
+        themeButton.setAttribute('aria-pressed', String(normalizedTheme === 'dark'));
+    }
+}
+
+function notifyQuickerTheme(theme) {
+    const webView = window.chrome && window.chrome.webview;
+    if (webView && typeof webView.postMessage === 'function') {
+        webView.postMessage(`DEEPCONVO_THEME:${theme}`);
+    }
+}
+
+async function initializeMindMapTheme() {
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const result = await chrome.storage.local.get(MINDMAP_THEME_STORAGE_KEY);
+    const savedTheme = result && result[MINDMAP_THEME_STORAGE_KEY];
+    applyMindMapTheme(savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : systemTheme);
+
+    const themeButton = $('#btn-theme-toggle');
+    if (!themeButton) return;
+    themeButton.onclick = async () => {
+        const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+        applyMindMapTheme(nextTheme);
+        await chrome.storage.local.set({ [MINDMAP_THEME_STORAGE_KEY]: nextTheme });
+        notifyQuickerTheme(nextTheme);
+    };
+}
+
+function showMindMapImportFeedback(message) {
+    if (typeof showTopToast === 'function') showTopToast(message);
+    else window.alert(message);
+}
+
+function applyImportedMindMap(content) {
+    try {
+        const imported = JSON.parse(content);
+        if (!imported || !imported.data) throw new Error('文件中没有思维导图数据');
+        state.data = imported.data;
+        state.view = imported.view || state.view;
+        state.history = [];
+        state.historyIndex = -1;
+        sessionStorage.removeItem('currentFileID');
+        recordHistory();
+        renderTree();
+        showMindMapImportFeedback('✅ 思维导图导入成功');
+    } catch (error) {
+        console.error('[MindMap] 导入思维导图失败:', error);
+        showMindMapImportFeedback(`❌ 导入失败：${error.message || '文件格式不正确'}`);
+    }
+}
+
+function initializeMindMapImport() {
+    const openButton = $('#btn-open');
+    const quickerWebView = window.chrome && window.chrome.webview;
+    if (!openButton || !quickerWebView ||
+        typeof quickerWebView.postMessage !== 'function' ||
+        typeof quickerWebView.addEventListener !== 'function') {
+        if (openButton) openButton.onclick = () => $('#fileInput').click();
+        return;
+    }
+
+    openButton.onclick = () => quickerWebView.postMessage('DEEPCONVO_IMPORT_REQUEST');
+    quickerWebView.addEventListener('message', event => {
+        let payload = event.data;
+        if (typeof payload === 'string') {
+            try { payload = JSON.parse(payload); }
+            catch { return; }
+        }
+        if (!payload || payload.type !== 'DEEPCONVO_IMPORT_RESULT' || payload.cancelled) return;
+        if (payload.error) {
+            showMindMapImportFeedback(`❌ 导入失败：${payload.error}`);
+            return;
+        }
+        applyImportedMindMap(payload.content);
+    });
+}
+
 const defaultTreeData = {
     id: 'root', topic: 'MindMap', content: '## 主题',
     widthMode: 'auto', heightMode: 'auto', children: [],
@@ -496,8 +592,13 @@ function initializeMapToolbar() {
     $('#btn-new').onclick=()=>{newMindMap();}
     $('#btn-save').onclick=()=>{saveMindMapData(true);}
     $('#btn-export').onclick=()=>{ 
-        const a=document.createElement('a'); 
-        a.href=URL.createObjectURL(new Blob([JSON.stringify({version:'v36-final-fix',data:state.data,view:state.view})],{type:'application/json'})); a.download='mindmap.json'; a.click(); };
+        const a=document.createElement('a');
+        const url=URL.createObjectURL(new Blob([JSON.stringify({version:'v36-final-fix',data:state.data,view:state.view})],{type:'application/json'}));
+        a.href=url;
+        a.download=`${getMindMapExportBaseName()}.json`;
+        a.click();
+        setTimeout(()=>URL.revokeObjectURL(url),0);
+    };
     $('#fileInput').onchange=(e)=>{ 
         const f=e.target.files[0]; 
         if(!f)return; 
@@ -520,7 +621,7 @@ function initializeMapToolbar() {
         };
         r.readAsText(f);
     };
-    $('#btn-open').onclick=()=>$('#fileInput').click();
+    initializeMindMapImport();
     $('#btn-export-canvas').onclick = () => {
         exportToCanvas();
     };
@@ -537,6 +638,7 @@ function initializeMapToolbar() {
         // 关闭菜单
         return;
     };
+    initializeMindMapTheme();
 }
 
 // =============================================================================
@@ -3445,7 +3547,7 @@ async function exportToCanvas() {
         nodes: nodes,
         edges: edges
     };
-    const fileName = `${document.title || 'MindMap'}.canvas`;
+    const fileName = `${getMindMapExportBaseName()}.canvas`;
     const jsonString = JSON.stringify(canvasData, null, 2);
     
     const isSaved = await saveFileDirectly(fileName, jsonString, 'application/json');
@@ -3616,7 +3718,7 @@ async function exportToVerticalCanvas() {
 
     // 5. 导出文件
     const canvasData = { nodes, edges };
-    const fileName=`${document.title || 'MindMap'}_Vertical.canvas`;
+    const fileName=`${getMindMapExportBaseName()}_Vertical.canvas`;
     const jsonString = JSON.stringify(canvasData, null, 2);
 
     const isSaved = await saveFileDirectly(fileName, jsonString, 'application/json');

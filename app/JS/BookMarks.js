@@ -86,26 +86,9 @@ uiContainer.innerHTML = `
     <div class="bookmark-panel" id="bookmarkPanel">
         <div class="panel-header">
             <div class="panel-actions">
-                <button id="newItemBtn" data-i18n-title="bookmarks.new_item_title" title="新建收藏">
-                    <i class="fa-regular fa-star"></i>
-                </button>
                 <button id="newFolderBtn" data-i18n-title="bookmarks.new_folder_title" title="新建文件夹">
                     <i class="fa-solid fa-folder-plus"></i>
                 </button>
-                <div style="position: relative; display: inline-block;">
-                    <button id="filterBtn" data-i18n-title="bookmarks.filter_title" title="筛选文件">
-                        <i class="fa-solid fa-filter"></i>
-                    </button>
-                    <div class="filter-dropdown" id="filterDropdown">
-                        <div class="filter-btn-item" data-type="mindmap">🧠 <span data-i18n="bookmarks.filter_mindmap">思维导图</span></div>
-                        <div class="filter-btn-item" data-type="markdown">📜 <span data-i18n="bookmarks.filter_markdown">整页对话</span></div>
-                        <div class="filter-btn-item" data-type="page">⭐ <span data-i18n="bookmarks.filter_page">精选对话</span></div>
-                        <div class="filter-btn-item" data-type="link">❤️ <span data-i18n="bookmarks.filter_link">收藏网页</span></div>
-                        <div class="filter-btn-item" data-type="site">🌐 <span data-i18n="bookmarks.filter_site">当前站点</span></div>
-                        <div style="height:1px; background:#eee; margin:4px 0;"></div>
-                        <div class="filter-btn-item" data-type="clear" style="color:#ef4444;">❌ <span data-i18n="bookmarks.filter_clear">清除筛选</span></div>
-                    </div>
-                </div>
 
                 <button id="searchBtn" data-i18n-title="bookmarks.search_title" title="搜索">
                     <i class="fa-solid fa-magnifying-glass"></i>
@@ -113,9 +96,6 @@ uiContainer.innerHTML = `
 
                 <button id="refreshFavBtn" data-i18n-title="bookmarks.refresh_title" title="刷新页面">
                     <i class="fas fa-sync-alt"></i>
-                </button>
-                <button id="switchBtn" data-i18n-title="bookmarks.switch_panel_title" title="切换面板">
-                    <i class="fas fa-exchange-alt"></i>
                 </button>
                 <button id="fullScreenBtn" data-i18n-title="bookmarks.fullscreen_title" title="宽屏显示">
                     <i class="fa-solid fa-expand"></i>
@@ -152,22 +132,6 @@ uiContainer.innerHTML = `
         <div class="context-menu-item" data-action="newFolder">
             <i class="fa-solid fa-folder-plus"></i>
             <span class="menu-text" data-i18n="bookmarks.ctx_new_folder">新建文件夹</span>
-        </div>
-        <div class="context-menu-item" data-action="newItem">
-            <i class="fa-regular fa-star"></i>
-            <span class="menu-text" data-i18n="bookmarks.ctx_new_item">新建收藏</span>
-        </div>
-        <div class="context-menu-item" data-action="newMap">
-            <i class="fa-solid fa-code-branch"></i>
-            <span class="menu-text" data-i18n="bookmarks.ctx_new_map">新建导图</span>
-        </div>
-        <div class="context-menu-item" data-action="preview">
-            <i class="fas fa-eye"></i>
-            <span class="menu-text" data-i18n="bookmarks.ctx_preview">预览收藏</span>
-        </div>
-        <div class="context-menu-item" data-action="sideview">
-            <i class="ri-layout-right-line"></i>
-            <span class="menu-text" data-i18n="bookmarks.ctx_sideview">边栏打开</span>
         </div>
         <div class="context-menu-item" data-action="open">
             <i class="fa-solid fa-arrow-up-right-from-square"></i>
@@ -473,16 +437,6 @@ class myBookmarkManager {
             }
         });
 
-        // 顶部按钮
-        if (location.href.includes('preview.html') || location.href.includes('MindMap.html')){
-            document.getElementById('newItemBtn').disabled=true;
-        }else{
-            document.getElementById('newItemBtn').addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.showNewItemModal([],'','',this.currentFolderId);
-            });
-        }
-
         document.getElementById('newFolderBtn').addEventListener('click', (e) => {
             e.stopPropagation();
             this.showNewFolderModal(this.currentFolderId);
@@ -505,11 +459,6 @@ class myBookmarkManager {
             setTimeout(() => {
                 icon.style.animation = 'fa-spin 1s ease-in-out';
             }, 10);
-        });
-        document.getElementById('switchBtn').addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.toggleDictionaryPanel();
-
         });
         document.getElementById('fullScreenBtn').addEventListener('click', (e) => {
             e.stopPropagation();
@@ -568,7 +517,7 @@ class myBookmarkManager {
 
         // 右键菜单
         this.initializeContextMenu();
-        this.initializeFilter();
+        this.initializeSearch();
 
 
 
@@ -577,9 +526,6 @@ class myBookmarkManager {
 ***********************************************************************************************************/
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.context-menuBM')) this.hideContextMenu();
-            if (!e.target.closest('#filterBtn') && !e.target.closest('#filterDropdown')) {
-                document.getElementById('filterDropdown').classList.remove('show');
-            }
             const now = Date.now();
             if (this.isSelecting || this.justFinishedSelecting || (now - this.lastMouseDownTime < 300)) {
                 return;
@@ -730,7 +676,6 @@ class myBookmarkManager {
         });
         
         container.addEventListener('click', (e) => {
-            document.getElementById('filterDropdown').classList.remove('show');
             if (this.justFinishedSelecting) return;
             if (e.target.closest('.item-actions button')) return;
 
@@ -784,9 +729,6 @@ class myBookmarkManager {
                     break;
                 case 'newFolder':
                     this.showNewFolderModal(id);
-                    break;
-                case 'newItem':
-                    this.showNewItemModal([], '', '', id);
                     break;
                 case 'delete':
                     this.showDeleteModal([id]);
@@ -1084,50 +1026,9 @@ class myBookmarkManager {
     }
 
 /**********************************************************************************************************
-// #region 筛选功能
+// #region 搜索功能
 ***********************************************************************************************************/
-    initializeFilter(){
-        // 筛选
-        const filterBtn = document.getElementById('filterBtn');
-        const filterDropdown = document.getElementById('filterDropdown');
-
-        // 点击主按钮切换菜单
-        filterBtn.addEventListener('click', async(e) => {
-            e.stopPropagation();
-            // if (!this.isFufei) {showTopToast('⚠️ 仅限付费用户使用~',2500); return;};
-            // this.isFufei=await this.checkUIMM2(true);if (!this.isFufei) {return;};
-            filterDropdown.classList.toggle('show');
-        });
-
-        // 点击菜单选项
-        /* 找到这段：点击菜单选项 */
-        filterDropdown.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const target = e.target.closest('.filter-btn-item');
-            if (target) { // 只要点到了 item
-                const type = target.dataset.type; // 从 target 获取 data-type
-                filterDropdown.querySelectorAll('.filter-btn-item').forEach(btn => btn.classList.remove('active'));
-                
-                if (type === 'clear') {
-                    this.activeFilter = null;
-                    filterBtn.classList.remove('active');
-                } else {
-                    if (this.activeFilter === type) {
-                        this.activeFilter = null;
-                        filterBtn.classList.remove('active');
-                        target.classList.remove('active'); // 使用 target
-                    } else {
-                        this.activeFilter = type;
-                        filterBtn.classList.add('active');
-                        target.classList.add('active'); // 使用 target
-                    }
-                }
-                filterDropdown.classList.remove('show');
-                this.applyFilter();
-            }
-        });
-
-        // --- 新增：搜索功能事件 ---
+    initializeSearch(){
         const searchBtn = document.getElementById('searchBtn');
         const searchBarRow = document.getElementById('searchBarRow');
         const searchInput = document.getElementById('searchInput');
@@ -1178,16 +1079,6 @@ class myBookmarkManager {
         
         // 5. 防止点击搜索框时关闭面板
         searchBarRow.addEventListener('click', (e) => e.stopPropagation());
-
-        installLongPress(filterBtn, {
-            delay: 600,
-            onLongPress: () => {
-                this.activeFilter = null;
-                filterBtn.classList.remove('active');
-                filterDropdown.querySelectorAll('.filter-btn-item').forEach(btn => btn.classList.remove('active'));
-                this.applyFilter();
-            }
-        });
 
         installLongPress(searchBtn, {
             delay: 600,
@@ -1348,29 +1239,11 @@ class myBookmarkManager {
                         }  
                     }
                     break;
-                case 'newItem':
-                    this.showNewItemModal([],'','',targetId);
-                    this.hideContextMenu();
-                    break;
                 case 'open':
                     if (item.type==='mindmap') {await this.openMindMap(targetId,item.name,true)}
                     else{window.open(item.url || item.Allurl, '_blank');}
                     this.hideContextMenu();
                     break;
-                case 'preview':
-                    this.open_MultipleQA(this.selectedIds,'markdown');
-                    this.hideContextMenu();
-                    break;
-                case 'sideview':
-                    if (item.type==='mindmap') {await this.openMindMap(targetId,item.name,true,true)}
-                    else{this.open_MultipleQA(this.selectedIds,'markdown',true)};
-                    this.hideContextMenu();
-                    break;
-                case 'newMap':
-                    this.open_MultipleQA(this.selectedIds,'mindmap');
-                    this.hideContextMenu();
-                    break;
-                
                 // --- 新增：移动菜单展开逻辑 ---
                 case 'move':
                     // 1. 获取相关元素
@@ -1436,36 +1309,8 @@ class myBookmarkManager {
     showContextMenu(x, y, targetId, type) {
         const menu = document.getElementById('contextMenuBM');
         const moveMenu = document.getElementById('contextMoveMenu');
-        const isSidebar = location.href.endsWith('view=sidepanel');
         if (moveMenu) moveMenu.classList.remove('show');
-
-        // ✅ 边界检查：防止菜单超出视口
-        const menuWidth = 124; // 最小宽度
-        let menuHeight = 106.6; // 高度
-        if (type==='folder'){
-            menuHeight = 167;
-        }else if(type==='empty'){
-            menuHeight = 76;
-        }else{
-            if(this.data.items[targetId].type==='mindmap'){menuHeight = 167;}
-            else{menuHeight =this.data.items[targetId].data.length===0?145:227;}
-        }
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-        
-        // 如果菜单会超出右边界，则向左显示
-        if (x + menuWidth > viewportWidth) {
-            x = viewportWidth - menuWidth;
-        }
-        // 如果菜单会超出下边界，则向上显示
-        if (y + menuHeight > viewportHeight) {
-            y = viewportHeight - menuHeight;
-        }
-        
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
         menu.style.display = 'block';
-        // console.log('显示上下文菜单', x, y, targetId, type, menu);
 
         menu.querySelectorAll('.context-menu-item').forEach(item => {
             item.dataset.targetId = targetId;
@@ -1477,21 +1322,13 @@ class myBookmarkManager {
 
         const openItem = menu.querySelector('[data-action="open"]');
         const newFolderItem = menu.querySelector('[data-action="newFolder"]');
-        const newItemItem = menu.querySelector('[data-action="newItem"]');
-        const previewItem = menu.querySelector('[data-action="preview"]');
-        const sideviewItem = menu.querySelector('[data-action="sideview"]');
-        const newMapItem = menu.querySelector('[data-action="newMap"]');
         const moveItem = menu.querySelector('[data-action="move"]');
         // 将 targetId 绑定到 Move 按钮上，方便后续读取
         moveItem.dataset.targetId = targetId;
 
         if (type === 'folder'||type === 'empty') {
             newFolderItem.style.display = 'flex';
-            newItemItem.style.display = 'flex';
             openItem.style.display = 'none';
-            previewItem.style.display = 'none';
-            sideviewItem.style.display = 'none';
-            newMapItem.style.display = 'none';
             if (type === 'folder'){
                 moveItem.style.display = 'flex';
                 renameItem.style.display = 'flex';
@@ -1505,18 +1342,20 @@ class myBookmarkManager {
             }
         }else {
             newFolderItem.style.display = 'none';
-            newItemItem.style.display = 'none';
             openItem.style.display = 'flex';
             openItem.querySelector('.menu-text').textContent = targetItem.type==='mindmap'? getI18nText('bookmarks.ctx_tabview') : getI18nText('bookmarks.ctx_open_link');
-            previewItem.style.display = (targetItem.type==='mindmap' || targetItem.data.length===0)? 'none' : 'flex';
-            newMapItem.style.display = (targetItem.type==='mindmap' || targetItem.data.length===0)? 'none' : 'flex';
-            // sideviewItem.style.display = (targetItem.type==='mindmap'||isSidebar)? 'none' : 'flex';
-            sideviewItem.style.display = (isSidebar || targetItem.data.length===0)? 'none' : 'flex';
             moveItem.style.display = 'flex';
             renameItem.style.display = 'flex';
             deleteItem.style.display = 'flex';
             bar.style.display = 'flex';
         }
+
+        // 根据精简后的实际菜单尺寸进行边界校正。
+        const menuRect = menu.getBoundingClientRect();
+        const maxX = Math.max(0, window.innerWidth - menuRect.width);
+        const maxY = Math.max(0, window.innerHeight - menuRect.height);
+        menu.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
+        menu.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
         
     }
 
@@ -1571,18 +1410,6 @@ class myBookmarkManager {
         const toggle = document.getElementById('favBtn');
         panel.classList.toggle('open');
         toggle.classList.toggle('hide-btn');
-
-        if (panel.classList.contains('open')) {
-            document.getElementById('dirBtn').classList.add('hide-btn');
-        }else{
-            document.getElementById('dirBtn').classList.remove('hide-btn');
-        }
-    }
-    toggleDictionaryPanel() {
-        document.querySelector('.directory-panel').classList.add('show'); // 立即显示面板
-        document.getElementById('bookmarkPanel').classList.remove('open');
-        this.fixedPanel = false;
-        document.querySelector('.bookmark-panel').classList.remove('fixed');
     }
 
     navigateTo(folderId) {
@@ -1741,11 +1568,7 @@ class myBookmarkManager {
     }
 
     clearAllFilters() {
-        // 清除筛选
         this.activeFilter = null;
-        document.querySelectorAll('.filter-btn-item').forEach(btn => btn.classList.remove('active'));
-        document.getElementById('filterBtn').classList.remove('active');
-        
         // 清除搜索
         this.searchKeyword = '';
         document.getElementById('searchInput').value = '';
@@ -1816,9 +1639,6 @@ class myBookmarkManager {
                         </button>
                         <button data-action="newFolder" data-id="${folderId}" data-i18n-title="bookmarks.ctx_new_folder" title="新建子文件夹">
                             <i class="fa-solid fa-folder-plus"></i>
-                        </button>
-                        <button data-action="newItem" data-id="${folderId}" data-i18n-title="bookmarks.ctx_new_item" title="新建收藏">
-                            <i class="fa-regular fa-star"></i>
                         </button>
                         <button class="danger" data-action="delete" data-id="${folderId}" data-i18n-title="bookmarks.ctx_delete" title="删除">
                             <i class="fa-regular fa-trash-can"></i>
@@ -3666,7 +3486,6 @@ async function initializeApp() {
     await initI18n();
     await bookmarkManager.initialize();
     bookmarkManager.mountToContainer(currentCfg.historyListSelector);
-    await initDirectory();
     renderLanguage();
     // if (!location.href.endsWith('preview.html') && !location.href.endsWith('MindMap.html')){
     //     await initPrompt();
