@@ -1,0 +1,95 @@
+﻿{
+  "ActionId": "0ec2f0b4-429d-4274-9831-7432d7125a19",
+  "SharedActionId": "00000000-0000-0000-0000-000000000000",
+  "Title": "思维导图",
+  "Description": "保留 DeepConvo 原版思维导图与收藏夹交互的独立 Quicker 动作。",
+  "Keywords": "思维导图,脑图,收藏夹,DeepConvo",
+  "ChangeLog": "v1.2.0：精简 WebView2 不需要的旧字体副本，使动作保持在 5 MB 限制内；保留亮暗模式记忆。",
+  "ShareUrl": "",
+  "Icon": "fa:Solid_ProjectDiagram:#FA709A",
+  "Variables": [
+    {
+      "Key": "app_data_json",
+      "Type": 0,
+      "DefaultValue": "{\"version\":1,\"chrome\":{\"app_lang\":\"zh-CN\"},\"idb\":{}}",
+      "SaveState": true,
+      "IsOutput": false,
+      "Desc": "收藏夹、文件夹、思维导图和界面设置的持久化数据"
+    },
+    {
+      "Key": "window_width",
+      "Type": 1,
+      "DefaultValue": 1200,
+      "SaveState": true,
+      "IsOutput": false,
+      "Desc": "窗口宽度"
+    },
+    {
+      "Key": "window_height",
+      "Type": 1,
+      "DefaultValue": 800,
+      "SaveState": true,
+      "IsOutput": false,
+      "Desc": "窗口高度"
+    },
+    {
+      "Key": "window_left",
+      "Type": 1,
+      "DefaultValue": -1,
+      "SaveState": true,
+      "IsOutput": false,
+      "Desc": "窗口横坐标"
+    },
+    {
+      "Key": "window_top",
+      "Type": 1,
+      "DefaultValue": -1,
+      "SaveState": true,
+      "IsOutput": false,
+      "Desc": "窗口纵坐标"
+    },
+    {
+      "Key": "window_maximized",
+      "Type": 2,
+      "DefaultValue": false,
+      "SaveState": true,
+      "IsOutput": false,
+      "Desc": "是否最大化窗口"
+    },
+    {
+      "Type": 0,
+      "Desc": "结果文本(自动)",
+      "IsOutput": false,
+      "Key": "text"
+    },
+    {
+      "Type": 0,
+      "Desc": "返回值(自动)",
+      "IsOutput": false,
+      "Key": "rtn"
+    },
+    {
+      "Type": 0,
+      "Desc": "错误信息(自动)",
+      "IsOutput": false,
+      "Key": "errMessage"
+    },
+    {
+      "Type": 0,
+      "Desc": "菜单参数(自动)",
+      "IsOutput": false,
+      "Key": "menuKey"
+    },
+    {
+      "Type": 2,
+      "Desc": "静默启动",
+      "DefaultValue": "true",
+      "IsInput": false,
+      "Key": "silent"
+    }
+  ],
+  "References": [
+    "Microsoft.Web.WebView2.Wpf.dll",
+    "Microsoft.Web.WebView2.Core.dll"
+  ]
+}

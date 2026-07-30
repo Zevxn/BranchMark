@@ -1,0 +1,94 @@
+{
+  "manifest_version": 3,
+  "name": "DeepConvo",
+  "version": "3.9.7",
+  "description": "专为重度AI用户设计的生产力工具。支持DeepSeek、ChatGPT等主流平台的对话目录导航、内容收藏与思维导图转换。内置快捷指令、代码行号及宽屏模式，支持坚果云同步，助您构建本地化AI知识库。",
+  "icons": {
+    "16": "libs/icons/icon16.png",
+    "32": "libs/icons/icon32.png",
+    "48": "libs/icons/icon48.png",
+    "128": "libs/icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "JS/background.js"
+  },
+  "action": {
+    "default_popup": "HTML/popup.html"
+  },
+   "web_accessible_resources": [{
+    "resources": ["HTML/preview.html",
+                  "HTML/MindMap.html",
+                  "libs/*",
+                  "locales/*"],
+    "matches": ["<all_urls>"]
+  }],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["JS/static/i18n.js","libs/pinyin-pro.js","JS/common.js","JS/cmdModal.js"],
+      "css": ["libs/remixicon.css"],
+      "all_frames": true,
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "https://chat.deepseek.com/*",
+        "https://chatgpt.com/*",
+        "https://www.doubao.com/chat/*",
+        "https://yuanbao.tencent.com/chat/*",
+        "https://yiyan.baidu.com/*",
+        "https://www.kimi.com/*",
+        "https://metaso.cn/*",
+        "https://gemini.google.com/*",
+        "https://chatglm.cn/*",
+        "https://chat.z.ai/*",
+        "https://www.qianwen.com/*",
+        "https://grok.com/*",
+        "https://aistudio.google.com/*",
+        "https://www.wenxiaobai.com/*"
+      ],
+      "css": ["CSS/BookMarks.css","CSS/AI-Contents.css"],
+      "js": ["libs/turndown.js","libs/turndown-plugin-gfm.js","JS/utils.js","JS/BookMarks.js","JS/AI-Contents.js","JS/handleMD.js","libs/marked.min.js","libs/katex.min.js"],
+      "run_at": "document_end",
+      "all_frames": true
+    },
+    {
+      "matches": ["*://gemini.google.com/*", "*://*.doubao.com/*"],
+      "js": ["JS/static/hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN", 
+      "all_frames": true,
+      "match_origin_as_fallback": true
+    },
+    {
+      "matches": ["*://gemini.google.com/*", "*://*.doubao.com/*"],
+      "js": ["JS/static/imghub.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_origin_as_fallback": true
+    },
+    {
+    "matches": ["<all_urls>"],
+    "js": ["JS/static/navigator.js"],
+    "world": "MAIN" 
+  }
+  ],
+  "permissions": ["storage", 
+    "unlimitedStorage",
+    "notifications", 
+    "alarms",
+    "clipboardRead",
+    "clipboardWrite",
+    "sidePanel",
+    "offscreen",
+    "downloads"
+  ],
+  "side_panel": {
+      "default_path": "HTML/popup.html?type=sidebar"
+   },
+  "host_permissions": ["https://dav.jianguoyun.com/*",
+                        "https://*.memfire.cloud/*" ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}

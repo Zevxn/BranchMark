@@ -1,0 +1,32 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm/
+.pnpm-store/
+
+# Generated application output
+/dist/
+/quicker/DeepConvoMindMap/DeepConvoMindMap.cs
+/quicker/DeepConvoMindMap/releases/
+
+# Test and coverage output
+/coverage/
+/test-results/
+/playwright-report/
+
+# Local temporary files
+.tmp-*
+*.tmp
+*.temp
+*.log
+
+# Editor and IDE settings
+.vscode/
+.idea/
+.vs/
+*.user
+*.suo
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+desktop.ini
