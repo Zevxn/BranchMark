@@ -33,20 +33,146 @@ public static string GetDefaultStateJson()
 
 public static string NormalizeStateJson(string raw)
 {
+    string normalized;
+    return TryNormalizeStateJson(raw, out normalized) ? normalized : GetDefaultStateJson();
+}
+
+public static bool TryNormalizeStateJson(string raw, out string normalized)
+{
+    normalized = null;
     try
     {
-        if (String.IsNullOrWhiteSpace(raw)) return GetDefaultStateJson();
+        if (String.IsNullOrWhiteSpace(raw)) return false;
         JObject state = JObject.Parse(raw);
         if (state["version"] == null) state["version"] = 1;
         if (state["chrome"] == null || state["chrome"].Type != JTokenType.Object) state["chrome"] = new JObject();
         if (state["idb"] == null || state["idb"].Type != JTokenType.Object) state["idb"] = new JObject();
         state["chrome"]["app_lang"] = "zh-CN";
-        return state.ToString(Formatting.None).Replace("\u2028", "\\u2028").Replace("\u2029", "\\u2029");
+        normalized = state.ToString(Formatting.None).Replace("\u2028", "\\u2028").Replace("\u2029", "\\u2029");
+        return true;
     }
     catch
     {
-        return GetDefaultStateJson();
+        return false;
     }
+}
+
+public static string ReadStateVariable(IStepContext context)
+{
+    try
+    {
+        object value = context.GetVarValue("app_data_json");
+        if (value == null) return null;
+        return value as string ?? Convert.ToString(value);
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+public static long ReadStateUpdatedAt(string stateJson)
+{
+    try
+    {
+        JObject state = JObject.Parse(stateJson);
+        JToken timestamp = state["syncUpdatedAt"];
+        long value;
+        return timestamp != null && Int64.TryParse(timestamp.ToString(), out value) ? value : 0;
+    }
+    catch
+    {
+        return 0;
+    }
+}
+
+public static bool TryReadSyncedStateFile(out string stateJson)
+{
+    stateJson = null;
+    string statePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Quicker",
+        "states",
+        "state_0ec2f0b4-429d-4274-9831-7432d7125a19.json");
+    if (!File.Exists(statePath)) return false;
+
+    for (int attempt = 0; attempt < 3; attempt++)
+    {
+        try
+        {
+            string rawFile;
+            using (FileStream stream = new FileStream(
+                statePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete))
+            using (StreamReader reader = new StreamReader(stream, Encoding.UTF8, true))
+            {
+                rawFile = reader.ReadToEnd();
+            }
+
+            JObject actionState = JObject.Parse(rawFile);
+            string actionId = (string)actionState["ActionId"];
+            if (!String.Equals(actionId, "0ec2f0b4-429d-4274-9831-7432d7125a19", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            JToken savedToken = actionState["States"]?["$var:app_data_json"];
+            if (savedToken == null || savedToken.Type == JTokenType.Null) return false;
+            string savedValue = savedToken.Type == JTokenType.String
+                ? (string)savedToken
+                : savedToken.ToString(Formatting.None);
+            return TryNormalizeStateJson(savedValue, out stateJson);
+        }
+        catch (IOException)
+        {
+            if (attempt < 2) Thread.Sleep(80);
+        }
+        catch (JsonException)
+        {
+            if (attempt < 2) Thread.Sleep(80);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+    return false;
+}
+
+public static string ResolveInitialStateJson(IStepContext context)
+{
+    string memoryState;
+    bool hasMemoryState = TryNormalizeStateJson(ReadStateVariable(context), out memoryState);
+    string diskState;
+    bool hasDiskState = TryReadSyncedStateFile(out diskState);
+
+    if (!hasDiskState) return hasMemoryState ? memoryState : GetDefaultStateJson();
+    if (!hasMemoryState)
+    {
+        context.SetVarValue("app_data_json", diskState);
+        return diskState;
+    }
+
+    long memoryUpdatedAt = ReadStateUpdatedAt(memoryState);
+    long diskUpdatedAt = ReadStateUpdatedAt(diskState);
+    string selectedState;
+    if (memoryUpdatedAt > 0 && diskUpdatedAt > 0)
+    {
+        selectedState = diskUpdatedAt >= memoryUpdatedAt ? diskState : memoryState;
+    }
+    else
+    {
+        // 旧版数据没有跨设备时间戳。首次升级时以坚果云已经同步到磁盘的文件为准。
+        selectedState = diskState;
+    }
+
+    if (!String.Equals(selectedState, memoryState, StringComparison.Ordinal))
+    {
+        context.SetVarValue("app_data_json", selectedState);
+    }
+    return selectedState;
 }
 
 public static string ReadSavedTheme(string stateJson)
@@ -93,6 +219,18 @@ public static void PostImportResult(
     if (content != null) payload["content"] = content;
     if (error != null) payload["error"] = error;
     core.PostWebMessageAsJson(payload.ToString(Formatting.None));
+}
+
+public static string NormalizeInternalUrl(string requestedUrl)
+{
+    if (String.IsNullOrWhiteSpace(requestedUrl)) return null;
+    Uri baseUri = new Uri("https://deepconvo-mindmap.local/");
+    Uri targetUri;
+    if (!Uri.TryCreate(baseUri, requestedUrl, out targetUri)) return null;
+    if (!String.Equals(targetUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return null;
+    if (!String.Equals(targetUri.Host, "deepconvo-mindmap.local", StringComparison.OrdinalIgnoreCase)) return null;
+    if (!targetUri.AbsolutePath.StartsWith("/HTML/", StringComparison.OrdinalIgnoreCase)) return null;
+    return targetUri.AbsoluteUri;
 }
 
 public static string EnsureApplicationFiles()
@@ -166,7 +304,10 @@ public static Window CreateMindMapWindow(
     IStepContext context,
     string applicationRoot,
     string initialStateJson,
-    ManualResetEventSlim closedSignal)
+    ManualResetEventSlim closedSignal,
+    string navigationUrl = "https://deepconvo-mindmap.local/HTML/MindMap.html",
+    bool rememberWindowPlacement = true,
+    Window owner = null)
 {
     WebView2 webView = new WebView2();
     webView.CreationProperties = new CoreWebView2CreationProperties
@@ -184,24 +325,28 @@ public static Window CreateMindMapWindow(
         Height = Math.Max(600, ReadDoubleVariable(context, "window_height", 800)),
         MinWidth = 800,
         MinHeight = 600,
-        WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        WindowStartupLocation = owner == null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner,
         WindowStyle = WindowStyle.SingleBorderWindow,
         ResizeMode = ResizeMode.CanResize,
         Content = webView
     };
+    if (owner != null) window.Owner = owner;
 
-    double savedLeft = ReadDoubleVariable(context, "window_left", -1);
-    double savedTop = ReadDoubleVariable(context, "window_top", -1);
-    if (savedLeft >= SystemParameters.VirtualScreenLeft &&
-        savedTop >= SystemParameters.VirtualScreenTop &&
-        savedLeft < SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - 100 &&
-        savedTop < SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 100)
+    if (rememberWindowPlacement)
     {
-        window.WindowStartupLocation = WindowStartupLocation.Manual;
-        window.Left = savedLeft;
-        window.Top = savedTop;
+        double savedLeft = ReadDoubleVariable(context, "window_left", -1);
+        double savedTop = ReadDoubleVariable(context, "window_top", -1);
+        if (savedLeft >= SystemParameters.VirtualScreenLeft &&
+            savedTop >= SystemParameters.VirtualScreenTop &&
+            savedLeft < SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - 100 &&
+            savedTop < SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 100)
+        {
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            window.Left = savedLeft;
+            window.Top = savedTop;
+        }
+        if (ReadBoolVariable(context, "window_maximized", false)) window.WindowState = WindowState.Maximized;
     }
-    if (ReadBoolVariable(context, "window_maximized", false)) window.WindowState = WindowState.Maximized;
 
     webView.CoreWebView2InitializationCompleted += async (sender, args) =>
     {
@@ -225,6 +370,13 @@ public static Window CreateMindMapWindow(
                 applicationRoot,
                 CoreWebView2HostResourceAccessKind.Allow);
             ApplyWebViewTheme(core, ReadSavedTheme(initialStateJson));
+            core.NewWindowRequested += (newWindowSender, newWindowArgs) =>
+            {
+                string internalUrl = NormalizeInternalUrl(newWindowArgs.Uri);
+                if (internalUrl == null) return;
+                newWindowArgs.Handled = true;
+                OpenInternalWindow(context, applicationRoot, internalUrl, window);
+            };
             core.WebMessageReceived += (messageSender, messageArgs) =>
             {
                 try
@@ -233,6 +385,7 @@ public static Window CreateMindMapWindow(
                     const string persistPrefix = "DEEPCONVO_PERSIST:";
                     const string themePrefix = "DEEPCONVO_THEME:";
                     const string importRequest = "DEEPCONVO_IMPORT_REQUEST";
+                    const string openWindowPrefix = "DEEPCONVO_OPEN_WINDOW:";
                     if (message != null && message.StartsWith(persistPrefix, StringComparison.Ordinal))
                     {
                         string payload = NormalizeStateJson(message.Substring(persistPrefix.Length));
@@ -281,6 +434,14 @@ public static Window CreateMindMapWindow(
                             PostImportResult(core, false, null, importException.Message);
                         }
                     }
+                    else if (message != null && message.StartsWith(openWindowPrefix, StringComparison.Ordinal))
+                    {
+                        OpenInternalWindow(
+                            context,
+                            applicationRoot,
+                            message.Substring(openWindowPrefix.Length),
+                            window);
+                    }
                 }
                 catch
                 {
@@ -290,7 +451,9 @@ public static Window CreateMindMapWindow(
 
             await core.AddScriptToExecuteOnDocumentCreatedAsync(
                 "window.__DEEPCONVO_QUICKER_STATE__ = " + initialStateJson + ";");
-            core.Navigate("https://deepconvo-mindmap.local/HTML/MindMap.html");
+            string internalNavigationUrl = NormalizeInternalUrl(navigationUrl);
+            if (internalNavigationUrl == null) throw new InvalidDataException("内部页面地址无效：" + navigationUrl);
+            core.Navigate(internalNavigationUrl);
             context.SetVarValue("rtn", "WEBVIEW_READY");
         }
         catch (Exception ex)
@@ -308,14 +471,17 @@ public static Window CreateMindMapWindow(
     {
         try
         {
-            Rect bounds = window.WindowState == WindowState.Normal ?
-                new Rect(window.Left, window.Top, window.Width, window.Height) :
-                window.RestoreBounds;
-            context.SetVarValue("window_width", bounds.Width);
-            context.SetVarValue("window_height", bounds.Height);
-            context.SetVarValue("window_left", bounds.Left);
-            context.SetVarValue("window_top", bounds.Top);
-            context.SetVarValue("window_maximized", window.WindowState == WindowState.Maximized);
+            if (rememberWindowPlacement)
+            {
+                Rect bounds = window.WindowState == WindowState.Normal ?
+                    new Rect(window.Left, window.Top, window.Width, window.Height) :
+                    window.RestoreBounds;
+                context.SetVarValue("window_width", bounds.Width);
+                context.SetVarValue("window_height", bounds.Height);
+                context.SetVarValue("window_left", bounds.Left);
+                context.SetVarValue("window_top", bounds.Top);
+                context.SetVarValue("window_maximized", window.WindowState == WindowState.Maximized);
+            }
             if (webView.CoreWebView2 != null)
             {
                 webView.ExecuteScriptAsync("window.__DEEPCONVO_EXPORT_QUICKER_STATE__ && window.__DEEPCONVO_EXPORT_QUICKER_STATE__();");
@@ -328,10 +494,30 @@ public static Window CreateMindMapWindow(
     window.Closed += (sender, args) =>
     {
         webView.Dispose();
-        closedSignal.Set();
+        if (closedSignal != null) closedSignal.Set();
     };
     webView.EnsureCoreWebView2Async(null);
     return window;
+}
+
+public static void OpenInternalWindow(
+    IStepContext context,
+    string applicationRoot,
+    string requestedUrl,
+    Window owner)
+{
+    string internalUrl = NormalizeInternalUrl(requestedUrl);
+    if (internalUrl == null) return;
+    string currentStateJson = NormalizeStateJson(ReadStateVariable(context));
+    Window childWindow = CreateMindMapWindow(
+        context,
+        applicationRoot,
+        currentStateJson,
+        null,
+        internalUrl,
+        false,
+        owner);
+    ShowAndActivate(childWindow, false);
 }
 
 public static void ShowAndActivate(Window window, bool modal)
@@ -363,7 +549,7 @@ public static string Exec(IStepContext context)
         context.SetVarValue("errMessage", "");
         context.SetVarValue("rtn", "STARTING");
         string applicationRoot = EnsureApplicationFiles();
-        string initialStateJson = NormalizeStateJson(context.GetVarValue("app_data_json") as string);
+        string initialStateJson = ResolveInitialStateJson(context);
         ManualResetEventSlim closedSignal = new ManualResetEventSlim(false);
         System.Windows.Threading.Dispatcher dispatcher = Application.Current.Dispatcher;
 

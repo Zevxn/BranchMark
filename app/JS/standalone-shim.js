@@ -15,6 +15,9 @@
     const quickerState = quickerWebView
         ? {
             version: 1,
+            syncUpdatedAt: initialQuickerState && Number.isFinite(initialQuickerState.syncUpdatedAt)
+                ? initialQuickerState.syncUpdatedAt
+                : 0,
             chrome: initialQuickerState && typeof initialQuickerState.chrome === 'object'
                 ? initialQuickerState.chrome
                 : {},
@@ -24,6 +27,34 @@
         }
         : null;
     let databasePromise = null;
+
+    // deepconvo-mindmap.local 是 WebView2 当前实例的虚拟域名，不能交给系统 Edge。
+    // Quicker 中的内部新窗请求交由 C# 创建带相同映射的子 WebView2；普通 HTML 不改写。
+    if (quickerWebView) {
+        const nativeWindowOpen = window.open.bind(window);
+        window.open = function openStandaloneWindow(url, target, features) {
+            let resolvedUrl = null;
+            try {
+                resolvedUrl = new URL(url || 'about:blank', location.href);
+            } catch {
+                return nativeWindowOpen(url, target, features);
+            }
+
+            if (resolvedUrl.protocol === 'https:' &&
+                resolvedUrl.hostname === 'deepconvo-mindmap.local' &&
+                resolvedUrl.pathname.startsWith('/HTML/')) {
+                quickerWebView.postMessage(`DEEPCONVO_OPEN_WINDOW:${resolvedUrl.href}`);
+                return {
+                    closed: false,
+                    close() {},
+                    focus() {},
+                    postMessage() {},
+                    location: { href: resolvedUrl.href },
+                };
+            }
+            return nativeWindowOpen(url, target, features);
+        };
+    }
 
     // 独立思维导图应用只提供中文界面，不再跟随浏览器或插件中的语言设置。
     if (quickerState) {
@@ -70,6 +101,9 @@
 
     function persistQuickerState() {
         if (!quickerWebView || !quickerState) return;
+        // Quicker 进程会缓存动作状态，外部同步工具替换 JSON 后不会刷新该缓存。
+        // 持久化时记录跨设备时间，供 Quicker 启动层在内存与磁盘之间选择新版本。
+        quickerState.syncUpdatedAt = Date.now();
         quickerWebView.postMessage(`DEEPCONVO_PERSIST:${JSON.stringify(quickerState)}`);
     }
 

@@ -4,7 +4,7 @@
   "Title": "思维导图",
   "Description": "保留 DeepConvo 原版思维导图与收藏夹交互的独立 Quicker 动作。",
   "Keywords": "思维导图,脑图,收藏夹,DeepConvo",
-  "ChangeLog": "v1.3.0：Quicker 中的导入按钮改用 Windows 原生文件选择器，普通 HTML 预览保持原有导入方式。",
+  "ChangeLog": "v1.5.0：动作启动时校验坚果云同步的状态 JSON，修复 Quicker 内存缓存导致其他设备始终读取旧思维导图的问题。",
   "ShareUrl": "",
   "Icon": "fa:Solid_ProjectDiagram:#FA709A",
   "Variables": [

@@ -44,6 +44,10 @@ assert.match(shim, /locales\\\/zh_CN\\\/messages/);
 assert.match(shim, /__DEEPCONVO_QUICKER_STATE__/);
 assert.match(shim, /DEEPCONVO_PERSIST:/);
 assert.match(shim, /quickerWebView\.postMessage/);
+assert.match(shim, /syncUpdatedAt = Date\.now\(\)/);
+assert.match(shim, /DEEPCONVO_OPEN_WINDOW:/);
+assert.match(shim, /nativeWindowOpen/);
+assert.match(shim, /resolvedUrl\.pathname\.startsWith\('\/HTML\/'\)/);
 
 const adapter = await readFile('app/JS/standalone-adapter.js', 'utf8');
 assert.match(adapter, /window\.initDirectory = async function/);
