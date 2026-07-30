@@ -17,6 +17,9 @@ assert.equal(config.Variables.find(variable => variable.Key === 'app_data_json')
 assert.match(source, /public static string Exec\(IStepContext context\)/);
 assert.match(source, /DEEPCONVO_THEME:/);
 assert.match(source, /PreferredColorScheme/);
+assert.match(source, /DEEPCONVO_IMPORT_REQUEST/);
+assert.match(source, /DEEPCONVO_IMPORT_RESULT/);
+assert.match(source, /OpenFileDialog/);
 assert.doesNotMatch(source, /\b(?:namespace|class)\s+[A-Za-z_]/);
 assert.ok(!source.includes('__APP_BUNDLE_BASE64__'));
 assert.ok(!source.includes('__BUNDLE_VERSION__'));

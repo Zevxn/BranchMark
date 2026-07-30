@@ -137,6 +137,72 @@
         }
     }
 
+    function showImportFeedback(message) {
+        if (typeof showTopToast === 'function') {
+            showTopToast(message);
+        } else {
+            window.alert(message);
+        }
+    }
+
+    function applyImportedMindMap(content) {
+        try {
+            const imported = JSON.parse(content);
+            if (!imported || !imported.data) {
+                throw new Error('文件中没有思维导图数据');
+            }
+
+            state.data = imported.data;
+            state.view = imported.view || state.view;
+            state.history = [];
+            state.historyIndex = -1;
+            sessionStorage.removeItem('currentFileID');
+            recordHistory();
+            renderTree();
+            showImportFeedback('✅ 思维导图导入成功');
+        } catch (error) {
+            console.error('[Standalone] 导入思维导图失败:', error);
+            showImportFeedback(`❌ 导入失败：${error.message || '文件格式不正确'}`);
+        }
+    }
+
+    const quickerWebView = window.chrome && window.chrome.webview;
+    if (quickerWebView &&
+        typeof quickerWebView.postMessage === 'function' &&
+        typeof quickerWebView.addEventListener === 'function') {
+        const installQuickerImportButton = () => {
+            const openButton = document.querySelector('#btn-open');
+            if (openButton) {
+                // 仅 Quicker 使用 Windows 原生选择器；普通 HTML 继续使用原版 fileInput。
+                openButton.onclick = () => quickerWebView.postMessage('DEEPCONVO_IMPORT_REQUEST');
+            }
+        };
+        if (document.readyState !== 'complete') {
+            // 原版会在 DOMContentLoaded 中绑定按钮，适配层必须随后覆盖 Quicker 分支。
+            document.addEventListener('DOMContentLoaded', installQuickerImportButton, { once: true });
+        } else {
+            installQuickerImportButton();
+        }
+
+        quickerWebView.addEventListener('message', event => {
+            let payload = event.data;
+            if (typeof payload === 'string') {
+                try {
+                    payload = JSON.parse(payload);
+                } catch {
+                    return;
+                }
+            }
+            if (!payload || payload.type !== 'DEEPCONVO_IMPORT_RESULT') return;
+            if (payload.cancelled) return;
+            if (payload.error) {
+                showImportFeedback(`❌ 导入失败：${payload.error}`);
+                return;
+            }
+            applyImportedMindMap(payload.content);
+        });
+    }
+
     const toolbar = document.querySelector('.toolbar');
     if (toolbar) {
         const divider = document.createElement('div');

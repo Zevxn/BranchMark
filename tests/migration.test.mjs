@@ -54,6 +54,9 @@ assert.match(adapter, /justify-content: space-between/);
 assert.match(adapter, /btn-theme-toggle/);
 assert.match(adapter, /mindmap_theme/);
 assert.match(adapter, /DEEPCONVO_THEME:/);
+assert.match(adapter, /DEEPCONVO_IMPORT_REQUEST/);
+assert.match(adapter, /DEEPCONVO_IMPORT_RESULT/);
+assert.match(adapter, /仅 Quicker 使用 Windows 原生选择器/);
 
 const [localeJson, localeScript] = await Promise.all([
     readFile('app/locales/zh_CN/messages.json', 'utf8').then(JSON.parse),

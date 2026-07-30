@@ -6,6 +6,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Threading;
 using System.Windows;
+using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using Newtonsoft.Json;
@@ -76,6 +77,22 @@ public static void ApplyWebViewTheme(CoreWebView2 core, string theme)
     {
         core.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Auto;
     }
+}
+
+public static void PostImportResult(
+    CoreWebView2 core,
+    bool cancelled,
+    string content,
+    string error)
+{
+    JObject payload = new JObject
+    {
+        ["type"] = "DEEPCONVO_IMPORT_RESULT",
+        ["cancelled"] = cancelled
+    };
+    if (content != null) payload["content"] = content;
+    if (error != null) payload["error"] = error;
+    core.PostWebMessageAsJson(payload.ToString(Formatting.None));
 }
 
 public static string EnsureApplicationFiles()
@@ -215,6 +232,7 @@ public static Window CreateMindMapWindow(
                     string message = messageArgs.TryGetWebMessageAsString();
                     const string persistPrefix = "DEEPCONVO_PERSIST:";
                     const string themePrefix = "DEEPCONVO_THEME:";
+                    const string importRequest = "DEEPCONVO_IMPORT_REQUEST";
                     if (message != null && message.StartsWith(persistPrefix, StringComparison.Ordinal))
                     {
                         string payload = NormalizeStateJson(message.Substring(persistPrefix.Length));
@@ -223,6 +241,45 @@ public static Window CreateMindMapWindow(
                     else if (message != null && message.StartsWith(themePrefix, StringComparison.Ordinal))
                     {
                         ApplyWebViewTheme(core, message.Substring(themePrefix.Length));
+                    }
+                    else if (message == importRequest)
+                    {
+                        try
+                        {
+                            window.Activate();
+                            window.Focus();
+                            OpenFileDialog dialog = new OpenFileDialog
+                            {
+                                Title = "导入思维导图",
+                                Filter = "思维导图 JSON (*.json)|*.json|所有文件 (*.*)|*.*",
+                                DefaultExt = ".json",
+                                AddExtension = true,
+                                CheckFileExists = true,
+                                Multiselect = false,
+                                RestoreDirectory = true
+                            };
+                            bool? selected = dialog.ShowDialog(window);
+                            if (selected == true)
+                            {
+                                string content;
+                                using (StreamReader reader = new StreamReader(
+                                    dialog.FileName,
+                                    Encoding.UTF8,
+                                    true))
+                                {
+                                    content = reader.ReadToEnd();
+                                }
+                                PostImportResult(core, false, content, null);
+                            }
+                            else
+                            {
+                                PostImportResult(core, true, null, null);
+                            }
+                        }
+                        catch (Exception importException)
+                        {
+                            PostImportResult(core, false, null, importException.Message);
+                        }
                     }
                 }
                 catch
