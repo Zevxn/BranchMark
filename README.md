@@ -67,6 +67,15 @@ Quicker 打包时只保留现代 WebView2 实际使用的 `.woff2` 字体，排�
 
 当前本机动作 ID：`0ec2f0b4-429d-4274-9831-7432d7125a19`。
 
+### 单机图形兼容模式
+
+如果只有某台电脑的 WebView2 出现光标或图形渲染异常，可在该电脑设置用户环境变量 `DEEPCONVO_MINDMAP_GRAPHICS_MODE`：
+
+- `opengl`：向动作的 WebView2 传入 `--use-gl=angle --use-angle=gl`。
+- `software`：向动作的 WebView2 传入 `--disable-gpu`，仅作为诊断或后备模式。
+
+该变量由动作代码显式读取，只影响当前电脑上的思维导图动作，不会进入 Quicker 状态 JSON。修改后需要完全退出 Quicker 和相关 `msedgewebview2.exe` 进程再重新启动。
+
 ## 目录
 
 ```text

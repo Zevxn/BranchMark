@@ -13,6 +13,7 @@
 - 工具栏可切换亮色或暗色模式，下次打开时自动恢复上次选择。
 - 每次启动都会校验 Quicker 状态 JSON，可读取坚果云从其他设备同步过来的较新数据。
 - 用户数据保存在 Quicker 动作变量 `app_data_json` 中，并在启动时与对应的 Quicker 状态 JSON 校验新旧。
+- 可在单台电脑上启用 OpenGL 或软件渲染兼容模式，设置不会同步到其他设备。
 - 应用资源随动作离线提供，并针对 WebView2 去除重复的旧字体格式，使动作保持在 Quicker 的 5 MB 限制内。
 - 自动记忆窗口尺寸、位置和最大化状态。
 
@@ -27,3 +28,13 @@
 - Windows 10 或 Windows 11
 - Quicker
 - Microsoft Edge WebView2 Runtime
+
+## 本机图形兼容模式
+
+如果某台电脑在默认 WebView2 渲染时出现光标或图形异常，可仅在该电脑的用户环境变量中设置：
+
+- 变量名：`DEEPCONVO_MINDMAP_GRAPHICS_MODE`
+- 变量值 `opengl`：使用 ANGLE OpenGL 后端。
+- 变量值 `software`：禁用 GPU，仅作为 OpenGL 仍无效时的兼容后备。
+
+设置后需要完全退出 Quicker 及相关 `msedgewebview2.exe` 进程，再重新启动动作。未设置该变量时保持 WebView2 默认渲染方式。

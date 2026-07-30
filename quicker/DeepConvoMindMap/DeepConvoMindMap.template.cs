@@ -300,6 +300,31 @@ public static bool ReadBoolVariable(IStepContext context, string key, bool fallb
     }
 }
 
+public static string ReadGraphicsBrowserArguments()
+{
+    try
+    {
+        // 显式读取用户级环境变量：设置只属于当前电脑，不会进入 Quicker 状态 JSON。
+        // 仅接受白名单模式，避免把任意 Chromium 启动参数传入提权运行的 Quicker。
+        string mode = Environment.GetEnvironmentVariable(
+            "DEEPCONVO_MINDMAP_GRAPHICS_MODE",
+            EnvironmentVariableTarget.User);
+        if (String.Equals(mode, "opengl", StringComparison.OrdinalIgnoreCase))
+        {
+            return "--use-gl=angle --use-angle=gl";
+        }
+        if (String.Equals(mode, "software", StringComparison.OrdinalIgnoreCase))
+        {
+            return "--disable-gpu";
+        }
+    }
+    catch
+    {
+        // 环境变量不可读时保留 WebView2 默认图形后端。
+    }
+    return null;
+}
+
 public static Window CreateMindMapWindow(
     IStepContext context,
     string applicationRoot,
@@ -310,7 +335,7 @@ public static Window CreateMindMapWindow(
     Window owner = null)
 {
     WebView2 webView = new WebView2();
-    webView.CreationProperties = new CoreWebView2CreationProperties
+    CoreWebView2CreationProperties creationProperties = new CoreWebView2CreationProperties
     {
         UserDataFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -318,6 +343,12 @@ public static Window CreateMindMapWindow(
             "DeepConvoMindMap",
             "WebView2")
     };
+    string graphicsBrowserArguments = ReadGraphicsBrowserArguments();
+    if (!String.IsNullOrWhiteSpace(graphicsBrowserArguments))
+    {
+        creationProperties.AdditionalBrowserArguments = graphicsBrowserArguments;
+    }
+    webView.CreationProperties = creationProperties;
     Window window = new Window
     {
         Title = "思维导图",
