@@ -94,6 +94,23 @@
             : JSON.parse(JSON.stringify(value));
     }
 
+    function repairCurrentMindMapSnapshot() {
+        if (!quickerState) return;
+        const currentFileId = quickerState.chrome.currentFileID;
+        if (currentFileId == null) return;
+        const referenceKey = `MindMapData.__REF__${currentFileId}-extra`;
+        const savedSnapshot = quickerState.idb[referenceKey];
+        if (!savedSnapshot) return;
+        if (JSON.stringify(quickerState.chrome.MindMapData) === JSON.stringify(savedSnapshot)) return;
+
+        quickerState.chrome.MindMapData = clone(savedSnapshot);
+        quickerState.chrome.MindMapAction = 'open';
+        persistQuickerState();
+    }
+
+    // 修复升级前已经存在的“收藏项是新版、启动快照是旧版”状态。
+    repairCurrentMindMapSnapshot();
+
     function getQuickerBucket(prefix) {
         if (!quickerState) return null;
         return prefix === chromePrefix ? quickerState.chrome : quickerState.idb;
@@ -127,6 +144,20 @@
             return;
         }
         localStorage.setItem(prefix + key, JSON.stringify(value));
+    }
+
+    function writeLocalValues(prefix, values) {
+        const quickerBucket = getQuickerBucket(prefix);
+        if (quickerBucket) {
+            Object.entries(values || {}).forEach(([key, value]) => {
+                quickerBucket[key] = clone(value);
+            });
+            persistQuickerState();
+            return;
+        }
+        Object.entries(values || {}).forEach(([key, value]) => {
+            localStorage.setItem(prefix + key, JSON.stringify(value));
+        });
     }
 
     function removeLocalValue(prefix, key) {
@@ -313,12 +344,34 @@
         });
     }
 
+    function syncSavedMindMapSnapshot(values) {
+        const savedMaps = Object.entries(values || {}).map(([key, value]) => {
+            const match = /^MindMapData\.__REF__(.+)-extra$/.exec(key);
+            return match ? { id: match[1], value } : null;
+        }).filter(Boolean);
+        if (!savedMaps.length) return;
+
+        const currentFileId = readLocalValue(chromePrefix, 'currentFileID');
+        const currentMap = savedMaps.find(item => String(item.id) === String(currentFileId))
+            || (currentFileId == null && savedMaps.length === 1 ? savedMaps[0] : null);
+        if (!currentMap) return;
+
+        // 原版保存只更新收藏项对应的 IDB 引用，启动时读取的 MindMapData 仍是旧快照。
+        // 同步两者后，重新打开动作会直接恢复刚保存的当前导图。
+        writeLocalValues(chromePrefix, {
+            MindMapData: currentMap.value,
+            currentFileID: currentMap.id,
+            MindMapAction: 'open',
+        });
+    }
+
     async function handleRuntimeMessage(message) {
         switch (message && message.action) {
             case 'IDB_GET':
                 return { success: true, data: await idbRead(message.keys) };
             case 'IDB_SET':
                 await idbWrite(message.data || {});
+                syncSavedMindMapSnapshot(message.data || {});
                 return { success: true };
             case 'IDB_REMOVE':
                 await idbDelete(message.keys);
