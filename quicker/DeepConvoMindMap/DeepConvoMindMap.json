@@ -4,7 +4,7 @@
   "Title": "思维导图",
   "Description": "保留 DeepConvo 原版思维导图与收藏夹交互的独立 Quicker 动作。",
   "Keywords": "思维导图,脑图,收藏夹,DeepConvo",
-  "ChangeLog": "v1.7.0：保存收藏思维导图时同步更新当前启动快照，修复退出后重新打开会恢复成保存前状态的问题。",
+  "ChangeLog": "v1.8.1：启动时自动解除 Quicker 单实例限制，再次运行动作时恢复并激活已打开窗口。",
   "ShareUrl": "",
   "Icon": "fa:Solid_ProjectDiagram:#FA709A",
   "Variables": [

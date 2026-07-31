@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.IO.Compression;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows;
+using System.Windows.Interop;
 using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -16,6 +19,82 @@ using Quicker.Public;
 public static string GetBundleVersion()
 {
     return "__BUNDLE_VERSION__";
+}
+
+public static string GetMainWindowTag()
+{
+    return "DeepConvoMindMap.MainWindow.0ec2f0b4-429d-4274-9831-7432d7125a19";
+}
+
+[DllImport("user32.dll")]
+public static extern bool ShowWindow(IntPtr windowHandle, int command);
+
+[DllImport("user32.dll")]
+public static extern bool BringWindowToTop(IntPtr windowHandle);
+
+[DllImport("user32.dll")]
+public static extern bool SetForegroundWindow(IntPtr windowHandle);
+
+public static void SetSingleInstanceLimit(object target, bool value)
+{
+    if (target == null) return;
+    PropertyInfo property = target.GetType().GetProperty(
+        "LimitSingleInstance",
+        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+    if (property != null && property.CanWrite && property.PropertyType == typeof(bool))
+    {
+        property.SetValue(target, value, null);
+    }
+}
+
+public static void AllowRepeatedInvocation(IStepContext context)
+{
+    try
+    {
+        object executeContext = null;
+        FieldInfo[] contextFields = context.GetType().GetFields(
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        foreach (FieldInfo field in contextFields)
+        {
+            string fieldTypeName = field.FieldType.FullName;
+            object fieldValue = field.GetValue(context);
+            if (String.Equals(fieldTypeName, "Quicker.Domain.Actions.X.XAction", StringComparison.Ordinal))
+            {
+                SetSingleInstanceLimit(fieldValue, false);
+            }
+            else if (String.Equals(fieldTypeName, "Quicker.Domain.Actions.ActionExecuteContext", StringComparison.Ordinal))
+            {
+                executeContext = fieldValue;
+            }
+        }
+
+        if (executeContext == null) return;
+        PropertyInfo programProperty = executeContext.GetType().GetProperty(
+            "XProgram",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        if (programProperty != null) SetSingleInstanceLimit(programProperty.GetValue(executeContext, null), false);
+
+        PropertyInfo actionProperty = executeContext.GetType().GetProperty(
+            "Action",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        object actionItem = actionProperty == null ? null : actionProperty.GetValue(executeContext, null);
+        if (actionItem == null) return;
+
+        PropertyInfo dataProperty = actionItem.GetType().GetProperty(
+            "Data",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        if (dataProperty == null || !dataProperty.CanRead || !dataProperty.CanWrite) return;
+        string actionData = dataProperty.GetValue(actionItem, null) as string;
+        if (String.IsNullOrWhiteSpace(actionData)) return;
+
+        JObject actionDefinition = JObject.Parse(actionData);
+        actionDefinition["LimitSingleInstance"] = false;
+        dataProperty.SetValue(actionItem, actionDefinition.ToString(Formatting.None), null);
+    }
+    catch
+    {
+        // Quicker 内部字段可能随版本变化；失败时不影响首次打开和数据保存。
+    }
 }
 
 public static string GetEmbeddedAppBundle()
@@ -352,6 +431,7 @@ public static Window CreateMindMapWindow(
     Window window = new Window
     {
         Title = "思维导图",
+        Tag = rememberWindowPlacement ? GetMainWindowTag() : null,
         Width = Math.Max(800, ReadDoubleVariable(context, "window_width", 1200)),
         Height = Math.Max(600, ReadDoubleVariable(context, "window_height", 800)),
         MinWidth = 800,
@@ -573,12 +653,62 @@ public static void ShowAndActivate(Window window, bool modal)
     }
 }
 
+public static bool TryActivateExistingMindMapWindow()
+{
+    bool activated = false;
+    System.Windows.Threading.Dispatcher dispatcher = Application.Current.Dispatcher;
+    Action activateWindow = () =>
+    {
+        foreach (Window existingWindow in Application.Current.Windows)
+        {
+            if (!String.Equals(
+                existingWindow.Tag as string,
+                GetMainWindowTag(),
+                StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!existingWindow.IsVisible) existingWindow.Show();
+            IntPtr windowHandle = new WindowInteropHelper(existingWindow).Handle;
+            if (existingWindow.WindowState == WindowState.Minimized)
+            {
+                if (windowHandle != IntPtr.Zero) ShowWindow(windowHandle, 9);
+                else existingWindow.WindowState = WindowState.Normal;
+            }
+
+            existingWindow.Topmost = true;
+            existingWindow.Activate();
+            if (windowHandle != IntPtr.Zero)
+            {
+                BringWindowToTop(windowHandle);
+                SetForegroundWindow(windowHandle);
+            }
+            existingWindow.Focus();
+            existingWindow.Topmost = false;
+            activated = true;
+            break;
+        }
+    };
+
+    if (dispatcher.CheckAccess()) activateWindow();
+    else dispatcher.Invoke(activateWindow);
+    return activated;
+}
+
 public static string Exec(IStepContext context)
 {
     try
     {
         context.SetVarValue("errMessage", "");
         context.SetVarValue("rtn", "STARTING");
+        AllowRepeatedInvocation(context);
+        if (TryActivateExistingMindMapWindow())
+        {
+            context.SetVarValue("rtn", "ACTIVATED_EXISTING");
+            return "ACTIVATED_EXISTING";
+        }
+
         string applicationRoot = EnsureApplicationFiles();
         string initialStateJson = ResolveInitialStateJson(context);
         ManualResetEventSlim closedSignal = new ManualResetEventSlim(false);
