@@ -71,11 +71,15 @@
 
 /* 容器 Reset */
 .custom-directory-container,
-.custom-directory-container * ,
+.bookmark-manager-container {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.custom-directory-container,
+.custom-directory-container *,
 .bookmark-manager-container,
 .bookmark-manager-container * {
     margin: 0; padding: 0; box-sizing: border-box !important; user-select: none;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .bookmark-manager-container {

@@ -8,17 +8,13 @@
     const chromePrefix = 'deepconvo-standalone:chrome:';
     const idbFallbackPrefix = 'deepconvo-standalone:idb:';
     const storageListeners = new Set();
+    // Quicker 的 $quickerSync/$quickerSp 仍通过 WebView2 原生消息通道工作。
+    // 安装 Chrome API 兼容层时必须保留它，否则 setVar 会在真正写回动作变量时失败。
     const quickerWebView = window.chrome && window.chrome.webview
         ? window.chrome.webview
         : null;
-    const hasLegacyQuickerState = Object.prototype.hasOwnProperty.call(
-        window,
-        '__DEEPCONVO_QUICKER_STATE__',
-    );
-    const legacyQuickerHost = Boolean(quickerWebView && hasLegacyQuickerState);
-    const nativeQuickerBridge = !legacyQuickerHost
-        ? (window.$quickerSync || (typeof $quickerSync !== 'undefined' ? $quickerSync : null))
-        : null;
+    const nativeQuickerBridge = window.$quickerSync
+        || (typeof $quickerSync !== 'undefined' ? $quickerSync : null);
 
     function readNativeQuickerState() {
         if (!nativeQuickerBridge || typeof nativeQuickerBridge.getVar !== 'function') return null;
@@ -31,10 +27,8 @@
         }
     }
 
-    const initialQuickerState = legacyQuickerHost
-        ? window.__DEEPCONVO_QUICKER_STATE__
-        : readNativeQuickerState();
-    const quickerState = legacyQuickerHost || nativeQuickerBridge
+    const initialQuickerState = readNativeQuickerState();
+    const quickerState = nativeQuickerBridge
         ? {
             version: 1,
             syncUpdatedAt: initialQuickerState && Number.isFinite(initialQuickerState.syncUpdatedAt)
@@ -48,68 +42,8 @@
                 : {},
         }
         : null;
-    window.__DEEPCONVO_LEGACY_QUICKER_HOST__ = legacyQuickerHost;
     window.__DEEPCONVO_NATIVE_QUICKER_HOST__ = Boolean(nativeQuickerBridge);
     let databasePromise = null;
-
-    // deepconvo-mindmap.local 是 WebView2 当前实例的虚拟域名，不能交给系统 Edge。
-    // Quicker 中的内部新窗请求交由 C# 创建带相同映射的子 WebView2；普通 HTML 不改写。
-    if (legacyQuickerHost) {
-        const nativeWindowOpen = window.open.bind(window);
-        window.open = function openStandaloneWindow(url, target, features) {
-            let resolvedUrl = null;
-            try {
-                resolvedUrl = new URL(url || 'about:blank', location.href);
-            } catch {
-                return nativeWindowOpen(url, target, features);
-            }
-
-            if (resolvedUrl.protocol === 'https:' &&
-                resolvedUrl.hostname === 'deepconvo-mindmap.local' &&
-                resolvedUrl.pathname.startsWith('/HTML/')) {
-                quickerWebView.postMessage(`DEEPCONVO_OPEN_WINDOW:${resolvedUrl.href}`);
-                return {
-                    closed: false,
-                    close() {},
-                    focus() {},
-                    postMessage() {},
-                    location: { href: resolvedUrl.href },
-                };
-            }
-            return nativeWindowOpen(url, target, features);
-        };
-    }
-
-    // 独立思维导图应用只提供中文界面，不再跟随浏览器或插件中的语言设置。
-    if (quickerState) {
-        quickerState.chrome.app_lang = 'zh-CN';
-    } else {
-        localStorage.setItem(chromePrefix + 'app_lang', JSON.stringify('zh-CN'));
-    }
-
-    // file:// 页面不能直接 fetch 本地 JSON。独立版预先以普通脚本载入中文包，
-    // 并在原版 i18n 请求语言文件时返回同样的数据，使两种预览方式表现一致。
-    const nativeFetch = window.fetch.bind(window);
-    window.fetch = function fetchStandaloneResource(input, options) {
-        const requestUrl = typeof input === 'string'
-            ? input
-            : input instanceof URL
-                ? input.href
-                : input?.url || String(input);
-        const isChineseLocale = /\/locales\/zh_CN\/messages\.json(?:[?#]|$)/i.test(requestUrl);
-
-        if (isChineseLocale && window.__DEEPCONVO_STANDALONE_ZH_CN__) {
-            return Promise.resolve(new Response(
-                JSON.stringify(window.__DEEPCONVO_STANDALONE_ZH_CN__),
-                {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                },
-            ));
-        }
-
-        return nativeFetch(input, options);
-    };
 
     function clone(value) {
         if (value === undefined) return undefined;
@@ -129,7 +63,9 @@
 
         quickerState.chrome.MindMapData = clone(savedSnapshot);
         quickerState.chrome.MindMapAction = 'open';
-        persistQuickerState();
+        persistQuickerState().catch(error => {
+            console.warn('[Standalone] 修复思维导图启动快照失败:', error);
+        });
     }
 
     // 修复升级前已经存在的“收藏项是新版、启动快照是旧版”状态。
@@ -141,22 +77,20 @@
     }
 
     function persistQuickerState() {
-        if (!quickerState) return;
+        if (!quickerState) return Promise.resolve();
         // Quicker 进程会缓存动作状态，外部同步工具替换 JSON 后不会刷新该缓存。
         // 持久化时记录跨设备时间，供 Quicker 启动层在内存与磁盘之间选择新版本。
         quickerState.syncUpdatedAt = Date.now();
         const serializedState = JSON.stringify(quickerState);
-        if (legacyQuickerHost) {
-            quickerWebView.postMessage(`DEEPCONVO_PERSIST:${serializedState}`);
-            return;
-        }
         if (nativeQuickerBridge && typeof nativeQuickerBridge.setVar === 'function') {
             try {
-                nativeQuickerBridge.setVar('app_data_json', serializedState);
+                return Promise.resolve(nativeQuickerBridge.setVar('app_data_json', serializedState));
             } catch (error) {
                 console.warn('[Standalone] 写入 Quicker 原生 WebView2 状态失败:', error);
+                return Promise.reject(error);
             }
         }
+        return Promise.resolve();
     }
 
     function readLocalValue(prefix, key) {
@@ -175,10 +109,10 @@
         const quickerBucket = getQuickerBucket(prefix);
         if (quickerBucket) {
             quickerBucket[key] = clone(value);
-            persistQuickerState();
-            return;
+            return persistQuickerState();
         }
         localStorage.setItem(prefix + key, JSON.stringify(value));
+        return Promise.resolve();
     }
 
     function writeLocalValues(prefix, values) {
@@ -187,22 +121,22 @@
             Object.entries(values || {}).forEach(([key, value]) => {
                 quickerBucket[key] = clone(value);
             });
-            persistQuickerState();
-            return;
+            return persistQuickerState();
         }
         Object.entries(values || {}).forEach(([key, value]) => {
             localStorage.setItem(prefix + key, JSON.stringify(value));
         });
+        return Promise.resolve();
     }
 
     function removeLocalValue(prefix, key) {
         const quickerBucket = getQuickerBucket(prefix);
         if (quickerBucket) {
             delete quickerBucket[key];
-            persistQuickerState();
-            return;
+            return persistQuickerState();
         }
         localStorage.removeItem(prefix + key);
+        return Promise.resolve();
     }
 
     function listLocalValues(prefix) {
@@ -249,13 +183,13 @@
             return withOptionalCallback(Promise.resolve(normalizeGetResult(keys, chromePrefix)), callback);
         },
         set(values, callback) {
-            const promise = Promise.resolve().then(() => {
+            const promise = Promise.resolve().then(async () => {
                 const changes = {};
                 Object.entries(values || {}).forEach(([key, value]) => {
                     const oldValue = readLocalValue(chromePrefix, key);
-                    writeLocalValue(chromePrefix, key, value);
                     changes[key] = { oldValue, newValue: clone(value) };
                 });
+                await writeLocalValues(chromePrefix, values);
                 if (Object.keys(changes).length) {
                     queueMicrotask(() => storageListeners.forEach(listener => listener(changes, 'local')));
                 }
@@ -264,20 +198,22 @@
         },
         remove(keys, callback) {
             const list = Array.isArray(keys) ? keys : [keys];
-            const promise = Promise.resolve().then(() => {
+            const promise = Promise.resolve().then(async () => {
                 const changes = {};
-                list.filter(Boolean).forEach(key => {
+                for (const key of list.filter(Boolean)) {
                     const oldValue = readLocalValue(chromePrefix, key);
-                    removeLocalValue(chromePrefix, key);
+                    await removeLocalValue(chromePrefix, key);
                     changes[key] = { oldValue, newValue: undefined };
-                });
+                }
                 queueMicrotask(() => storageListeners.forEach(listener => listener(changes, 'local')));
             });
             return withOptionalCallback(promise, callback);
         },
         clear(callback) {
-            const promise = Promise.resolve().then(() => {
-                Object.keys(listLocalValues(chromePrefix)).forEach(key => removeLocalValue(chromePrefix, key));
+            const promise = Promise.resolve().then(async () => {
+                for (const key of Object.keys(listLocalValues(chromePrefix))) {
+                    await removeLocalValue(chromePrefix, key);
+                }
             });
             return withOptionalCallback(promise, callback);
         }
@@ -349,9 +285,9 @@
     }
 
     async function idbWrite(values) {
-        const db = await openDatabase();
+        const db = await openDatabase();    // 仅在 Quicker 中使用 IndexedDB 时才会返回 null
         if (!db) {
-            Object.entries(values || {}).forEach(([key, value]) => writeLocalValue(idbFallbackPrefix, key, value));
+            await writeLocalValues(idbFallbackPrefix, values);
             return;
         }
         return new Promise((resolve, reject) => {
@@ -365,9 +301,11 @@
 
     async function idbDelete(keys) {
         const list = Array.isArray(keys) ? keys : [keys];
-        const db = await openDatabase();
+        const db = await openDatabase();    // 仅在 Quicker 中使用 IndexedDB 时才会返回 null
         if (!db) {
-            list.filter(Boolean).forEach(key => removeLocalValue(idbFallbackPrefix, key));
+            for (const key of list.filter(Boolean)) {
+                await removeLocalValue(idbFallbackPrefix, key);
+            }
             return;
         }
         return new Promise((resolve, reject) => {
@@ -379,7 +317,7 @@
         });
     }
 
-    function syncSavedMindMapSnapshot(values) {
+    async function syncSavedMindMapSnapshot(values) {
         const savedMaps = Object.entries(values || {}).map(([key, value]) => {
             const match = /^MindMapData\.__REF__(.+)-extra$/.exec(key);
             return match ? { id: match[1], value } : null;
@@ -393,7 +331,7 @@
 
         // 原版保存只更新收藏项对应的 IDB 引用，启动时读取的 MindMapData 仍是旧快照。
         // 同步两者后，重新打开动作会直接恢复刚保存的当前导图。
-        writeLocalValues(chromePrefix, {
+        await writeLocalValues(chromePrefix, {
             MindMapData: currentMap.value,
             currentFileID: currentMap.id,
             MindMapAction: 'open',
@@ -406,7 +344,7 @@
                 return { success: true, data: await idbRead(message.keys) };
             case 'IDB_SET':
                 await idbWrite(message.data || {});
-                syncSavedMindMapSnapshot(message.data || {});
+                await syncSavedMindMapSnapshot(message.data || {});
                 return { success: true };
             case 'IDB_REMOVE':
                 await idbDelete(message.keys);

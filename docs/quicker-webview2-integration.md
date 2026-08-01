@@ -23,7 +23,7 @@ npm run build
 - 初始值：
 
 ```json
-{"version":1,"chrome":{"app_lang":"zh-CN"},"idb":{}}
+{"version":1,"chrome":{},"idb":{}}
 ```
 
 变量名必须是 `app_data_json`。网页启动时调用
@@ -40,7 +40,7 @@ npm run build
 - WebView Profile 可以按你的动作单独设置，避免与其他网页动作混用浏览器缓存。
 
 虚拟域名对应的本地目录必须填写你电脑上 `dist` 的绝对路径。不要直接使用
-`file:///.../index.html`：页面包含相对资源和 `fetch` 请求，HTTPS 虚拟域名的兼容性更稳定。
+`file:///.../index.html`：HTTPS 虚拟域名对相对资源、IndexedDB 和 WebView2 权限的兼容性更稳定。
 
 页面不需要额外注入 JavaScript。原生 WebView2 提供 `$quickerSync` 后，适配层会自动启用
 Quicker 持久化；若没有该接口，则自动退回普通浏览器的 localStorage/IndexedDB，不会误写动作变量。

@@ -67,30 +67,30 @@
         <mxCell id="qstate" parent="quicker" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=13;" value="&lt;b&gt;quickerState&lt;/b&gt;&lt;br&gt;version / syncUpdatedAt&lt;br&gt;chrome：设置与启动快照&lt;br&gt;idb：收藏夹与脑图正文" vertex="1">
           <mxGeometry height="80" width="205" x="40" y="80" as="geometry" />
         </mxCell>
-        <mxCell id="webmsg" parent="quicker" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" value="&lt;b&gt;WebView2 消息桥&lt;/b&gt;&lt;br&gt;DEEPCONVO_PERSIST:&lt;br&gt;完整 quickerState JSON" vertex="1">
+        <mxCell id="webmsg" parent="quicker" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" value="&lt;b&gt;Quicker 原生桥&lt;/b&gt;&lt;br&gt;$quickerSync&lt;br&gt;getVar / setVar" vertex="1">
           <mxGeometry height="80" width="185" x="347" y="80" as="geometry" />
         </mxCell>
         <mxCell id="appdata" parent="quicker" style="shape=cylinder3;boundedLbl=1;backgroundOutline=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#F8CECC;strokeColor=#B85450;fontSize=13;" value="&lt;b&gt;Quicker 变量&lt;/b&gt;&lt;br&gt;app_data_json&lt;br&gt;SaveState = true" vertex="1">
           <mxGeometry height="85" width="190" x="650" y="77.5" as="geometry" />
         </mxCell>
-        <mxCell id="statefile" parent="quicker" style="shape=mxgraph.flowchart.document;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=12;" value="&lt;b&gt;Quicker 状态文件&lt;/b&gt;&lt;br&gt;%LOCALAPPDATA%\Quicker\states\&lt;br&gt;state_0ec2f0b4-...json&lt;br&gt;States[&amp;quot;$var:app_data_json&amp;quot;]" vertex="1">
+        <mxCell id="statefile" parent="quicker" style="shape=mxgraph.flowchart.document;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=12;" value="&lt;b&gt;Quicker SaveState&lt;/b&gt;&lt;br&gt;由用户自己的动作管理&lt;br&gt;网页不直接访问状态文件" vertex="1">
           <mxGeometry height="105" width="220" x="635" y="207.5" as="geometry" />
         </mxCell>
-        <mxCell id="selector" parent="quicker" style="rhombus;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=12;" value="启动时比较&lt;br&gt;&lt;b&gt;syncUpdatedAt&lt;/b&gt;&lt;br&gt;选择更新的数据" vertex="1">
+        <mxCell id="selector" parent="quicker" style="rhombus;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=12;" value="动作启动&lt;br&gt;&lt;b&gt;载入 SaveState&lt;/b&gt;&lt;br&gt;提供给 WebView2" vertex="1">
           <mxGeometry height="95" width="160" x="320" y="212.5" as="geometry" />
         </mxCell>
-        <mxCell id="inject" parent="quicker" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=12;" value="&lt;b&gt;启动注入&lt;/b&gt;&lt;br&gt;window.__DEEPCONVO_QUICKER_STATE__&lt;br&gt;直接恢复当前脑图与收藏夹" vertex="1">
+        <mxCell id="inject" parent="quicker" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=12;" value="&lt;b&gt;启动读取&lt;/b&gt;&lt;br&gt;$quickerSync.getVar&lt;br&gt;恢复当前脑图与收藏夹" vertex="1">
           <mxGeometry height="95" width="280" x="40" y="320" as="geometry" />
         </mxCell>
         <mxCell id="cloud" parent="quicker" style="ellipse;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;" value="&lt;b&gt;坚果云同步&lt;/b&gt;&lt;br&gt;同步 state_*.json" vertex="1">
           <mxGeometry height="75" width="170" x="660" y="380" as="geometry" />
         </mxCell>
-        <mxCell id="e_qstate_msg" edge="1" parent="quicker" source="qstate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeColor=#B85450;strokeWidth=2;fontSize=11;" target="webmsg" value="每次持久化变更">
+        <mxCell id="e_qstate_msg" edge="1" parent="quicker" source="qstate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeColor=#B85450;strokeWidth=2;fontSize=11;" target="webmsg" value="序列化完整状态">
           <mxGeometry relative="1" x="-0.1176" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="e_msg_appdata" edge="1" parent="quicker" source="webmsg" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeColor=#B85450;strokeWidth=2;fontSize=11;" target="appdata" value="SetVarValue">
+        <mxCell id="e_msg_appdata" edge="1" parent="quicker" source="webmsg" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeColor=#B85450;strokeWidth=2;fontSize=11;" target="appdata" value="setVar">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e_appdata_file" edge="1" parent="quicker" source="appdata" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeColor=#B85450;strokeWidth=2;fontSize=11;" target="statefile" value="Quicker 保存状态">
@@ -107,7 +107,7 @@
         <mxCell id="e_file_selector" edge="1" parent="quicker" source="statefile" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;dashed=1;strokeColor=#D6B656;strokeWidth=2;fontSize=11;" target="selector" value="磁盘候选">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e_selector_inject" edge="1" parent="quicker" source="selector" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;dashed=1;strokeColor=#9673A6;strokeWidth=2;fontSize=11;" target="inject" value="采用更新版本">
+        <mxCell id="e_selector_inject" edge="1" parent="quicker" source="selector" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;dashed=1;strokeColor=#9673A6;strokeWidth=2;fontSize=11;" target="inject" value="提供变量">
           <mxGeometry relative="1" x="-0.6798" as="geometry">
             <mxPoint as="offset" />
             <Array as="points">

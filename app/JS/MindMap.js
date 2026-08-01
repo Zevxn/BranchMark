@@ -28,14 +28,6 @@ function applyMindMapTheme(theme) {
     }
 }
 
-function notifyQuickerTheme(theme) {
-    const webView = window.chrome && window.chrome.webview;
-    if (window.__DEEPCONVO_LEGACY_QUICKER_HOST__ &&
-        webView && typeof webView.postMessage === 'function') {
-        webView.postMessage(`DEEPCONVO_THEME:${theme}`);
-    }
-}
-
 async function initializeMindMapTheme() {
     const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     const result = await chrome.storage.local.get(MINDMAP_THEME_STORAGE_KEY);
@@ -48,7 +40,6 @@ async function initializeMindMapTheme() {
         const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
         applyMindMapTheme(nextTheme);
         await chrome.storage.local.set({ [MINDMAP_THEME_STORAGE_KEY]: nextTheme });
-        notifyQuickerTheme(nextTheme);
     };
 }
 
@@ -78,7 +69,6 @@ function applyImportedMindMap(content) {
 function initializeMindMapImport() {
     const openButton = $('#btn-open');
     const fileInput = $('#fileInput');
-    const quickerWebView = window.chrome && window.chrome.webview;
     const quickerSubprogram = window.$quickerSp
         || (typeof $quickerSp !== 'undefined' ? $quickerSp : null);
 
@@ -89,9 +79,10 @@ function initializeMindMapImport() {
                 return;
             }
 
-            openButton.disabled = true;
             try {
                 // Quicker 宿主不可靠地支持网页文件选择器，交给动作的原生模块选择并读取文件。
+                // 不要在等待期间禁用按钮：部分 Quicker 版本在取消文件选择后不会完成
+                // $quickerSp 返回的 Promise，若依赖 finally 恢复，按钮会永久不可点击。
                 const result = await quickerSubprogram('DeepConvoImportMindMap', {});
                 if (!result || result.cancelled || result.success === false) return;
                 if (result.error) throw new Error(String(result.error));
@@ -104,58 +95,36 @@ function initializeMindMapImport() {
                 showMindMapImportFeedback(
                     `❌ 导入失败：${error.message || '请检查 DeepConvoImportMindMap 子程序'}`,
                 );
-            } finally {
-                openButton.disabled = false;
             }
         };
         return;
     }
 
-    if (!openButton || !window.__DEEPCONVO_LEGACY_QUICKER_HOST__ || !quickerWebView ||
-        typeof quickerWebView.postMessage !== 'function' ||
-        typeof quickerWebView.addEventListener !== 'function') {
-        if (openButton) {
-            openButton.onclick = () => {
-                if (!fileInput) {
-                    showMindMapImportFeedback('❌ 找不到文件选择控件');
+    if (openButton) {
+        openButton.onclick = () => {
+            if (!fileInput) {
+                showMindMapImportFeedback('❌ 找不到文件选择控件');
+                return;
+            }
+            // 普通浏览器必须在用户点击的同步调用栈内打开选择器。
+            fileInput.value = '';
+            try {
+                if (typeof fileInput.showPicker === 'function') {
+                    fileInput.showPicker();
                     return;
                 }
-                // 必须在用户点击的同步调用栈内打开选择器，WebView2 才会保留用户激活状态。
-                fileInput.value = '';
+                fileInput.click();
+            } catch (error) {
+                console.warn('[MindMap] showPicker 打开失败，尝试 click 回退:', error);
                 try {
-                    if (typeof fileInput.showPicker === 'function') {
-                        fileInput.showPicker();
-                        return;
-                    }
                     fileInput.click();
-                } catch (error) {
-                    console.warn('[MindMap] showPicker 打开失败，尝试 click 回退:', error);
-                    try {
-                        fileInput.click();
-                    } catch (fallbackError) {
-                        console.error('[MindMap] 无法打开文件选择窗口:', fallbackError);
-                        showMindMapImportFeedback('❌ 无法打开文件选择窗口');
-                    }
+                } catch (fallbackError) {
+                    console.error('[MindMap] 无法打开文件选择窗口:', fallbackError);
+                    showMindMapImportFeedback('❌ 无法打开文件选择窗口');
                 }
-            };
-        }
-        return;
+            }
+        };
     }
-
-    openButton.onclick = () => quickerWebView.postMessage('DEEPCONVO_IMPORT_REQUEST');
-    quickerWebView.addEventListener('message', event => {
-        let payload = event.data;
-        if (typeof payload === 'string') {
-            try { payload = JSON.parse(payload); }
-            catch { return; }
-        }
-        if (!payload || payload.type !== 'DEEPCONVO_IMPORT_RESULT' || payload.cancelled) return;
-        if (payload.error) {
-            showMindMapImportFeedback(`❌ 导入失败：${payload.error}`);
-            return;
-        }
-        applyImportedMindMap(payload.content);
-    });
 }
 
 const defaultTreeData = {
@@ -265,30 +234,36 @@ function updateDockData(qaData) {           // 思维导图页面加载卡片坞
 }
 
 async function saveMindMapData(isForce=false,notify=true){           // 保存
-    if (bookmarkManager){
-        if (!isForce) return;
-        saveGlobalScrolls(); 
-        const saveData={data:state.data,view:state.view,scrollMap: Object.fromEntries(state.scrollMap)}
-        const currentFileID = sessionStorage.getItem('currentFileID');
-        // console.log('currentFileID',currentFileID)
-        const isExist = Object.prototype.hasOwnProperty.call(bookmarkManager.data.items, currentFileID);
-        if (!isExist){
-            const newId = generateFileId();
-            const targetItem = {
-                id: newId,
-                name: document.querySelector('#card-root > div.card-header').textContent.trim(),
-                parentId: null,
-                data:`MindMapData.__REF__${newId}-extra`
-            };
-            bookmarkManager.showNewItemModal(targetItem,saveData,'save_mindmap');
-        }else{
-            idbSet({[`MindMapData.__REF__${currentFileID}-extra`]:saveData})
-            if (notify) showTopToast('✅ 保存成功！');
-        }
-    };
+    if (!bookmarkManager || !isForce) return false;
+    saveGlobalScrolls();
+    const saveData={data:state.data,view:state.view,scrollMap: Object.fromEntries(state.scrollMap)};
+    const currentFileID = sessionStorage.getItem('currentFileID');
+    const isExist = Object.prototype.hasOwnProperty.call(bookmarkManager.data.items, currentFileID);
+    if (!isExist){
+        const newId = generateFileId();
+        const targetItem = {
+            id: newId,
+            name: document.querySelector('#card-root > div.card-header').textContent.trim(),
+            parentId: null,
+            data:`MindMapData.__REF__${newId}-extra`
+        };
+        bookmarkManager.showNewItemModal(targetItem,saveData,'save_mindmap');
+        return false;
+    }
+
+    try {
+        await idbSet({[`MindMapData.__REF__${currentFileID}-extra`]:saveData});
+        sessionStorage.setItem('MindMapData', JSON.stringify(saveData));
+        if (notify) showTopToast('✅ 保存成功！');
+        return true;
+    } catch (error) {
+        console.error('[MindMap] 保存思维导图失败:', error);
+        if (notify) showTopToast(`❌ 保存失败：${error.message || '数据未能写入'}`);
+        return false;
+    }
 }
-function newMindMap(){      // 新建思维导图
-    saveMindMapData(true);  // 询问保存
+async function newMindMap(){      // 新建思维导图
+    await saveMindMapData(true);  // 询问保存
     new_MindMap();          // 新建
 }
 
@@ -647,8 +622,8 @@ function initializeMapToolbar() {
     };
 
     $('#btn-center').onclick=()=>{ state.view={tx:window.innerWidth / 2,ty:window.innerHeight / 2,scale:1}; updateTransform(); saveStorage(); };
-    $('#btn-new').onclick=()=>{newMindMap();}
-    $('#btn-save').onclick=()=>{saveMindMapData(true);}
+    $('#btn-new').onclick=()=>{void newMindMap();}
+    $('#btn-save').onclick=()=>{void saveMindMapData(true);}
     $('#btn-export').onclick=()=>{ 
         const a=document.createElement('a');
         const url=URL.createObjectURL(new Blob([JSON.stringify({version:'v36-final-fix',data:state.data,view:state.view})],{type:'application/json'}));

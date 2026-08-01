@@ -286,7 +286,6 @@ class myBookmarkManager {
         this.initialized = false; // 新增标记
         this.fixedPanel = false;
 
-        this.activeFilter = null; // 当前激活的筛选类型
         this.searchKeyword = '';
         this.visibleIds = new Set(); // 存储筛选后应该显示的 ID 集合
         this.filterCollapsedIds = new Set(); 
@@ -294,14 +293,6 @@ class myBookmarkManager {
         // === 新增：拖拽自动展开相关的状态 ===
         this.autoExpandedFolderId = null; // 记录哪个文件夹是因为拖拽而临时展开的
         this.autoExpandTimer = null;      // 记录展开的延时定时器
-        this.isFufei=false;
-        this.dragHistoryItem=null;
-
-        this.embeddedCurrentId = 'root'; // 嵌入面板当前的目录ID
-        this.embeddedVisibleIds = new Set(); // 嵌入面板的筛选结果缓存
-        this.embeddedExpandedFolders = new Set();
-        this.localEmptyFolders = new Set();
-        this.embedded=false;
         this.rootDir='根目录';
         this.isSelfChange = true;
     }
@@ -333,28 +324,6 @@ class myBookmarkManager {
             const savedFolderId=await chromeGet('currentFolderId');
             const isInitializedData=await chromeGet('isInitializedData');
             const savedViewMode = await chromeGet('viewMode');
-            const savedEmbeddedExpanded = await chromeGet('embeddedExpandedFolders');
-            const savedLocalEmpty = await chromeGet('localEmptyFolders');
-            // 兼容升级前直接写入 localStorage 的数据；后续统一交给存储适配层。
-            const legacyEmbeddedExpanded = localStorage.getItem('embeddedExpandedFolders');
-            const legacyLocalEmpty = localStorage.getItem('localEmptyFolders');
-            const embeddedExpanded = savedEmbeddedExpanded
-                ?? (legacyEmbeddedExpanded ? JSON.parse(legacyEmbeddedExpanded) : null);
-            const localEmpty = savedLocalEmpty
-                ?? (legacyLocalEmpty ? JSON.parse(legacyLocalEmpty) : null);
-            if (embeddedExpanded) this.embeddedExpandedFolders = new Set(embeddedExpanded);
-            if (localEmpty) this.localEmptyFolders = new Set(localEmpty);
-            const migratedLocalState = {};
-            if (savedEmbeddedExpanded == null && embeddedExpanded) {
-                migratedLocalState.embeddedExpandedFolders = embeddedExpanded;
-            }
-            if (savedLocalEmpty == null && localEmpty) {
-                migratedLocalState.localEmptyFolders = localEmpty;
-            }
-            if (Object.keys(migratedLocalState).length) {
-                await chrome.storage.local.set(migratedLocalState);
-            }
-
             if (savedData) {
                 this.data = savedData;
                 if (!isInitializedData) await chrome.storage.local.set({'isInitializedData': true});
@@ -394,7 +363,6 @@ class myBookmarkManager {
                 }
             if (savedExpanded) this.expandedFolders = new Set(savedExpanded);
             if (savedViewMode) this.viewMode = savedViewMode;
-            this.isFufei=await this.checkUIMM2(false);
             // if (savedFolderId !== null) this.currentFolderId = savedFolderId || 'root';
         } catch (e) {
             console.log('[BookmarkManager] 加载数据失败', e);
@@ -668,8 +636,6 @@ class myBookmarkManager {
                 const id = itemContent.dataset.id;
                 const fileName = itemContent.querySelector('.item-text').textContent;
                 if (type === 'item') {
-                    // if (!this.isFufei) {showTopToast('⚠️ 仅限付费用户使用~',2500);return;};
-                    this.isFufei=await this.checkUIMM2(true);if (!this.isFufei) {return;};
                     const item = this.data.items[id];
                     if (item.data.length===0){              // 没有问答记录时，直接打开链接
                         window.open(item.url, '_blank');    // 只有收藏页面才可能为空，并且有链接
@@ -797,21 +763,13 @@ class myBookmarkManager {
             if (!breadItem) return;
             let targetId = breadItem.dataset.id;
             
-            let draggedId=null;
-            if (this.draggedMultipleIds){
-                draggedId = this.draggedMultipleIds[0];
-            }else if(this.dragHistoryItem && targetId){
-                draggedId=await this.confirmNewItem(true,this.dragHistoryItem.textContent.trim(),
-                                this.dragHistoryItem.href || this.dragHistoryItem.getAttribute('href'),'root')   // 先加入根目录但不渲染
-                console.log('draggedId',draggedId)
-                this.draggedMultipleIds=[draggedId];    // 加入可拖拽列表
-            }
+            if (!this.draggedMultipleIds) return;
+            const draggedId = this.draggedMultipleIds[0];
             if (this.canDrop(draggedId, targetId)) {
                 this.moveMultipleItems(this.draggedMultipleIds, targetId, this.dragPosition).catch(console.error);
             }
             // 清理样式
             this.dragPosition = null;
-            this.dragHistoryItem=null;
             this.draggedMultipleIds = null;
         })
     }
@@ -838,14 +796,6 @@ class myBookmarkManager {
     containerDragstart(container){
         container.addEventListener('dragstart', (e) => {
             e.stopPropagation();
-            const historyItem=e.target.closest(currentCfg.historyItemSelector);
-            if (currentWebsite==='腾讯元宝') {
-                historyItem.setAttribute('href', 'https://yuanbao.tencent.com/chat/naQivTmsDa/'+historyItem.dataset.itemId);
-            }
-            if (historyItem && historyItem.getAttribute('href')){
-                this.dragHistoryItem=historyItem;
-                return
-            }
             const itemContent = e.target.closest('.item-content');
             if (!itemContent) return;
             this.dragStartOffset = e.clientY - itemContent.getBoundingClientRect().top;
@@ -929,7 +879,7 @@ class myBookmarkManager {
             }
             const itemContent = e.target.closest('.item-content');
 
-            if (((!itemContent && !breadItem )|| (!this.draggedMultipleIds && !this.dragHistoryItem))) return;
+            if ((!itemContent && !breadItem) || !this.draggedMultipleIds) return;
             const targetId = itemContent.dataset.id;
             const targetType = itemContent.dataset.type;
             let draggedId=null;
@@ -1023,21 +973,14 @@ class myBookmarkManager {
             this.autoExpandedFolderId = null;
             const itemContent = e.target.closest('.item-content');
             const targetId = itemContent?.dataset.id;
-            let draggedId=null;
-            if (this.draggedMultipleIds){
-                draggedId = this.draggedMultipleIds[0];
-            }else if(this.dragHistoryItem && targetId){
-                draggedId=await this.confirmNewItem(true,this.dragHistoryItem.textContent.trim(),
-                                this.dragHistoryItem.href || this.dragHistoryItem.getAttribute('href'),'root')   // 先加入根目录但不渲染
-                this.draggedMultipleIds=[draggedId];    // 加入可拖拽列表
-            }
+            if (!this.draggedMultipleIds) return;
+            const draggedId = this.draggedMultipleIds[0];
             
             if (this.canDrop(draggedId, targetId)) {
                 this.moveMultipleItems(this.draggedMultipleIds, targetId, this.dragPosition).catch(console.error);
             }
 
             this.dragPosition = null;
-            this.dragHistoryItem=null;
             this.draggedMultipleIds = null;
         });
     }
@@ -1054,8 +997,6 @@ class myBookmarkManager {
         // 1. 点击搜索按钮：切换搜索框显示
         searchBtn.addEventListener('click', async(e) => {
             e.stopPropagation();
-            // if (!this.isFufei) {showTopToast('⚠️ 仅限付费用户使用~',2500);return;};
-            // this.isFufei=await this.checkUIMM2(true);if (!this.isFufei) {return;};
             const isOpening = !searchBarRow.classList.contains('show');
             searchBarRow.classList.toggle('show');
             searchBtn.classList.toggle('active', isOpening);
@@ -1110,71 +1051,29 @@ class myBookmarkManager {
     }
     
     applyFilter() {
-        this.filterCollapsedIds.clear(); 
+        this.filterCollapsedIds.clear();
         this.visibleIds.clear();
-        
-        // 检查是否有活跃的过滤条件
-        const hasFilter = !!this.activeFilter;
-        const hasSearch = this.searchKeyword && this.searchKeyword.trim() !== '';
 
-        // 如果既没筛选也没搜索，恢复默认视图
-        if (!hasFilter && !hasSearch) {
+        const keyword = this.searchKeyword.trim().toLowerCase();
+        if (!keyword) {
             this.render();
-            // 确保移除空状态提示，显示原有内容
             return;
         }
 
-        const currentHost = window.location.hostname;
-        const lowerKeyword = hasSearch ? this.searchKeyword.toLowerCase().trim() : '';
-
-        // 遍历所有 Item
         Object.values(this.data.items).forEach(item => {
-            // 1. 检查类型筛选匹配
-            const matchFilter = hasFilter ? this.checkItemMatch(item, currentHost) : true;
-            
-            // 2. 检查搜索关键词匹配 (匹配名称 或 URL)
-            let matchSearch = true;
-            if (hasSearch) {
-                const name = (item.name || '').toLowerCase();
-                const url = (item.url || item.Allurl || '').toLowerCase();
-                matchSearch = name.includes(lowerKeyword) || url.includes(lowerKeyword);
-            }
-
-            // 3. 同时满足才算命中
-            if (matchFilter && matchSearch) {
-                this.visibleIds.add(item.id);
-
-                // 递归添加父文件夹
-                let parentId = item.parentId;
-                while (parentId && parentId !== 'root') {
-                    this.visibleIds.add(parentId);
-                    if (this.data.folders[parentId]) {
-                        parentId = this.data.folders[parentId].parentId;
-                    } else {
-                        break;
-                    }
-                }
-            }
+            const name = (item.name || '').toLowerCase();
+            const url = (item.url || item.Allurl || '').toLowerCase();
+            if (!name.includes(keyword) && !url.includes(keyword)) return;
+            this.visibleIds.add(item.id);
+            this._addParentPathToVisible(item.parentId);
         });
-        if (hasSearch) {
-            Object.values(this.data.folders).forEach(folder => {
-                // 如果有“类型筛选”(如只看思维导图)，通常不应该显示空文件夹，
-                // 但如果用户明确搜索了文件夹名字，我们应该显示它。
-                // 这里设定：如果有 activeFilter，则忽略文件夹搜索(除非你希望文件夹也受类型限制，但文件夹没有类型)
-                // 或者策略改为：只要名字匹配就显示 (更符合直觉)
-                
-                const name = (folder.name || '').toLowerCase();
-                
-                // 只有当名字包含关键词，且(没有类型筛选 或 类型筛选允许显示文件夹)时
-                // 简单起见，这里让搜索关键词拥有最高优先级：只要名字匹配就显示
-                if (name.includes(lowerKeyword)) {
-                    this.visibleIds.add(folder.id);
-                    this._addParentPathToVisible(folder.parentId); // 使用辅助函数添加路径
-                }
-            });
-        }
 
-        // 渲染树（渲染函数会根据 visibleIds 过滤）
+        Object.values(this.data.folders).forEach(folder => {
+            if (!(folder.name || '').toLowerCase().includes(keyword)) return;
+            this.visibleIds.add(folder.id);
+            this._addParentPathToVisible(folder.parentId);
+        });
+
         this.render();
     }
     // [新增] 辅助函数：递归将父级文件夹加入 visibleIds，确保路径可见
@@ -1194,26 +1093,6 @@ class myBookmarkManager {
         }
     }
 
-    // 判断单个项目是否符合筛选条件
-    checkItemMatch(item, currentHost) {
-        switch (this.activeFilter) {
-            case 'mindmap':
-                return item.type === 'mindmap';
-            case 'markdown':
-                return item.type === 'markdown';
-            case 'page':
-                // 排除 mindmap 和 markdown，剩余的视为普通页面
-                return item.type !== 'mindmap' && item.type !== 'markdown' && item.data.length > 0;
-            case 'link':
-                return item.data.length===0;
-            case 'site':
-                // 检查 url 或 Allurl 是否包含当前域名
-                const url = item.url || item.Allurl || '';
-                return url.includes(currentHost);
-            default:
-                return true;
-        }
-    }
 
 
 
@@ -1249,12 +1128,6 @@ class myBookmarkManager {
                 case 'newFolder':
                     this.showNewFolderModal(targetId);
                     this.hideContextMenu();
-                    const embeddedTree=document.querySelector('.embedded-tree-content');
-                    if (embeddedTree){
-                        if (parseInt(menu.style.left) <= embeddedTree.getBoundingClientRect().right) {
-                            this.embedded=true;console.log('新建嵌入文件夹')        // 表明是嵌入面板中点击的右键
-                        }  
-                    }
                     break;
                 case 'open':
                     if (item.type==='mindmap') {await this.openMindMap(targetId,item.name,true)}
@@ -1441,11 +1314,6 @@ class myBookmarkManager {
     render() {
         this.renderBreadcrumb();
         this.renderTree();
-        this.renderEmbed();
-    }
-    async renderEmbed(){
-        const embeddedBreadcrumb=document.querySelector('.embedded-breadcrumb');
-        if (embeddedBreadcrumb) this.renderEmbeddedView(embeddedBreadcrumb,document.querySelector('.embedded-tree-content'))
     }
 
     renderBreadcrumb() {
@@ -1480,15 +1348,13 @@ class myBookmarkManager {
         }
 
         // --- 新增：检测是否处于筛选/搜索模式且无结果 ---
-        const isFiltering = this.activeFilter || (this.searchKeyword && this.searchKeyword.trim() !== '');
+        const isFiltering = this.searchKeyword.trim() !== '';
         
         // 如果正在筛选，但 visibleIds 为空（且不是因为还没有 items，而是没匹配到）
         // 注意：visibleIds 只存 ID，如果筛选结果为0，它就是空的
         if (isFiltering && this.visibleIds.size === 0) {
             let msg = '没有找到匹配的内容';
-            if (this.activeFilter && this.searchKeyword) msg = '没有符合当前筛选和搜索条件的内容';
-            else if (this.activeFilter) msg = '当前筛选条件下没有内容';
-            else if (this.searchKeyword) msg = `没有找到包含 "${this.searchKeyword}" 的内容`;
+            if (this.searchKeyword) msg = `没有找到包含 "${this.searchKeyword}" 的内容`;
 
             container.innerHTML = `
                 <div class="empty-result-state">
@@ -1585,7 +1451,6 @@ class myBookmarkManager {
     }
 
     clearAllFilters() {
-        this.activeFilter = null;
         // 清除搜索
         this.searchKeyword = '';
         document.getElementById('searchInput').value = '';
@@ -1622,7 +1487,7 @@ class myBookmarkManager {
     /* ============== 增量更新原子函数 ============== */
     renderFolderNode(folderId) {
         // 1. 检查筛选状态
-        const isFiltering = this.activeFilter || (this.searchKeyword && this.searchKeyword.trim() !== '');
+        const isFiltering = this.searchKeyword.trim() !== '';
         
         // 2. 筛选模式下的可见性检查
         if (isFiltering && !this.visibleIds.has(folderId)) {
@@ -1671,7 +1536,7 @@ class myBookmarkManager {
     }
     renderItemNode(itemId) {
         // --- 修改开始：同时检查筛选和搜索状态 ---
-        const isFiltering = this.activeFilter || (this.searchKeyword && this.searchKeyword.trim() !== '');
+        const isFiltering = this.searchKeyword.trim() !== '';
         
         if (isFiltering && !this.visibleIds.has(itemId)) {
             return '';
@@ -1725,119 +1590,9 @@ class myBookmarkManager {
         if (i) return this.viewMode==='list'?this.renderItemNode(id):this.renderGridNode(id,'item');
         return '';
     }
-    renderInsertNode(id, parentId = 'root') { // ② 新增节点插到合适位置
-        // 1. [基础修复] 精确获取主面板当前显示的 ID
-        const mainBreadcrumb = document.getElementById('breadcrumb');
-        const mainCurrentId = mainBreadcrumb?.querySelector('.breadcrumb-item:last-child')?.getAttribute('data-id') || 'root';
-        this.currentFolderId = mainCurrentId; 
-
-        // 2. [刷新逻辑] 如果是从空变有 (0->1)，且目标是当前视图，直接重绘
-        const children = this.getChildren(parentId); 
-        const isEmptyFolder = children.length === 1; 
-        
-        if (isEmptyFolder) {
-            // 如果是主面板当前文件夹，或嵌入面板当前文件夹
-            if (parentId === mainCurrentId || (this.embeddedCurrentId && parentId === this.embeddedCurrentId)) {
-                this.render();
-                // 额外刷新嵌入视图，确保"暂无内容"消失
-                if (this.embeddedCurrentId && parentId === this.embeddedCurrentId) {
-                    const embedBread = document.querySelector('.embedded-breadcrumb');
-                    const embedContent = document.querySelector('.embedded-tree-content');
-                    if (embedBread && embedContent) this.renderEmbeddedView(embedBread, embedContent);
-                }
-                return;
-            }
-        }
-
-        // 3. [核心逻辑] 预计算：是否匹配当前站点
-        const item = this.data.items[id];
-        const isItem = !!item;
-        const currentHost = window.location.hostname;
-        
-        // 判定该项目是否属于当前站点 (仅针对 item，文件夹默认允许)
-        let matchesSite = true;
-        if (isItem) {
-            const url = item.url || item.Allurl || '';
-            matchesSite = url.includes(currentHost);
-        }
-
-        // 4. [核心逻辑] 预生成 HTML
-        // HTML_Normal: 用于主面板 (受全局筛选影响)
-        const htmlNormal = this.renderNode(id);
-        
-        // HTML_Force: 用于嵌入面板 (如果匹配站点，强制生成，忽略主面板筛选)
-        let htmlForce = htmlNormal;
-        
-        // 如果主面板正在筛选(导致 htmlNormal 为空)，但该项目匹配当前站点，我们需要"伪造"可见性来生成 HTML
-        const isFiltering = this.activeFilter || (this.searchKeyword && this.searchKeyword.trim() !== '');
-        if (isFiltering && !htmlNormal && matchesSite) {
-            this.visibleIds.add(id); // 临时加入可见列表
-            htmlForce = this.renderNode(id);
-            this.visibleIds.delete(id); // 恢复原状
-        }
-
-        // 5. 收集目标容器
-        const targets = [];
-        // [A] 主面板根视图
-        if (parentId === mainCurrentId) {
-            const mainTree = document.getElementById('treeContainer');
-            if (mainTree) targets.push(mainTree);
-        }
-        // [B] 嵌入面板根视图
-        if (this.embeddedCurrentId && parentId === this.embeddedCurrentId) {
-            const embedContent = document.querySelector('.embedded-tree-content');
-            if (embedContent) {
-                const inner = embedContent.querySelector('.embedded-items-container') || embedContent;
-                targets.push(inner);
-            }
-        }
-        // [C] 已展开的子文件夹
-        if (parentId !== 'root') {
-            const childContainers = document.querySelectorAll(`.children[data-id="${parentId}"]`);
-            childContainers.forEach(el => targets.push(el));
-        }
-
-        const uniqueTargets = [...new Set(targets)]; 
-
-        // 6. 遍历插入
-        uniqueTargets.forEach(cnt => {
-            // 移除空状态
-            const emptyState = cnt.querySelector('.empty-state, .empty-result-state');
-            if (emptyState) emptyState.remove();
-
-            // === 判断当前容器是否属于嵌入面板 ===
-            const isEmbedCnt = cnt.closest('.embedded-tree-content');
-
-            // === [关键修复] 嵌入面板的特殊插入逻辑 ===
-            if (isEmbedCnt) {
-                // 如果是 Item 且不匹配当前站点，坚决不显示
-                if (isItem && !matchesSite) {
-                    return; 
-                }
-                // 如果匹配，使用强制生成的 HTML (防止因主面板筛选而导致空白)
-                if (htmlForce) {
-                    cnt.insertAdjacentHTML('beforeend', htmlForce);
-                }
-            } 
-            // === 主面板插入逻辑 ===
-            else {
-                // 如果是 embedded=true (显式要求嵌入操作)，则不操作主面板
-                // 但通常 embedded 默认为 false，我们只通过容器类型判断
-                if (htmlNormal) {
-                    cnt.insertAdjacentHTML('beforeend', htmlNormal);
-                }
-            }
-
-            // [视觉优化] 强制展开子菜单
-            // if (cnt.classList.contains('children')) {
-            //     cnt.classList.add('expanded');
-            //     const parentItem = cnt.closest('.tree-item');
-            //     if (parentItem) {
-            //         const icon = parentItem.querySelector('.folder-icon');
-            //         if (icon) icon.classList.remove('collapsed');
-            //     }
-            // }
-        });
+    renderInsertNode() {
+        // 收藏夹数据量较小，完整重绘比维护多个历史嵌入视图更可靠。
+        this.render();
     }
     renderDeleteNode(id) {                                // ③ 删除节点
         document.querySelectorAll(`.tree-item[data-id="${id}"]`).forEach(el=>{
@@ -1873,7 +1628,7 @@ class myBookmarkManager {
         if (!scope) return;
 
         // 2. 判断当前主面板的模式
-        const isFiltering = this.activeFilter || (this.searchKeyword && this.searchKeyword.trim() !== '');
+        const isFiltering = this.searchKeyword.trim() !== '';
         let isNowExpanded = false;
 
         if (isFiltering) {
@@ -1960,12 +1715,11 @@ class myBookmarkManager {
     hideModal(modalId) {
         document.body.classList.remove('modal-open');  // 移除模糊标记
         document.getElementById(modalId).classList.remove('show');
-        setTimeout(()=>{this.embedded=false;},500);
     }
     // 新增：渲染网格/卡片节点
     renderGridNode(id, type) {
         // 必须检查当前是否处于筛选/搜索模式，且该 ID 是否在可见集合中
-        const isFiltering = this.activeFilter || (this.searchKeyword && this.searchKeyword.trim() !== '');
+        const isFiltering = this.searchKeyword.trim() !== '';
         
         if (isFiltering && !this.visibleIds.has(id)) {
             return ''; // 如果不匹配，不渲染
@@ -2181,15 +1935,13 @@ class myBookmarkManager {
         }
     }
     async openMindMap(id,fileName,newTab=false, sidebar=false,options = {}){    // 打开思维导图
-        // if (!this.isFufei) {showTopToast('⚠️ 仅限付费用户使用~',2500);return;};
-        this.isFufei=await this.checkUIMM2(true);if (!this.isFufei) {return;};
         const refkey=`MindMapData.__REF__${id}-extra`;
         const MindMapData = await idbGet([refkey]) || {};
         try {
             // 打开预览窗口
             let win=null;
             await chrome.storage.local.set({'MindMapData': MindMapData, 'currentFileID': id,'MindMapAction':'open','fileName':fileName});// 防止刷新后数据丢失
-            if (currentWebsite === 'MindMapHtml' && !newTab ) {
+            if (!newTab) {
                 try{
                     await updateState(MindMapData,id,fileName);     // 如果已经打开了MindMap.html，直接渲染
                     console.log('就地渲染思维导图');
@@ -2299,15 +2051,9 @@ class myBookmarkManager {
         // ======== 【新增这一块】 ======== 
         // 让它在所有视图的缓存里都占据一席之地
         if (this.visibleIds) this.visibleIds.add(folderId);
-        if (this.embeddedVisibleIds) this.embeddedVisibleIds.add(folderId);
-        // ===============================
         await this.saveToStorage(); 
         console.log('confirmNewFolder 所在文件夹的id',parentId);
         this.renderInsertNode(folderId, parentId);
-        if (this.embedded || true){
-            this.localEmptyFolders.add(folderId)
-            await chrome.storage.local.set({'localEmptyFolders': [...this.localEmptyFolders]})
-        }
         this.hideModal('newFolderModal');
 
     }
@@ -2320,7 +2066,7 @@ class myBookmarkManager {
         this.action=action;         // 实例内部调用都是空值
 
         document.getElementById('newItemNameInput').value = this.indexData.name||cleanPageName();
-        const href=currentWebsite==='PreviewHtml'?sessionStorage.getItem('markdownHref'):location.href;//.split('?')[0];
+        const href = location.href;
         document.getElementById('newItemUrlInput').value = href;
         this.initializeCustomDropdown('itemDropdown', 'newItemModal');
 
@@ -2402,11 +2148,6 @@ class myBookmarkManager {
         }
         // ======== 【新增这一块】 ========
         if (this.visibleIds) this.visibleIds.add(itemId);
-        // 判断它是否符合嵌入视图展示条件（当前站点网址匹配）
-        if (this.embeddedVisibleIds && (!url || url.includes(window.location.hostname))) {
-            this.embeddedVisibleIds.add(itemId);
-        }
-        // ===============================
         if (!isAuto){
             await this.saveToStorage(); // ✅ 等待保存完成
             this.renderInsertNode(itemId, dropdownValue);
@@ -2562,10 +2303,7 @@ class myBookmarkManager {
     async moveMultipleItems(itemIds, targetId, position) {
         // 按当前显示顺序排序，确保移动后顺序正确
         const container = document.getElementById('treeContainer');
-        // 如果是嵌入模式，尝试从嵌入容器获取，防止找不到元素
-        const contextContainer = container || document.querySelector('.embedded-tree-content');
-        
-        const visibleItems = Array.from(contextContainer.querySelectorAll('.tree-item'));
+        const visibleItems = Array.from(container.querySelectorAll('.tree-item'));
         const sortedIds = itemIds.sort((a, b) => {
             const indexA = visibleItems.findIndex(el => el.dataset.id === a);
             const indexB = visibleItems.findIndex(el => el.dataset.id === b);
@@ -3051,619 +2789,26 @@ class myBookmarkManager {
             });
         });
     }
-    async checkUIMM2(notify=true) {
-        const response = await chrome.runtime.sendMessage({ action: 'getSelector' });
-        if (response && response.isChro === true) {
-            return true;
-        }else{
-            if (notify) showTopToast(getI18nText('toast.pro_only'),2500)
-            return false;
-        }
-    }
-    /**********************************************************************************************************
-    // #region 嵌入式渲染模块
-    ***********************************************************************************************************/
-    
-    /**
-     * 在指定容器上方嵌入完整的书签管理面板
-     * @param {string} targetSelector 目标容器选择器
-     */
-    /**
-     * 在指定容器上方嵌入书签面板
-     */
-    async mountToContainer(targetSelector) {
-        if (!currentCfg.historyListSelector) return;
-        if(!this.isFufei || !currentSettings.enableAssisFav) return;
-        if (document.querySelector('.bookmark-manager-container.embedded-view')) return;
-        await waitForElement(targetSelector,1000)
-        const targetElement = document.querySelector(targetSelector);
-        if (!targetElement) return;
-
-        // 1. 创建容器
-        const embedContainer = document.createElement('div');
-        embedContainer.className = 'bookmark-manager-container embedded-view';
-        
-        // 2. 构建 HTML 结构 (面包屑 + 内容区)
-        // 我们去掉顶部的 .panel-header (包含刷新按钮那些)，只保留面包屑和树
-        const htmlStructure = `
-            <div class="breadcrumb embedded-breadcrumb"></div>
-            
-            <div class="panel-content embedded-tree-content">
-                <div class="selection-box" id="embeddedSelectionBox"></div> 
-                <div class="embedded-items-container"></div> 
-            </div>
-        `;
-        
-        // 使用安全赋值 (如果你定义了 setSafeHTML) 或者 innerHTML
-        if (typeof setSafeHTML === 'function') {
-            setSafeHTML(embedContainer, htmlStructure);
-        } else {
-            embedContainer.innerHTML = htmlStructure;
-        }
-
-        // 3. 插入到页面
-        targetElement.insertAdjacentElement('beforebegin', embedContainer);
-
-        // 4. 获取引用
-        const breadcrumbEl = embedContainer.querySelector('.embedded-breadcrumb');
-        const treeContentEl = embedContainer.querySelector('.embedded-tree-content');
-        treeContentEl.style.position = 'relative';
-
-        // 5. 渲染数据 (默认从当前路径开始)
-        this.renderEmbeddedView(breadcrumbEl, treeContentEl);
-
-        // 6. 绑定事件
-        this.bindEmbeddedEvents(breadcrumbEl, treeContentEl);
-
-        this.initializeSelectionBox(treeContentEl,treeContentEl);   // 初始化框选功能
-        
-        // 初始化拖拽功能
-        this.containerDragstart(embedContainer.parentElement);
-        this.containerDragend(embedContainer.parentElement); 
-        this.containerDragover(embedContainer.parentElement);       
-        this.containerDrop(embedContainer.parentElement);
-        this.breadcrumbDrop(breadcrumbEl);
-        console.log('嵌入式面板加载完成');
-    }
-
-    /**
-     * [更新] 渲染嵌入视图
-     * 1. 自动筛选当前站点
-     * 2. 默认保持折叠状态
-     */
-    /**
-     * [重写] 渲染嵌入视图 (状态完全隔离)
-     */
-    async renderEmbeddedView(breadcrumbEl, treeContentEl) {
-        // --- 1. 渲染面包屑 (使用 embeddedCurrentId) ---
-        const parts = [];
-        let currentId = this.embeddedCurrentId; // 使用嵌入面板的独立路径
-        let depth = 0;
-        
-        while (currentId !== 'root' && currentId && this.data.folders[currentId] && depth < 20) {
-            const folder = this.data.folders[currentId];
-            parts.unshift({ id: currentId, name: folder.name });
-            currentId = folder.parentId;
-            depth++;
-        }
-        
-        let breadHtml = `<span class="breadcrumb-item" data-id="root" data-i18n="bookmarks.root_dir">${this.rootDir}</span>`;
-        parts.forEach(part => {
-            breadHtml += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" data-id="${part.id}">${part.name}</span>`;
-        });
-        
-        if (typeof setSafeHTML === 'function') setSafeHTML(breadcrumbEl, breadHtml);
-        else breadcrumbEl.innerHTML = breadHtml;
-
-        // --- 2. 渲染列表 (快照技术：劫持全局状态) ---
-        
-        // A. 备份主面板的所有状态
-        const globalCurrentId = this.currentFolderId;
-        const globalFilter = this.activeFilter;
-        const globalKeyword = this.searchKeyword;
-        const globalVisibleIds = new Set(this.visibleIds);
-        const globalCollapsed = new Set(this.filterCollapsedIds);
-
-        // B. 切换到“嵌入模式”状态
-        this.currentFolderId = this.embeddedCurrentId; // 劫持导航：让渲染器画嵌入面板的层级
-        this.activeFilter = 'site';                    // 劫持模式：开启筛选模式逻辑
-        this.searchKeyword = '';                       
-        
-        // C. 计算并应用筛选 (只保留当前站点数据)
-        const siteMatches = this.calculateSiteMatches();
-        this.visibleIds = siteMatches;
-        this.embeddedVisibleIds = siteMatches; // 存下来给 toggleEmbeddedFolder 用
-
-        // D. [关键] 强制默认折叠
-        // 筛选模式下，逻辑通常是“默认展开”。为了“默认折叠”，
-        // 我们需要把所有可见的文件夹ID都加入 filterCollapsedIds。
-        // 这样 renderFolderNode 就会给它们加上 'collapsed' 类。
-        siteMatches.forEach(id => {
-            if (this.data.folders[id]) {
-                // 如果这个 ID 不在“已展开集合”中，就让它折叠
-                if (!this.embeddedExpandedFolders.has(id)) {
-                    this.filterCollapsedIds.add(id);
-                }
-            }
-        });
-
-        try {
-            // E. 检查当前层级是否有内容
-            // 劫持了 currentFolderId 后，getChildren 会取 embeddedCurrentId 下的子元素
-            // 然后 renderFolderNode 会根据 visibleIds 过滤
-            const children = this.getChildren(this.embeddedCurrentId);
-            const hasVisibleChildren = children.some(id => siteMatches.has(id));
-
-            if (!hasVisibleChildren && this.embeddedCurrentId === 'root') {
-                // 如果根目录都没东西，说明真的没收藏
-                const emptyHtml = `<div class="empty-result-state" style="padding:40px 0;text-align:center;color:#94a3b8;"><p data-i18n="bookmarks.no_bookmark_for_site">${getI18nText('bookmarks.no_bookmark_for_site')}</p></div>`;
-                if (typeof setSafeHTML === 'function') setSafeHTML(treeContentEl, emptyHtml);
-                else treeContentEl.innerHTML = emptyHtml;
-            } else if (!hasVisibleChildren) {
-                // 如果是进入了某个空文件夹
-                const emptyHtml = `<div class="empty-result-state" style="padding:20px;text-align:center;color:#94a3b8;"><p data-i18n="bookmarks.no_match_in_folder">${getI18nText('bookmarks.no_match_in_folder')}</p></div>`;
-                if (typeof setSafeHTML === 'function') setSafeHTML(treeContentEl, emptyHtml);
-                else treeContentEl.innerHTML = emptyHtml;
-            } else {
-                // F. 执行渲染 (复用核心方法)
-                const itemsContainer = treeContentEl.querySelector('.embedded-items-container');
-            
-                // 如果找到了就渲染进内部容器，没找到(兼容旧逻辑)才渲染进外层
-                this.renderToElement(itemsContainer || treeContentEl);
-            }
-        } catch (e) {
-            console.error('嵌入视图渲染异常:', e);
-        } finally {
-            // G. [关键] 立即恢复主面板状态 (无痕操作)
-            this.currentFolderId = globalCurrentId;
-            this.activeFilter = globalFilter;
-            this.searchKeyword = globalKeyword;
-            this.visibleIds = globalVisibleIds;
-            this.filterCollapsedIds = globalCollapsed;
-            await initEmbedPreview();
-        }
-    }
-    /**
-     * [重写] 嵌入面板专用折叠/展开
-     */
-    async toggleEmbeddedFolder(folderId, uiContainer) {
-        const folderEl = uiContainer.querySelector(`.tree-item[data-id="${folderId}"]`);
-        if (!folderEl) return;
-        
-        const icon = folderEl.querySelector('.folder-icon');
-        const childrenContainer = folderEl.querySelector(`.children[data-id="${folderId}"]`);
-        
-        const isCollapsed = icon.classList.contains('collapsed');
-        
-        if (isCollapsed) {
-            // === 展开 ===
-            icon.classList.remove('collapsed');
-            this.embeddedExpandedFolders.add(folderId);
-
-            if (childrenContainer) {
-                // 如果内容为空（第一次展开），需要动态渲染子项
-                if (!childrenContainer.innerHTML.trim()) {
-                    // [关键] 再次劫持全局状态，确保渲染出来的子项是经过筛选的
-                    const globalFilter = this.activeFilter;
-                    const globalVisibleIds = this.visibleIds;
-
-                    try {
-                        this.activeFilter = 'site';
-                        this.visibleIds = this.embeddedVisibleIds; // 使用之前计算好的缓存
-                        
-                        // 生成子项 HTML
-                        const html = this.renderFolderContent(folderId);
-                        
-                        if (typeof setSafeHTML === 'function') setSafeHTML(childrenContainer, html);
-                        else childrenContainer.innerHTML = html;
-                        
-                    } finally {
-                        this.activeFilter = globalFilter;
-                        this.visibleIds = globalVisibleIds;
-                    }
-                }
-                childrenContainer.classList.add('expanded');
-            }
-        } else {
-            // === 折叠 ===
-            icon.classList.add('collapsed');
-            this.embeddedExpandedFolders.delete(folderId);
-            if (childrenContainer) childrenContainer.classList.remove('expanded');
-        }
-        await chrome.storage.local.set({'embeddedExpandedFolders': [...this.embeddedExpandedFolders]})
-        await initEmbedPreview();
-    }
-    /**
-     * [更新] 绑定嵌入面板事件 (修复交互逻辑)
-     */
-    bindEmbeddedEvents(breadcrumbEl, treeContentEl) {
-        // 1. 面包屑点击 -> 独立导航
-        breadcrumbEl.addEventListener('click', (e) => {
-            const item = e.target.closest('.breadcrumb-item');
-            if (item) {
-                const id = item.dataset.id;
-                this.embeddedCurrentId = id; // 更新嵌入面板的 ID
-                this.renderEmbeddedView(breadcrumbEl, treeContentEl); // 重新渲染
-            }
-        });
-
-        // 2. 列表点击 -> 选中 或 展开
-        treeContentEl.addEventListener('click', async(e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            if (this.justFinishedSelecting) return;
-            if (!e.target.closest('.context-menuBM')) this.hideContextMenu();
-
-            const itemContent = e.target.closest('.item-content');
-            const id = itemContent.dataset.id;
-            const type = itemContent.dataset.type;
-            // 场景A: 点击文件夹图标 -> 仅展开/折叠 (不进入，不选中)
-            if (type === 'folder' && e.target.closest('.folder-icon')) {
-                this.toggleEmbeddedFolder(id, treeContentEl);
-                return;
-            }
-            if (e.ctrlKey) {
-                this.toggleSelection(id);
-            }else{
-                this.selectItem(id)
-            }
-
-            // 场景B: 点击行 -> 仅选中
-            const treeItem = itemContent.closest('.tree-item');
-            if (treeItem) {
-                const item = this.data.items[treeItem.dataset.id];
-                if (item){
-                    const click_url=item.url||item.Allurl;
-                    if (location.href.split('?')[0]===click_url.split('?')[0]) return;
-                    let target=null;
-                    if (currentWebsite==='Gemini'){
-                        target = await findTargetInGeminiSidebar(click_url, currentCfg.historyItemSelector)
-                    }else{
-                        const allItems = Array.from(document.querySelectorAll(currentCfg.historyItemSelector));
-                        target = allItems.find(a => click_url.includes(getUrlKey(a)));
-                    }
-                    
-                    if (target){
-                        target.click();
-                    }else{
-                        const currentMessage=document.querySelector(currentCfg.selector);
-                        spaNavigate(click_url);
-                        // setTimeout(()=>{
-                        //     if (currentMessage === document.querySelector(currentCfg.selector)){
-                        //         spaNavigate(click_url,'ClICK_JUMP')
-                        //     }
-                        // },500)
-                    }
-                    
-                }
-            }
-            // 这里不更新 this.selectedIds，或者你可以专门搞一个 this.embeddedSelectedIds
-            // 防止右键删除时误删主面板选中的东西
-        });
-
-        // 3. 列表双击 -> 进入文件夹 或 打开
-        treeContentEl.addEventListener('dblclick', (e) => {
-            // 忽略图标双击
-            if (e.target.closest('.folder-icon')) return;
-
-            const itemContent = e.target.closest('.item-content');
-            if (!itemContent) return;
-
-            const id = itemContent.dataset.id;
-            const type = itemContent.dataset.type;
-
-            if (type === 'folder') {
-                // [关键] 更新嵌入面板的 ID，而不是主面板的
-                this.embeddedCurrentId = id;
-                this.renderEmbeddedView(breadcrumbEl, treeContentEl);
-            }
-        });
-
-        this.containerContext(treeContentEl);
-    }
-
-    /**
-     * 将当前目录渲染到指定 DOM 节点中
-     * (完全复用 renderFolderNode 和 renderItemNode)
-     */
-    renderToElement(containerElement) {
-        const children = this.getChildren(this.currentFolderId);
-        let html = '';
-
-        if (this.viewMode === 'grid') {
-            containerElement.classList.add('tree-container', 'grid-view'); // 复用 CSS 类
-            children.forEach(id => {
-               // 复用 renderGridNode
-               html += this.data.folders[id] ? this.renderGridNode(id, 'folder') : this.renderGridNode(id, 'item');
-            });
-        } else {
-            containerElement.classList.add('tree-container'); // 复用 CSS 类
-            containerElement.classList.remove('grid-view');
-            
-            children.forEach(id => {
-                if (this.data.folders[id]) {
-                    html += this.renderFolderNode(id); // 复用现有方法
-                }
-            });
-            children.forEach(id => {
-                if (this.data.items[id]) {
-                    html += this.renderItemNode(id);   // 复用现有方法
-                }
-            });
-        }
-
-        // 使用安全方式赋值
-        setSafeHTML(containerElement, html);
-    }
-
-    /**
-     * [新增] 计算当前站点匹配的 ID 集合
-     * @returns {Set} 包含所有匹配项及其父文件夹 ID 的集合
-     */
-    calculateSiteMatches() {
-        const currentHost = window.location.hostname;
-        const matchedIds = new Set();
-
-        // 1. [原有逻辑] 遍历所有 Item 寻找匹配
-        Object.values(this.data.items).forEach(item => {
-            const url = item.url || item.Allurl || '';
-            if (url.includes(currentHost)) {
-                matchedIds.add(item.id);
-
-                // 递归添加父文件夹，确保路径可见
-                let parentId = item.parentId;
-                while (parentId && parentId !== 'root') {
-                    matchedIds.add(parentId);
-                    if (this.data.folders[parentId]) {
-                        parentId = this.data.folders[parentId].parentId;
-                    } else {
-                        break;
-                    }
-                }
-            }
-        });
-
-        // 2. [新增] 总是包含根目录，允许存放在最外层
-        matchedIds.add('root');
-
-        // 3. [新增] 将符合路径条件的“空文件夹”也加进去
-        // 逻辑：如果一个文件夹是空的，且它的父级已经在 matchedIds 里（说明父级匹配了域名或就是root），
-        // 那么这个空文件夹也应该显示，以便用户存东西进去。
-        Object.values(this.data.folders).forEach(folder => {
-            // 判断是否为空文件夹 (没有子文件 且 没有子文件夹)
-            const isEmpty = (!folder.children || folder.children.length === 0);
-
-            if (isEmpty) {
-                // 如果它的父级已经在可见列表中 (比如父级是 root，或者父级里有匹配项)
-                if (matchedIds.has(folder.parentId)) {
-                    matchedIds.add(folder.id);
-                }
-            }
-        });
-        
-        return matchedIds;
-    }
-
-    
 }
 
-
-// =========================================================
-// #region [安全校验模块]
-// =========================================================
 
 let bookmarkManager = null;
-(async function() {
-    try {
-        // const isFufei = await checkUIMM1();
-        // console.log("BookmarkManager 激活状态:", isFufei);
-        const isFufei = true;
-        
-        if (isFufei) {
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', async() => {
-                    await initializeApp();
-                });
-            } else {
-                await initializeApp();
-            }
-        } else {
-            console.log("%c用户关闭了激活窗口，插件暂不运行", "color:gray");
-        }
-    } catch (e) {
-        console.log("Plugin init error:", e);
-    }
 
-})();
-
-// 核心流程控制
-async function checkUIMM1() {
-    try {
-        // 向 Background 发送消息
-        const response = await chrome.runtime.sendMessage({ 
-            action: 'check_status' 
-        });
-        if (response && response.isChro === true) {
-            return true;
-        }else{
-            // showTopToast('仅限付费用户使用')
-            return false;
-        }
-        
-    } catch (e) {
-        // 发生错误（如插件被禁用/卸载），默认为 false
-        console.log('Pro check failed:', e);
-        return false;
-    }
-}
-async function initializeApp() {
-    console.log("正在初始化 BookmarkManager...");
+async function initializeBookmarkManager() {
     document.body.appendChild(uiContainer);
     bookmarkManager = new myBookmarkManager();
-    await initI18n();
     await bookmarkManager.initialize();
-    bookmarkManager.mountToContainer(currentCfg.historyListSelector);
-    renderLanguage();
-    // if (!location.href.endsWith('preview.html') && !location.href.endsWith('MindMap.html')){
-    //     await initPrompt();
-    // }
-    console.log("BookmarkManager 初始化完成");
+    renderLanguage(uiContainer);
 }
 
-
-
-function spaNavigate(url,action='SPA_JUMP') {
-    // 直接发送消息给 window，navigator.js 会收到
-    window.postMessage({ action: action, url: url }, "*");
-}
-
-
-
-/**
- * 在 Gemini 侧边栏中静默查找特定链接
- * @param {string} click_url - 需要查找的目标链接
- * @param {string} historyItemSelector - 侧边栏每一项的选择器 (例如 'a' 或 'a[href^="/app/"]')
- * @returns {Promise<Element|null>} - 找到的 DOM 元素，没找到返回 null
- */
-async function findTargetInGeminiSidebar(click_url, historyItemSelector = 'a') {
-    // 1. 定义容器选择器
-    const containerSelector = 'side-navigation-content > div > div > infinite-scroller';
-    
-    const realContainer = document.querySelector(containerSelector);
-    if (!realContainer) {
-        console.log("找不到 Gemini 侧边栏容器");
-        return null;
-    }
-
-    // --- 准备工作：记录原始位置 & 背景色 ---
-    const startScrollTop = realContainer.scrollTop;
-    console.log(`开始查找目标: ${click_url}`);
-
-    // 获取背景色防止重影
-    function getSolidBackgroundColor(el) {
-        let current = el;
-        while (current) {
-            const style = window.getComputedStyle(current);
-            const color = style.backgroundColor;
-            if (color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
-                return color;
-            }
-            current = current.parentElement;
-        }
-        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches 
-            ? '#131314' : '#ffffff';
-    }
-    const solidBg = getSolidBackgroundColor(realContainer);
-
-    // --- 施展“替身术” (视觉冻结) ---
-    const rect = realContainer.getBoundingClientRect();
-    const fakeContainer = realContainer.cloneNode(true);
-    
-    Object.assign(fakeContainer.style, {
-        position: 'fixed',
-        top: `${rect.top}px`,
-        left: `${rect.left}px`,
-        width: `${rect.width}px`,
-        height: `${rect.height}px`,
-        zIndex: '99999',
-        overflow: 'hidden',
-        backgroundColor: solidBg,
-        pointerEvents: 'auto', 
-        margin: '0',
-        boxSizing: 'border-box'
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        initializeBookmarkManager().catch(error => {
+            console.error('[Bookmarks] 初始化失败:', error);
+        });
+    }, { once: true });
+} else {
+    initializeBookmarkManager().catch(error => {
+        console.error('[Bookmarks] 初始化失败:', error);
     });
-
-    // 提示信息
-    const tip = document.createElement('div');
-    tip.textContent = "正在查找历史记录...";
-    Object.assign(tip.style, {
-        position: 'absolute', bottom: '10px', right: '10px',
-        background: 'rgba(0,0,0,0.7)', color: '#fff',
-        padding: '5px 10px', borderRadius: '4px', fontSize: '12px',
-        pointerEvents: 'none'
-    });
-    fakeContainer.appendChild(tip);
-
-    document.body.appendChild(fakeContainer);
-    
-    // 同步画面
-    fakeContainer.scrollTop = startScrollTop;
-
-    // --- 开始查找循环 ---
-    let foundTarget = null;
-    let previousHeight = 0;
-    let noChangeCount = 0;
-    const maxLoops = 100; // 防止无限循环
-    let loopCount = 0;
-
-    try {
-        while (loopCount < maxLoops) {
-            loopCount++;
-
-            // --- 核心步骤 1: 立即搜寻目标 ---
-            // 注意：这里必须在 realContainer 下面找，而不是 document，缩小范围
-            const allItems = Array.from(realContainer.querySelectorAll(historyItemSelector));
-            const target = allItems.find(a => click_url.includes(getUrlKey(a)));
-
-            if (target) {
-                console.log("✅ 找到目标元素:", target);
-                foundTarget = target;
-                break; // 【关键】找到了立马跳出循环
-            }
-
-            // --- 核心步骤 2: 检查是否到底 (没得加载了) ---
-            const currentHeight = realContainer.scrollHeight;
-            if (Math.abs(currentHeight - previousHeight) < 5) {
-                noChangeCount++;
-                if (noChangeCount >= 5) { 
-                    console.log("❌ 滚动到底部仍未找到目标");
-                    break; 
-                }
-            } else {
-                noChangeCount = 0;
-                previousHeight = currentHeight;
-                tip.textContent = `检索中...`;
-            }
-
-            // --- 核心步骤 3: 滚动加载下一页 ---
-            // 滚到底部
-            realContainer.scrollTop = realContainer.scrollHeight;
-
-            // 等待加载 (Gemini 比较慢，建议 600ms)
-            await new Promise(r => setTimeout(r, 600));
-        }
-
-    } catch (e) {
-        console.error("查找过程中出错:", e);
-    } finally {
-        // --- 收尾工作 (无论是否找到都会执行) ---
-        
-        // 1. 还原真身位置
-        realContainer.scrollTop = startScrollTop;
-        
-        // 2. 确保渲染一帧
-        await new Promise(r => requestAnimationFrame(r));
-
-        // 3. 移除替身
-        fakeContainer.remove();
-        // console.log("视觉冻结解除，回归原位");
-    }
-
-    return foundTarget;
 }
-
-// --- 调用示例 ---
-// 假设你要找的链接是 https://gemini.google.com/app/123456
-// const targetElement = await findTargetInGeminiSidebar(
-//     "https://gemini.google.com/app/123456", 
-//     "a" // 或者更精确的选择器，如 'a[href^="/app/"]'
-// );
-
-// if (targetElement) {
-//     // 找到了！可以做你想做的事，比如模拟点击
-//     // targetElement.click(); 
-// }
-
-
-
-// 阅读代码，检查逻辑。为什么会出现folders里有id的文件夹，但却不渲染，检查是否存在使得父文件夹的children里没有子id，而folers里却有该id的逻辑漏洞；其次在嵌入面板中新建的文件夹，随后执行了渲染，但并没有出现，并且只在主面板中出现！只有刷新页面才会在嵌入面板中出现！
