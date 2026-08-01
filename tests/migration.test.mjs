@@ -4,8 +4,6 @@ import { access, readFile } from 'node:fs/promises';
 const exactCopies = [
     ['ref/JS/AI-Contents.js', 'app/JS/AI-Contents.js'],
     ['ref/JS/utils.js', 'app/JS/utils.js'],
-    ['ref/JS/renderMD.js', 'app/JS/renderMD.js'],
-    ['ref/CSS/AI-Contents.css', 'app/CSS/AI-Contents.css'],
 ];
 
 for (const [referencePath, migratedPath] of exactCopies) {
@@ -20,6 +18,8 @@ const html = await readFile('app/HTML/MindMap.html', 'utf8');
 assert.match(html, /standalone-shim\.js/);
 assert.doesNotMatch(html, /standalone-adapter\.js/);
 assert.match(html, /id="btn-theme-toggle"/);
+assert.match(html, /id="fileInput" class="mindmap-file-input"/);
+assert.doesNotMatch(html, /id="fileInput"[^>]*display\s*:\s*none/);
 assert.match(html, /:root\[data-theme="light"\]/);
 assert.match(html, /:root\[data-theme="dark"\]/);
 
@@ -52,6 +52,11 @@ assert.match(mindMap, /mindmap_theme/);
 assert.match(mindMap, /DEEPCONVO_THEME:/);
 assert.match(mindMap, /DEEPCONVO_IMPORT_REQUEST/);
 assert.match(mindMap, /DEEPCONVO_IMPORT_RESULT/);
+assert.match(mindMap, /fileInput\.showPicker\(\)/);
+assert.match(mindMap, /fileInput\.click\(\)/);
+assert.match(mindMap, /window\.__DEEPCONVO_NATIVE_QUICKER_HOST__/);
+assert.match(mindMap, /quickerSubprogram\('DeepConvoImportMindMap', \{\}\)/);
+assert.match(mindMap, /result\.content/);
 assert.match(mindMap, /a\.download=`\$\{getMindMapExportBaseName\(\)\}\.json`/);
 
 const bookmarks = await readFile('app/JS/BookMarks.js', 'utf8');
@@ -65,8 +70,35 @@ assert.match(bookmarks, /chromeGet\('localEmptyFolders'\)/);
 assert.match(bookmarks, /chrome\.storage\.local\.set\(\{'embeddedExpandedFolders':/);
 assert.match(bookmarks, /chrome\.storage\.local\.set\(\{'localEmptyFolders':/);
 
-const bookmarksCss = await readFile('app/CSS/BookMarks.css', 'utf8');
+const [bookmarksCss, aiContentsCss, renderMarkdown] = await Promise.all([
+    readFile('app/CSS/BookMarks.css', 'utf8'),
+    readFile('app/CSS/AI-Contents.css', 'utf8'),
+    readFile('app/JS/renderMD.js', 'utf8'),
+]);
 assert.match(bookmarksCss, /\.panel-actions \{[^}]*justify-content: space-between;[^}]*gap: 0;/);
+
+for (const [name, source] of [
+    ['MindMap.html', html],
+    ['BookMarks.css', bookmarksCss],
+    ['AI-Contents.css', aiContentsCss],
+    ['renderMD.js', renderMarkdown],
+]) {
+    assert.doesNotMatch(
+        source,
+        /@media\s*\(prefers-color-scheme:\s*dark\)/,
+        `${name} 不应绕过 data-theme 直接应用系统暗色样式`,
+    );
+}
+assert.match(renderMarkdown, /:root\[data-theme="dark"\][\s\S]*\.mermaid-container svg/);
+assert.match(renderMarkdown, /:root\[data-theme="dark"\][\s\S]*\.code-line-numbers/);
+assert.match(renderMarkdown, /var\(--code-line-separator, var\(--code-block-border\)\)/);
+assert.doesNotMatch(renderMarkdown, /border-right-color:\s*#444/);
+assert.equal((html.match(/--bg-color\s*:/g) || []).length, 2, '基础背景色只能各定义一套亮色和暗色值');
+assert.equal(
+    (html.match(/--code-line-separator\s*:/g) || []).length,
+    2,
+    '代码行号分隔线只能各定义一套亮色和暗色值',
+);
 
 const [localeJson, localeScript] = await Promise.all([
     readFile('app/locales/zh_CN/messages.json', 'utf8').then(JSON.parse),

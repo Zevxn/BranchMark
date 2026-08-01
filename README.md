@@ -8,10 +8,10 @@
 
 - `JS/AI-Contents.js`
 - `JS/utils.js`
-- `JS/renderMD.js`
-- `CSS/AI-Contents.css`
 
-`HTML/MindMap.html`、`JS/MindMap.js`、`JS/BookMarks.js` 和 `CSS/BookMarks.css` 已作为独立应用正式源码维护，主题、导入导出和收藏夹精简等需求直接在这些文件中实现。
+`HTML/MindMap.html`、`JS/MindMap.js`、`JS/BookMarks.js`、`JS/renderMD.js`、
+`CSS/BookMarks.css` 和 `CSS/AI-Contents.css` 已作为独立应用正式源码维护，主题、Markdown
+渲染、导入导出和收藏夹精简等需求直接在这些文件中实现。
 
 原版 KaTeX、Mermaid、Marked、Highlight、Remix Icon、Font Awesome、字体与中英文语言包均已复制到 `app`，运行时不再引用 `ref`。
 

@@ -52,8 +52,7 @@
 }
 
 
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
+:root[data-theme="dark"] {
         --bg-panel: #1e1e1e;
         --bg-popup: #1e1e1e;
         --bg-input: #2d2d2d;
@@ -68,7 +67,6 @@
         --tree-line: #64748b;
         --bookmark-thumb: #3c3c3d;
         --bookmark-thumb-hover: #545557;
-    }
 }
 
 /* 容器 Reset */
@@ -194,11 +192,6 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 :root[data-theme="dark"] {
     .panel-header { background: #1e1e1e; border-bottom: 1px solid #444; }
 }
-@media (prefers-color-scheme: dark) { 
-    :root:not([data-theme="light"]){
-        .panel-header { background: #1e1e1e; border-bottom: 1px solid #444; }
-    }
-}
 
 .panel-actions { display: flex; justify-content: space-between; gap: 0; align-items: center; flex: 1; }
 .panel-actions button {
@@ -227,13 +220,6 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
     .panel-actions button { background: rgb(63, 63, 63); color: #e4e4e4; }
     .panel-actions button:hover:not(:disabled) { background: rgb(80, 80, 80); transform: translateY(-2px); }
     .panel-actions button.danger:hover { background: rgba(239, 68, 68, 0.2); }
-}
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-        .panel-actions button { background: rgb(63, 63, 63); color: #e4e4e4; }
-        .panel-actions button:hover:not(:disabled) { background: rgb(80, 80, 80); transform: translateY(-2px); }
-        .panel-actions button.danger:hover { background: rgba(239, 68, 68, 0.2); }
-    }
 }
 
 /* --- 搜索栏 --- */
@@ -264,11 +250,6 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
     .breadcrumb { background: #1e1e1e; } 
   }
   
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-        .breadcrumb { background: #1e1e1e; } 
-    }
-}
 .breadcrumb-item { cursor: pointer; color: var(--accent-orange); 
     padding: 2px 6px; border-radius: 6px; transition: 0.2s;
     border: 2px dashed transparent;
@@ -362,8 +343,7 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
     );
 }
 
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
+:root[data-theme="dark"] {
         .item-content:hover .item-actions {
             background: linear-gradient(
                 to right, transparent 0%, rgba(63, 63, 63, 0) 40px, rgba(63, 63, 63, 1) 80px
@@ -392,7 +372,6 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
                 to right, transparent 0%, rgba(228,233,253, 0) 40px, rgba(134, 99, 26) 80px
             );
         }
-    }
 }
 
 .item-actions button {

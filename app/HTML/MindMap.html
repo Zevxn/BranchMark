@@ -31,7 +31,6 @@
         :root { 
             color-scheme: light; 
             --bg-color: #f4f6f8; 
-            --bg-color: #f4f6f8; 
             --bg-pattern: #dde1e6;
             --bg-secondary: #f1f5f9;
             --primary: #007bff; 
@@ -71,16 +70,19 @@
             /* 代码块配色 (亮色模式 - 仿GitHub) */
             --code-block-bg: #f6f8fa; 
             --code-block-border: #d0d7de;
+            --code-line-separator: rgba(31, 35, 40, 0.10);
             --code-inline-bg: rgba(175,184,193,0.2);
             --code-font-family: ui-monospace, SFMono-Regular, "SF Mono", "Segoe UI Mono", "Roboto Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
             
         }
 
-        /* --- 2. 暗色模式适配 --- */
-        @media (prefers-color-scheme: dark) {
-            :root {
+        /* --- 2. 主题适配：只服从页面显式主题 --- */
+        :root[data-theme="light"] {
+            color-scheme: light;
+        }
+
+        :root[data-theme="dark"] {
                 color-scheme: dark;
-                --bg-color: #1e1e1e;
                 --bg-color: #1e1e1e;
                 --bg-pattern: #333333;
                 --bg-secondary: #383838; 
@@ -114,10 +116,9 @@
                 /* 代码块配色 (暗色模式 - 沉浸式微深色) */
                 --code-block-bg: rgba(0, 0, 0, 0.3); 
                 --code-block-border: #444;
+                --code-line-separator: rgba(255, 255, 255, 0.12);
                 --code-inline-bg: rgba(110,118,129,0.4);
-            }
-
-                /* 针对所有卡片上的工具图标 (Fold/Expand, Simple Mode Toggle) */
+            /* 针对所有卡片上的工具图标 (Fold/Expand, Simple Mode Toggle) */
             .tool-icon:hover {
                 filter: none;              /* 关键：悬停时取消反色滤镜 */
                 color: #ffffff !important; /* 强制变为纯白 */
@@ -461,7 +462,7 @@
             z-index: 100; 
         }
         /* 适配暗黑模式 */
-        @media (prefers-color-scheme: dark) {
+        :root[data-theme="dark"] {
             .node-card.selected {
                 box-shadow: 
                     0 0 0 1px #333,             /* 暗色模式下内圈用深色 */
@@ -782,7 +783,7 @@
             opacity: 0.6;
         }
         /* --- 暗色模式下便利贴 (Simple Mode) 适配 --- */
-         @media (prefers-color-scheme: dark) {
+        :root[data-theme="dark"] {
             
             /* 1. 默认无颜色便利贴：工具栏背景修复 */
             .node-card.simple .header-tools {
@@ -906,7 +907,7 @@
         }
 
         /* 暗黑模式适配 */
-        @media (prefers-color-scheme: dark) {
+        :root[data-theme="dark"] {
             .context-menu, .submenu {
                 background: #2d2d2d;
                 border-color: #444;
@@ -1137,77 +1138,24 @@
             opacity: 0.6; 
         }
 
-        /* 独立应用支持手动选择主题；显式选择优先于系统配色。 */
-        :root[data-theme="light"] {
-            color-scheme: light;
-            --bg-color: #f4f6f8;
-            --bg-pattern: #dde1e6;
-            --bg-secondary: #f1f5f9;
-            --primary: #007bff;
-            --line-color: #464343;
-            --text-color: #24292e;
-            --text-color-secondary: #666;
-            --bg-mix-ratio: 75%;
-            --card-bg: #ffffff;
-            --card-border: transparent;
-            --header-bg-top: #fff;
-            --header-bg-bottom: #f9f9f9;
-            --header-border-bottom: #eaecef;
-            --shadow-color: rgba(0, 0, 0, 0.189);
-            --shadow-color-hover: rgba(0, 0, 0, 0.219);
-            --shadow-color-active: rgba(24, 144, 255, 0.15);
-            --node-default-color: rgba(0, 0, 0, 0.15);
-            --toolbar-bg: white;
-            --toolbar-border: #e1e4e8;
-            --btn-hover: #f1f3f5;
-            --modal-mask: rgba(0, 0, 0, 0.45);
-            --modal-bg: #ffffff;
-            --scroll-track: transparent;
-            --scroll-thumb: #c1c7cd;
-            --scroll-thumb-hover: #a0a5aa;
-            --code-block-bg: #f6f8fa;
-            --code-block-border: #d0d7de;
-            --code-inline-bg: rgba(175, 184, 193, 0.2);
-        }
-
-        :root[data-theme="dark"] {
-            color-scheme: dark;
-            --bg-color: #1e1e1e;
-            --bg-pattern: #333333;
-            --bg-secondary: #383838;
-            --primary: #4dabf7;
-            --line-color: #8a8989;
-            --text-color: #e0e0e0;
-            --text-color-secondary: #aaaaaa;
-            --bg-mix-ratio: 97%;
-            --card-bg: #2d2d2d;
-            --card-border: #444;
-            --header-bg-top: #383838;
-            --header-bg-bottom: #303030;
-            --header-border-bottom: #444;
-            --shadow-color: rgba(0, 0, 0, 0.3);
-            --shadow-color-hover: rgba(0, 0, 0, 0.5);
-            --shadow-color-active: rgba(77, 171, 247, 0.3);
-            --node-default-color: rgba(255, 255, 255, 0.15);
-            --toolbar-bg: #2d2d2d;
-            --toolbar-border: #444;
-            --btn-hover: #3d3d3d;
-            --modal-mask: rgba(0, 0, 0, 0.7);
-            --modal-bg: #2d2d2d;
-            --scroll-track: rgba(255, 255, 255, 0.02);
-            --scroll-thumb: #4a4a4a;
-            --scroll-thumb-hover: #666666;
-            --code-block-bg: rgba(0, 0, 0, 0.3);
-            --code-block-border: #444;
-            --code-inline-bg: rgba(110, 118, 129, 0.4);
-        }
-
         #btn-theme-toggle { flex: 0 0 auto; }
+
+        /* WebView2 中 display:none 的文件输入框可能拒绝脚本触发选择器。
+           保留一个已渲染但不可见的控件，供 showPicker()/click() 使用。 */
+        .mindmap-file-input {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
 
     </style>
 </head>
 <body class="mindmap">
-    <input type="file" id="fileInput" accept=".json" style="display:none">
+    <input type="file" id="fileInput" class="mindmap-file-input" accept=".json,application/json" tabindex="-1" aria-hidden="true">
     <div class="toolbar">
         <button class="btn" id="btn-undo" title="Ctrl+Z" disabled><i class="ri-arrow-go-back-line"></i></button>
         <button class="btn" id="btn-redo" title="Ctrl+Y" disabled><i class="ri-arrow-go-forward-line"></i></button>

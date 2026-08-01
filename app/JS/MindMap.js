@@ -77,11 +77,68 @@ function applyImportedMindMap(content) {
 
 function initializeMindMapImport() {
     const openButton = $('#btn-open');
+    const fileInput = $('#fileInput');
     const quickerWebView = window.chrome && window.chrome.webview;
+    const quickerSubprogram = window.$quickerSp
+        || (typeof $quickerSp !== 'undefined' ? $quickerSp : null);
+
+    if (openButton && window.__DEEPCONVO_NATIVE_QUICKER_HOST__) {
+        openButton.onclick = async () => {
+            if (typeof quickerSubprogram !== 'function') {
+                showMindMapImportFeedback('❌ 当前 Quicker WebView2 不支持调用导入子程序');
+                return;
+            }
+
+            openButton.disabled = true;
+            try {
+                // Quicker 宿主不可靠地支持网页文件选择器，交给动作的原生模块选择并读取文件。
+                const result = await quickerSubprogram('DeepConvoImportMindMap', {});
+                if (!result || result.cancelled || result.success === false) return;
+                if (result.error) throw new Error(String(result.error));
+                if (typeof result.content !== 'string' || !result.content.trim()) {
+                    throw new Error('导入子程序没有返回 content 文本');
+                }
+                applyImportedMindMap(result.content);
+            } catch (error) {
+                console.error('[MindMap] Quicker 导入子程序执行失败:', error);
+                showMindMapImportFeedback(
+                    `❌ 导入失败：${error.message || '请检查 DeepConvoImportMindMap 子程序'}`,
+                );
+            } finally {
+                openButton.disabled = false;
+            }
+        };
+        return;
+    }
+
     if (!openButton || !window.__DEEPCONVO_LEGACY_QUICKER_HOST__ || !quickerWebView ||
         typeof quickerWebView.postMessage !== 'function' ||
         typeof quickerWebView.addEventListener !== 'function') {
-        if (openButton) openButton.onclick = () => $('#fileInput').click();
+        if (openButton) {
+            openButton.onclick = () => {
+                if (!fileInput) {
+                    showMindMapImportFeedback('❌ 找不到文件选择控件');
+                    return;
+                }
+                // 必须在用户点击的同步调用栈内打开选择器，WebView2 才会保留用户激活状态。
+                fileInput.value = '';
+                try {
+                    if (typeof fileInput.showPicker === 'function') {
+                        fileInput.showPicker();
+                        return;
+                    }
+                    fileInput.click();
+                } catch (error) {
+                    console.warn('[MindMap] showPicker 打开失败，尝试 click 回退:', error);
+                    try {
+                        fileInput.click();
+                    } catch (fallbackError) {
+                        console.error('[MindMap] 无法打开文件选择窗口:', fallbackError);
+                        showMindMapImportFeedback('❌ 无法打开文件选择窗口');
+                    }
+                }
+            };
+        }
         return;
     }
 
