@@ -696,20 +696,104 @@ function renderMarkdown(c) {
     return html;
 }
 
+const QUICKER_OPEN_PATH_OR_URL_SP = 'DeepConvoOpenPathOrUrl';
+const QUICKER_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'file:', 'zotero:', 'obsidian:']);
+
+function getMarkdownQuickerSubprogram() {
+    return window.$quickerSp
+        || (typeof $quickerSp !== 'undefined' ? $quickerSp : null);
+}
+
+function fileUrlToWindowsPath(fileUrl) {
+    const host = decodeURIComponent(fileUrl.hostname || '');
+    let path = decodeURIComponent(fileUrl.pathname || '').replace(/\//g, '\\');
+    if (host && host.toLowerCase() !== 'localhost') {
+        return `\\\\${host}\\${path.replace(/^\\+/, '')}`;
+    }
+    return path.replace(/^\\(?=[a-zA-Z]:)/, '');
+}
+
+function normalizeMarkdownLinkTarget(href) {
+    const rawHref = String(href || '').trim();
+    if (!rawHref) return null;
+    if (rawHref.startsWith('#')) return { kind: 'internal', target: rawHref };
+
+    let parsed;
+    try {
+        parsed = new URL(rawHref, document.baseURI || location.href);
+    } catch {
+        return null;
+    }
+
+    if (parsed.origin === location.origin && parsed.protocol !== 'file:') {
+        return { kind: 'internal', target: parsed.href };
+    }
+    if (!QUICKER_EXTERNAL_PROTOCOLS.has(parsed.protocol)) return null;
+    if (parsed.protocol === 'file:') {
+        return { kind: 'file', target: fileUrlToWindowsPath(parsed) };
+    }
+    return { kind: 'url', target: parsed.href };
+}
+
+async function openMarkdownLinkWithQuicker(href) {
+    const normalized = normalizeMarkdownLinkTarget(href);
+    if (!normalized) {
+        showTopToast('❌ 不支持打开该链接');
+        return false;
+    }
+    if (normalized.kind === 'internal') {
+        location.href = normalized.target;
+        return true;
+    }
+
+    const quickerSubprogram = getMarkdownQuickerSubprogram();
+    if (typeof quickerSubprogram !== 'function') {
+        showTopToast('❌ 当前 Quicker WebView2 不支持调用打开链接子程序');
+        return false;
+    }
+
+    try {
+        const result = await quickerSubprogram(QUICKER_OPEN_PATH_OR_URL_SP, {
+            target: normalized.target,
+            kind: normalized.kind,
+            originalHref: String(href || ''),
+        });
+        if (!result || result.cancelled || result.success === false) {
+            if (result?.error) throw new Error(String(result.error));
+            return false;
+        }
+        return true;
+    } catch (error) {
+        console.warn('[Markdown] Quicker 打开链接失败:', error);
+        showTopToast(`❌ 打开失败：${error.message || '请检查打开链接子程序'}`);
+        return false;
+    }
+}
+
 // =============================================================================
 // #region 富文本渲染
 // =============================================================================
 async function processRichContent(element) {
     if (!element) return;
-    // 所有 Markdown 链接均在新标签页打开
+    const useQuickerSubprogram = Boolean(
+        window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && getMarkdownQuickerSubprogram(),
+    );
     element.querySelectorAll('a[href]').forEach(link => {
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
+        if (useQuickerSubprogram) {
+            link.removeAttribute('target');
+            link.removeAttribute('rel');
+        } else {
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+        }
 
         // 防止点击链接时触发思维导图卡片的点击事件
         if (!link.dataset.linkClickBound) {
-            link.addEventListener('click', event => {
+            link.addEventListener('click', async event => {
                 event.stopPropagation();
+                if (!useQuickerSubprogram) return;
+                event.preventDefault();
+                await openMarkdownLinkWithQuicker(link.getAttribute('href'));
             });
 
             link.dataset.linkClickBound = 'true';

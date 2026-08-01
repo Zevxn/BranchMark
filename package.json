@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
     "build": "node scripts/build.mjs",
-    "test": "node tests/migration.test.mjs && node tests/storage-sync.test.mjs && node tests/export-subprogram.test.mjs",
+    "test": "node tests/migration.test.mjs && node tests/storage-sync.test.mjs && node tests/export-subprogram.test.mjs && node tests/markdown-link.test.mjs",
     "check": "node --check app/JS/standalone-locale-zh-cn.js && node --check app/JS/standalone-shim.js && node --check app/JS/static/i18n.js && node --check app/JS/MindMap.js && node --check app/JS/BookMarks.js && node --check app/JS/AI-Contents.js && node --check app/JS/utils.js && node --check app/JS/renderMD.js"
   }
 }

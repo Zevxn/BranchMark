@@ -354,7 +354,8 @@
                 return { success: true, isChro: true };
             case 'OPEN_SIDE_PANEL': {
                 const target = message.path ? new URL(message.path, appRoot).href : location.href;
-                window.open(target, '_blank', 'noopener');
+                if (nativeQuickerBridge) location.href = target;
+                else window.open(target, '_blank', 'noopener');
                 return { success: true };
             }
             default:

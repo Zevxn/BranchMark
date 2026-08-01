@@ -93,7 +93,6 @@ async function readQuickerExportDirectory() {
 async function selectQuickerExportDirectory() {
     const quickerSubprogram = getQuickerSubprogramBridge();
     if (typeof quickerSubprogram !== 'function') return null;
-
     try {
         const result = await quickerSubprogram(QUICKER_SELECT_EXPORT_DIRECTORY_SP, {});
         if (!result || result.cancelled || result.success === false) return null;

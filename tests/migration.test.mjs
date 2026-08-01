@@ -116,6 +116,13 @@ for (const [name, source] of [
 assert.match(renderMarkdown, /:root\[data-theme="dark"\][\s\S]*\.mermaid-container svg/);
 assert.match(renderMarkdown, /var\(--code-line-separator, var\(--code-block-border\)\)/);
 assert.doesNotMatch(renderMarkdown, /border-right-color:\s*#444/);
+assert.match(renderMarkdown, /DeepConvoOpenPathOrUrl/);
+assert.match(renderMarkdown, /function fileUrlToWindowsPath/);
+assert.match(renderMarkdown, /function normalizeMarkdownLinkTarget/);
+assert.match(renderMarkdown, /event\.preventDefault\(\)[\s\S]*openMarkdownLinkWithQuicker/);
+assert.match(bookmarks, /!newTab \|\| window\.__DEEPCONVO_NATIVE_QUICKER_HOST__/,
+    'Quicker 内部新窗请求应降级为当前窗口打开');
+assert.match(shim, /if \(nativeQuickerBridge\) location\.href = target/);
 
 const bookmarkReset = bookmarksCss.match(
     /\.custom-directory-container,\s*\.custom-directory-container \*,\s*\.bookmark-manager-container,\s*\.bookmark-manager-container \*\s*\{([^}]*)\}/,

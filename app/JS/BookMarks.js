@@ -1941,10 +1941,14 @@ class myBookmarkManager {
             // 打开预览窗口
             let win=null;
             await chrome.storage.local.set({'MindMapData': MindMapData, 'currentFileID': id,'MindMapAction':'open','fileName':fileName});// 防止刷新后数据丢失
-            if (!newTab) {
+            const openInCurrentView = !newTab || window.__DEEPCONVO_NATIVE_QUICKER_HOST__;
+            if (openInCurrentView) {
                 try{
                     await updateState(MindMapData,id,fileName);     // 如果已经打开了MindMap.html，直接渲染
                     console.log('就地渲染思维导图');
+                    if (newTab && window.__DEEPCONVO_NATIVE_QUICKER_HOST__) {
+                        showTopToast('ℹ️ Quicker 中已在当前窗口打开');
+                    }
                 }catch(e){
                     console.log('[openMindMap] 渲染问答对话失败:', e);
                 }

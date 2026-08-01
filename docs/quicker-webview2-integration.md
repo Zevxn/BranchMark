@@ -72,12 +72,48 @@ C#，只使用 Quicker 自带模块：
 变量名和子程序名称需要完全一致。点击网页“导入”按钮后，网页会异步等待子程序返回，再解析
 `content` 并载入脑图。这条路径使用 Quicker 原生文件对话框，不依赖 WebView2 的网页上传能力。
 
-## 5. 配置 Canvas 导出子程序
+## 5. 配置 Markdown 链接打开子程序
+
+Quicker 模式会拦截思维导图 Markdown 中的外部链接，通过以下子程序交给 Windows 默认程序打开：
+
+### `DeepConvoOpenPathOrUrl`
+
+输入变量：
+
+| 输入变量 | 类型 | 说明 |
+| --- | --- | --- |
+| `target` | 文本 | 已规范化的 Windows 文件路径或网址 |
+| `kind` | 文本 | `file` 表示本地文件，`url` 表示外部网址 |
+| `originalHref` | 文本 | Markdown 中未经转换的原始链接 |
+
+子程序根据 `kind` 使用 Quicker 的“打开文件/文件夹”或“打开网址”模块，也可以统一使用支持
+Windows Shell 默认程序的打开模块，并返回：
+
+| 输出变量 | 类型 | 说明 |
+| --- | --- | --- |
+| `success` | 布尔 | 默认设为 `false`；成功发起打开后设为 `true` |
+| `cancelled` | 布尔 | 正常执行时为 `false` |
+| `error` | 文本 | 可选；失败原因，没有错误时留空 |
+
+例如 Markdown：
+
+```markdown
+[查看论文](<file:///D:/Zotero/storage/example/paper.pdf>)
+```
+
+网页会把它转换为 `D:\Zotero\storage\example\paper.pdf` 后传给子程序。PDF、Word、图片等文件
+均由 Windows 文件关联决定使用哪个默认程序打开。`http`、`https`、`mailto`、`zotero` 和
+`obsidian` 链接也通过同一子程序打开；`javascript:`、`data:` 等危险协议会被拒绝。
+
+普通浏览器不调用该子程序，仍使用浏览器原生链接行为。Quicker 内部页面的新窗请求则自动
+降级为当前窗口打开，避免新 WebView2 无法识别本地虚拟域名。
+
+## 6. 配置 Canvas 导出子程序
 
 Quicker WebView2 不能可靠地使用网页 `showDirectoryPicker()`，而且 Quicker 返回的目录路径不能转换成
 浏览器的 `FileSystemDirectoryHandle`。因此原生模式使用两个子程序完成目录选择和文件写入。
 
-### 5.1 `DeepConvoSelectExportFolder`
+### 6.1 `DeepConvoSelectExportFolder`
 
 该子程序不需要输入参数，调用 Quicker 的“选择文件夹”模块，并返回：
 
@@ -90,7 +126,7 @@ Quicker WebView2 不能可靠地使用网页 `showDirectoryPicker()`，而且 Qu
 用户取消时必须返回 `cancelled = true`，不要把它固定为 `false`。网页只有在选择成功后才会更新保存目录，
 所以取消切换不会清除原目录。
 
-### 5.2 `DeepConvoSaveExportFile`
+### 6.2 `DeepConvoSaveExportFile`
 
 该子程序接收：
 
@@ -112,7 +148,7 @@ Quicker WebView2 不能可靠地使用网页 `showDirectoryPicker()`，而且 Qu
 目录选择子程序；导出 Canvas 时调用文件保存子程序。普通浏览器仍使用原来的
 `showDirectoryPicker() + IndexedDB FileSystemHandle`，不会调用 Quicker 子程序。
 
-## 6. 数据如何保存
+## 7. 数据如何保存
 
 `app_data_json` 是核心业务状态的单一 JSON 容器：
 
@@ -134,7 +170,7 @@ Quicker WebView2 不能可靠地使用网页 `showDirectoryPicker()`，而且 Qu
 新增、重命名、移动或删除后，业务代码发送 `IDB_SET`，适配层更新内存状态并立即把完整 JSON
 写回 `app_data_json`。脑图内容采用同样流程，因此关闭窗口后再次打开仍可恢复。
 
-## 7. 快速自检
+## 8. 快速自检
 
 新动作第一次打开后，可以按以下顺序验证：
 
@@ -145,6 +181,7 @@ Quicker WebView2 不能可靠地使用网页 `showDirectoryPicker()`，而且 Qu
 5. 点击“导入”，确认会由 `DeepConvoImportMindMap` 子程序弹出 Quicker 原生文件选择窗口。
 6. 点击“切换保存目录”，确认 `DeepConvoSelectExportFolder` 能返回目录路径。
 7. 导出 Canvas，确认 `DeepConvoSaveExportFile` 将文件写入刚选择的目录。
+8. 在 Markdown 中点击本地文件或网址，确认 `DeepConvoOpenPathOrUrl` 使用系统默认程序打开。
 
 如果数据不能恢复，优先检查：变量名是否完全一致、SaveState 是否开启、WebView2 是否提供
 `$quickerSync`，以及动作是否在窗口关闭前就提前结束。
