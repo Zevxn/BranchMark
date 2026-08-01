@@ -90,6 +90,11 @@ assert.doesNotMatch(utils, /chatgpt\.com|deepseek\.com|initLineNumber|initHighli
 assert.match(helpers, /function openQAdata/);
 assert.match(helpers, /function buildQAList/);
 assert.match(helpers, /function saveFileDirectly/);
+assert.match(helpers, /function changeObsidianPath/);
+assert.match(helpers, /DeepConvoSelectExportFolder/);
+assert.match(helpers, /DeepConvoSaveExportFile/);
+assert.match(helpers, /obsidian_export_directory/);
+assert.match(mindMap, /await changeObsidianPath\(\)/);
 assert.doesNotMatch(helpers, /websiteConfigs|initDirectory|HistoryListMonitor|HighlightManager/);
 
 assert.doesNotMatch(bookmarks, /initI18n|app_lang|mountToContainer|renderEmbeddedView|checkUIMM/);

@@ -72,7 +72,47 @@ C#，只使用 Quicker 自带模块：
 变量名和子程序名称需要完全一致。点击网页“导入”按钮后，网页会异步等待子程序返回，再解析
 `content` 并载入脑图。这条路径使用 Quicker 原生文件对话框，不依赖 WebView2 的网页上传能力。
 
-## 5. 数据如何保存
+## 5. 配置 Canvas 导出子程序
+
+Quicker WebView2 不能可靠地使用网页 `showDirectoryPicker()`，而且 Quicker 返回的目录路径不能转换成
+浏览器的 `FileSystemDirectoryHandle`。因此原生模式使用两个子程序完成目录选择和文件写入。
+
+### 5.1 `DeepConvoSelectExportFolder`
+
+该子程序不需要输入参数，调用 Quicker 的“选择文件夹”模块，并返回：
+
+| 输出变量 | 类型 | 说明 |
+| --- | --- | --- |
+| `directoryPath` | 文本 | 用户选择的文件夹完整路径 |
+| `cancelled` | 布尔 | 默认设为 `true`；选择成功后设为 `false` |
+| `error` | 文本 | 可选；失败原因，没有错误时留空 |
+
+用户取消时必须返回 `cancelled = true`，不要把它固定为 `false`。网页只有在选择成功后才会更新保存目录，
+所以取消切换不会清除原目录。
+
+### 5.2 `DeepConvoSaveExportFile`
+
+该子程序接收：
+
+| 输入变量 | 类型 | 说明 |
+| --- | --- | --- |
+| `directoryPath` | 文本 | 上一个子程序选择的文件夹 |
+| `filename` | 文本 | 要保存的 `.canvas` 文件名 |
+| `content` | 文本 | 完整文件内容 |
+
+将 `directoryPath` 和 `filename` 组合为完整路径后，通过 Quicker 的文件写入模块保存 `content`，并返回：
+
+| 输出变量 | 类型 | 说明 |
+| --- | --- | --- |
+| `success` | 布尔 | 默认设为 `false`；文件写入成功后设为 `true` |
+| `cancelled` | 布尔 | 正常写入时为 `false` |
+| `error` | 文本 | 可选；失败原因，没有错误时留空 |
+
+网页会把已选择路径保存到 `app_data_json.chrome.obsidian_export_directory`。点击“切换保存目录”时调用
+目录选择子程序；导出 Canvas 时调用文件保存子程序。普通浏览器仍使用原来的
+`showDirectoryPicker() + IndexedDB FileSystemHandle`，不会调用 Quicker 子程序。
+
+## 6. 数据如何保存
 
 `app_data_json` 是核心业务状态的单一 JSON 容器：
 
@@ -94,7 +134,7 @@ C#，只使用 Quicker 自带模块：
 新增、重命名、移动或删除后，业务代码发送 `IDB_SET`，适配层更新内存状态并立即把完整 JSON
 写回 `app_data_json`。脑图内容采用同样流程，因此关闭窗口后再次打开仍可恢复。
 
-## 6. 快速自检
+## 7. 快速自检
 
 新动作第一次打开后，可以按以下顺序验证：
 
@@ -103,6 +143,8 @@ C#，只使用 Quicker 自带模块：
 3. 在 Quicker 动作变量中确认 `app_data_json` 已不再是初始值。
 4. 再次运行动作，确认文件夹和脑图内容能够恢复。
 5. 点击“导入”，确认会由 `DeepConvoImportMindMap` 子程序弹出 Quicker 原生文件选择窗口。
+6. 点击“切换保存目录”，确认 `DeepConvoSelectExportFolder` 能返回目录路径。
+7. 导出 Canvas，确认 `DeepConvoSaveExportFile` 将文件写入刚选择的目录。
 
 如果数据不能恢复，优先检查：变量名是否完全一致、SaveState 是否开启、WebView2 是否提供
 `$quickerSync`，以及动作是否在窗口关闭前就提前结束。

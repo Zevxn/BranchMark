@@ -662,14 +662,10 @@ function initializeMapToolbar() {
         exportToVerticalCanvas();
     };
     $('#btn-change-folder').onclick = async() => {
-        await resetObsidianPath();
-        // 2. 立即触发选择新目录 (因为句柄已空，getObsidianHandle 会自动弹窗)
-        const newHandle = await getObsidianHandle();
-        if (newHandle) {
+        const newDirectory = await changeObsidianPath();
+        if (newDirectory) {
             showTopToast('✅ 新目录设置成功！');
         }
-        // 关闭菜单
-        return;
     };
     initializeMindMapTheme();
 }

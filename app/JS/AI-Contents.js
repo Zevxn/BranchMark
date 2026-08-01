@@ -72,6 +72,43 @@ function downloadFile(content, filename, mimeType) {
 const FILE_HANDLE_DB_NAME = 'AI_File_Handle_DB';
 const FILE_HANDLE_STORE_NAME = 'handles';
 const OBSIDIAN_HANDLE_KEY = 'obsidian_dir_handle';
+const QUICKER_EXPORT_DIRECTORY_KEY = 'obsidian_export_directory';
+const QUICKER_SELECT_EXPORT_DIRECTORY_SP = 'DeepConvoSelectExportFolder';
+const QUICKER_SAVE_EXPORT_FILE_SP = 'DeepConvoSaveExportFile';
+
+function getQuickerSubprogramBridge() {
+    return window.$quickerSp
+        || (typeof $quickerSp !== 'undefined' ? $quickerSp : null);
+}
+
+function isNativeQuickerExport() {
+    return Boolean(window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && getQuickerSubprogramBridge());
+}
+
+async function readQuickerExportDirectory() {
+    const result = await chrome.storage.local.get(QUICKER_EXPORT_DIRECTORY_KEY);
+    return String(result?.[QUICKER_EXPORT_DIRECTORY_KEY] || '').trim();
+}
+
+async function selectQuickerExportDirectory() {
+    const quickerSubprogram = getQuickerSubprogramBridge();
+    if (typeof quickerSubprogram !== 'function') return null;
+
+    try {
+        const result = await quickerSubprogram(QUICKER_SELECT_EXPORT_DIRECTORY_SP, {});
+        if (!result || result.cancelled || result.success === false) return null;
+        if (result.error) throw new Error(String(result.error));
+
+        const directoryPath = String(result.directoryPath || '').trim();
+        if (!directoryPath) throw new Error('选择目录子程序没有返回 directoryPath');
+        await chrome.storage.local.set({ [QUICKER_EXPORT_DIRECTORY_KEY]: directoryPath });
+        return directoryPath;
+    } catch (error) {
+        console.warn('[Export] Quicker 选择保存目录失败:', error);
+        showTopToast(`❌ 选择保存目录失败：${error.message || '请检查目录选择子程序'}`);
+        return null;
+    }
+}
 
 function openFileHandleDatabase() {
     return new Promise((resolve, reject) => {
@@ -157,10 +194,61 @@ async function getObsidianHandle() {
 }
 
 async function resetObsidianPath() {
+    if (isNativeQuickerExport()) {
+        await chrome.storage.local.remove(QUICKER_EXPORT_DIRECTORY_KEY);
+        return;
+    }
     await writeFileHandle(OBSIDIAN_HANDLE_KEY, null);
 }
 
+async function changeObsidianPath() {
+    if (isNativeQuickerExport()) return await selectQuickerExportDirectory();
+    if (typeof window.showDirectoryPicker !== 'function') {
+        showTopToast(getI18nText('toast.dir_fail'));
+        return null;
+    }
+
+    try {
+        const directoryHandle = await window.showDirectoryPicker({
+            id: 'obsidian-vault',
+            mode: 'readwrite',
+            startIn: 'documents',
+        });
+        await writeFileHandle(OBSIDIAN_HANDLE_KEY, directoryHandle);
+        return directoryHandle;
+    } catch (error) {
+        if (error?.name !== 'AbortError') {
+            console.warn('[Export] 切换保存目录失败:', error);
+            showTopToast(getI18nText('toast.dir_fail'));
+        }
+        return null;
+    }
+}
+
 async function saveFileDirectly(filename, content) {
+    if (isNativeQuickerExport()) {
+        try {
+            let directoryPath = await readQuickerExportDirectory();
+            if (!directoryPath) directoryPath = await selectQuickerExportDirectory();
+            if (!directoryPath) return false;
+
+            const result = await getQuickerSubprogramBridge()(QUICKER_SAVE_EXPORT_FILE_SP, {
+                directoryPath,
+                filename,
+                content,
+            });
+            if (!result || result.cancelled || result.success === false) {
+                if (result?.error) throw new Error(String(result.error));
+                return false;
+            }
+            return true;
+        } catch (error) {
+            console.warn('[Export] Quicker 写入导出文件失败:', error);
+            showTopToast(`❌ 写入文件失败：${error.message || '请检查文件保存子程序'}`);
+            return false;
+        }
+    }
+
     if (typeof window.showDirectoryPicker !== 'function') return false;
     try {
         const directoryHandle = await getObsidianHandle();
