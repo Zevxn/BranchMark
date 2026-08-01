@@ -306,6 +306,74 @@ imgStyleSheet.textContent = `
     .md-content ul, .md-content ol { margin-bottom: 6px; padding-left: 24px; }
     .md-content li { margin-bottom: 4px; }
 
+    /* Markdown 链接：沿用主题色，避免浏览器默认的高饱和蓝色和粗重下划线 */
+    .md-content a {
+        color: var(--primary);
+        font-weight: 500;
+        text-decoration-line: underline;
+        text-decoration-thickness: 1px;
+        text-decoration-color: currentColor;
+        text-underline-offset: 0.18em;
+        overflow-wrap: anywhere;
+        cursor: pointer;
+        transition: color 0.15s ease, background-color 0.15s ease,
+            border-color 0.15s ease, transform 0.1s ease;
+    }
+
+    .md-content a:hover {
+        background-color: var(--btn-hover);
+        text-decoration-thickness: 2px;
+    }
+
+    .md-content a:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+        border-radius: 3px;
+    }
+
+    /* 本地文件使用附件式入口，限制继承字号，长文件名也能自然换行 */
+    .md-content a.md-file-link {
+        display: inline-flex;
+        align-items: flex-start;
+        gap: 7px;
+        max-width: 100%;
+        box-sizing: border-box;
+        padding: 6px 9px;
+        border: 1px solid var(--toolbar-border);
+        border-radius: 6px;
+        background-color: var(--bg-secondary);
+        color: var(--text-color);
+        font-size: clamp(13px, 0.92em, 15px);
+        font-weight: 500;
+        line-height: 1.45;
+        text-decoration: none;
+        vertical-align: middle;
+    }
+
+    .md-content a.md-file-link:hover {
+        border-color: var(--primary);
+        background-color: var(--btn-hover);
+        text-decoration: none;
+    }
+
+    .md-content a.md-file-link:active {
+        transform: translateY(1px);
+    }
+
+    .md-file-link-icon {
+        flex: 0 0 auto;
+        margin-top: 0.12em;
+        color: var(--primary);
+        font-size: 1.08em;
+        line-height: 1.2;
+    }
+
+    .md-file-link-label {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
     .md-content img { max-width: 100%; border-radius: 4px; }
     .md-content table { border-collapse: collapse; width: 100%; margin: 8px 0; display: table; }
     .md-content th, .md-content td { border: 1px solid var(--code-block-border); padding: 6px 13px; color: var(--text-color); }
@@ -779,6 +847,23 @@ async function processRichContent(element) {
         window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && getMarkdownQuickerSubprogram(),
     );
     element.querySelectorAll('a[href]').forEach(link => {
+        const normalizedTarget = normalizeMarkdownLinkTarget(link.getAttribute('href'));
+        const isLocalFile = normalizedTarget?.kind === 'file';
+        link.classList.toggle('md-file-link', isLocalFile);
+
+        if (isLocalFile && !link.dataset.fileLinkDecorated) {
+            const label = document.createElement('span');
+            label.className = 'md-file-link-label';
+            while (link.firstChild) label.appendChild(link.firstChild);
+
+            const icon = document.createElement('i');
+            icon.className = 'ri-file-paper-2-line md-file-link-icon';
+            icon.setAttribute('aria-hidden', 'true');
+
+            link.append(icon, label);
+            link.dataset.fileLinkDecorated = 'true';
+        }
+
         if (useQuickerSubprogram) {
             link.removeAttribute('target');
             link.removeAttribute('rel');

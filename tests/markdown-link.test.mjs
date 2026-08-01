@@ -7,6 +7,12 @@ const markedSource = await readFile('app/libs/marked.min.js', 'utf8');
 const helperStart = renderMarkdown.indexOf("const QUICKER_OPEN_PATH_OR_URL_SP");
 const helperEnd = renderMarkdown.indexOf('// =============================================================================', helperStart);
 assert.ok(helperStart >= 0 && helperEnd > helperStart, '应能定位 Markdown 链接打开适配代码');
+assert.match(renderMarkdown, /\.md-content a\.md-file-link\s*\{/,
+    '本地文件链接应使用独立的附件式样式');
+assert.match(renderMarkdown, /font-size:\s*clamp\(13px, 0\.92em, 15px\)/,
+    '本地文件链接字号不应随大字号容器无限放大');
+assert.match(renderMarkdown, /ri-file-paper-2-line md-file-link-icon/,
+    '本地文件链接应复用现有 Remix Icon 文件图标');
 
 const calls = [];
 const toasts = [];
