@@ -32,6 +32,8 @@ assert.match(shim, /chromePrefix \+ 'app_lang', JSON\.stringify\('zh-CN'\)/);
 assert.match(shim, /__DEEPCONVO_STANDALONE_ZH_CN__/);
 assert.match(shim, /locales\\\/zh_CN\\\/messages/);
 assert.match(shim, /__DEEPCONVO_QUICKER_STATE__/);
+assert.match(shim, /\$quickerSync/);
+assert.match(shim, /__DEEPCONVO_NATIVE_QUICKER_HOST__/);
 assert.match(shim, /DEEPCONVO_PERSIST:/);
 assert.match(shim, /quickerWebView\.postMessage/);
 assert.match(shim, /syncUpdatedAt = Date\.now\(\)/);
@@ -58,6 +60,10 @@ for (const removedMarkup of ['id="newItemBtn"', 'id="filterBtn"', 'id="filterDro
 }
 assert.doesNotMatch(bookmarks, /await initDirectory\(\)/);
 assert.match(bookmarks, /initializeSearch\(\)/);
+assert.match(bookmarks, /chromeGet\('embeddedExpandedFolders'\)/);
+assert.match(bookmarks, /chromeGet\('localEmptyFolders'\)/);
+assert.match(bookmarks, /chrome\.storage\.local\.set\(\{'embeddedExpandedFolders':/);
+assert.match(bookmarks, /chrome\.storage\.local\.set\(\{'localEmptyFolders':/);
 
 const bookmarksCss = await readFile('app/CSS/BookMarks.css', 'utf8');
 assert.match(bookmarksCss, /\.panel-actions \{[^}]*justify-content: space-between;[^}]*gap: 0;/);

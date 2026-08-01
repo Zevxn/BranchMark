@@ -11,8 +11,30 @@
     const quickerWebView = window.chrome && window.chrome.webview
         ? window.chrome.webview
         : null;
-    const initialQuickerState = window.__DEEPCONVO_QUICKER_STATE__;
-    const quickerState = quickerWebView
+    const hasLegacyQuickerState = Object.prototype.hasOwnProperty.call(
+        window,
+        '__DEEPCONVO_QUICKER_STATE__',
+    );
+    const legacyQuickerHost = Boolean(quickerWebView && hasLegacyQuickerState);
+    const nativeQuickerBridge = !legacyQuickerHost
+        ? (window.$quickerSync || (typeof $quickerSync !== 'undefined' ? $quickerSync : null))
+        : null;
+
+    function readNativeQuickerState() {
+        if (!nativeQuickerBridge || typeof nativeQuickerBridge.getVar !== 'function') return null;
+        try {
+            const raw = nativeQuickerBridge.getVar('app_data_json');
+            return typeof raw === 'string' ? JSON.parse(raw) : raw;
+        } catch (error) {
+            console.warn('[Standalone] 读取 Quicker 原生 WebView2 状态失败:', error);
+            return null;
+        }
+    }
+
+    const initialQuickerState = legacyQuickerHost
+        ? window.__DEEPCONVO_QUICKER_STATE__
+        : readNativeQuickerState();
+    const quickerState = legacyQuickerHost || nativeQuickerBridge
         ? {
             version: 1,
             syncUpdatedAt: initialQuickerState && Number.isFinite(initialQuickerState.syncUpdatedAt)
@@ -26,11 +48,13 @@
                 : {},
         }
         : null;
+    window.__DEEPCONVO_LEGACY_QUICKER_HOST__ = legacyQuickerHost;
+    window.__DEEPCONVO_NATIVE_QUICKER_HOST__ = Boolean(nativeQuickerBridge);
     let databasePromise = null;
 
     // deepconvo-mindmap.local 是 WebView2 当前实例的虚拟域名，不能交给系统 Edge。
     // Quicker 中的内部新窗请求交由 C# 创建带相同映射的子 WebView2；普通 HTML 不改写。
-    if (quickerWebView) {
+    if (legacyQuickerHost) {
         const nativeWindowOpen = window.open.bind(window);
         window.open = function openStandaloneWindow(url, target, features) {
             let resolvedUrl = null;
@@ -117,11 +141,22 @@
     }
 
     function persistQuickerState() {
-        if (!quickerWebView || !quickerState) return;
+        if (!quickerState) return;
         // Quicker 进程会缓存动作状态，外部同步工具替换 JSON 后不会刷新该缓存。
         // 持久化时记录跨设备时间，供 Quicker 启动层在内存与磁盘之间选择新版本。
         quickerState.syncUpdatedAt = Date.now();
-        quickerWebView.postMessage(`DEEPCONVO_PERSIST:${JSON.stringify(quickerState)}`);
+        const serializedState = JSON.stringify(quickerState);
+        if (legacyQuickerHost) {
+            quickerWebView.postMessage(`DEEPCONVO_PERSIST:${serializedState}`);
+            return;
+        }
+        if (nativeQuickerBridge && typeof nativeQuickerBridge.setVar === 'function') {
+            try {
+                nativeQuickerBridge.setVar('app_data_json', serializedState);
+            } catch (error) {
+                console.warn('[Standalone] 写入 Quicker 原生 WebView2 状态失败:', error);
+            }
+        }
     }
 
     function readLocalValue(prefix, key) {

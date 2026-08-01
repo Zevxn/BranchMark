@@ -65,6 +65,13 @@ Quicker 打包时只保留现代 WebView2 实际使用的 `.woff2` 字体，排�
 
 当前本机动作 ID：`0ec2f0b4-429d-4274-9831-7432d7125a19`。
 
+### 手工接入 Quicker 原生 WebView2
+
+网页底层已支持 Quicker 原生 WebView2 提供的 `$quickerSync` 接口。你可以自行新建动作，
+让 WebView2 加载构建后的 `dist/index.html`；无需 C#，也无需由本仓库创建或修改动作。
+
+动作变量、虚拟域名映射和数据结构见 [Quicker WebView2 手工接入说明](docs/quicker-webview2-integration.md)。
+
 ### 单机图形兼容模式
 
 如果只有某台电脑的 WebView2 出现光标或图形渲染异常，可在该电脑设置用户环境变量 `DEEPCONVO_MINDMAP_GRAPHICS_MODE`：

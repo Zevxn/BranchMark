@@ -333,10 +333,27 @@ class myBookmarkManager {
             const savedFolderId=await chromeGet('currentFolderId');
             const isInitializedData=await chromeGet('isInitializedData');
             const savedViewMode = await chromeGet('viewMode');
-            const localExpanded = localStorage.getItem('embeddedExpandedFolders');
-            const localEmpty = localStorage.getItem('localEmptyFolders');
-            if (localExpanded) this.embeddedExpandedFolders = new Set(JSON.parse(localExpanded));
-            if (localEmpty) this.localEmptyFolders = new Set(JSON.parse(localEmpty));
+            const savedEmbeddedExpanded = await chromeGet('embeddedExpandedFolders');
+            const savedLocalEmpty = await chromeGet('localEmptyFolders');
+            // 兼容升级前直接写入 localStorage 的数据；后续统一交给存储适配层。
+            const legacyEmbeddedExpanded = localStorage.getItem('embeddedExpandedFolders');
+            const legacyLocalEmpty = localStorage.getItem('localEmptyFolders');
+            const embeddedExpanded = savedEmbeddedExpanded
+                ?? (legacyEmbeddedExpanded ? JSON.parse(legacyEmbeddedExpanded) : null);
+            const localEmpty = savedLocalEmpty
+                ?? (legacyLocalEmpty ? JSON.parse(legacyLocalEmpty) : null);
+            if (embeddedExpanded) this.embeddedExpandedFolders = new Set(embeddedExpanded);
+            if (localEmpty) this.localEmptyFolders = new Set(localEmpty);
+            const migratedLocalState = {};
+            if (savedEmbeddedExpanded == null && embeddedExpanded) {
+                migratedLocalState.embeddedExpandedFolders = embeddedExpanded;
+            }
+            if (savedLocalEmpty == null && localEmpty) {
+                migratedLocalState.localEmptyFolders = localEmpty;
+            }
+            if (Object.keys(migratedLocalState).length) {
+                await chrome.storage.local.set(migratedLocalState);
+            }
 
             if (savedData) {
                 this.data = savedData;
@@ -2289,7 +2306,7 @@ class myBookmarkManager {
         this.renderInsertNode(folderId, parentId);
         if (this.embedded || true){
             this.localEmptyFolders.add(folderId)
-            localStorage.setItem('localEmptyFolders', JSON.stringify([...this.localEmptyFolders]))
+            await chrome.storage.local.set({'localEmptyFolders': [...this.localEmptyFolders]})
         }
         this.hideModal('newFolderModal');
 
@@ -3253,7 +3270,7 @@ class myBookmarkManager {
             this.embeddedExpandedFolders.delete(folderId);
             if (childrenContainer) childrenContainer.classList.remove('expanded');
         }
-        localStorage.setItem('embeddedExpandedFolders', JSON.stringify([...this.embeddedExpandedFolders]))
+        await chrome.storage.local.set({'embeddedExpandedFolders': [...this.embeddedExpandedFolders]})
         await initEmbedPreview();
     }
     /**

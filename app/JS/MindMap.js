@@ -30,7 +30,8 @@ function applyMindMapTheme(theme) {
 
 function notifyQuickerTheme(theme) {
     const webView = window.chrome && window.chrome.webview;
-    if (webView && typeof webView.postMessage === 'function') {
+    if (window.__DEEPCONVO_LEGACY_QUICKER_HOST__ &&
+        webView && typeof webView.postMessage === 'function') {
         webView.postMessage(`DEEPCONVO_THEME:${theme}`);
     }
 }
@@ -77,7 +78,7 @@ function applyImportedMindMap(content) {
 function initializeMindMapImport() {
     const openButton = $('#btn-open');
     const quickerWebView = window.chrome && window.chrome.webview;
-    if (!openButton || !quickerWebView ||
+    if (!openButton || !window.__DEEPCONVO_LEGACY_QUICKER_HOST__ || !quickerWebView ||
         typeof quickerWebView.postMessage !== 'function' ||
         typeof quickerWebView.addEventListener !== 'function') {
         if (openButton) openButton.onclick = () => $('#fileInput').click();

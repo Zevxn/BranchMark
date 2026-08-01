@@ -94,4 +94,91 @@ assert.deepEqual(latestState.chrome.MindMapData, savedSnapshot, '启动快照应
 assert.equal(latestState.chrome.currentFileID, 'id_saved');
 assert.equal(latestState.chrome.MindMapAction, 'open');
 
-console.log('存储同步校验通过：保存收藏思维导图时同步更新下次启动快照。');
+const nativeWrites = [];
+const nativeInitialState = {
+    version: 1,
+    chrome: { app_lang: 'zh-CN', currentFileID: 'native_file' },
+    idb: {},
+};
+const nativeLocation = { href: 'https://deepconvo-mindmap-native.local/HTML/MindMap.html' };
+const nativeDocument = {
+    currentScript: { src: 'https://deepconvo-mindmap-native.local/JS/standalone-shim.js' },
+    createElement() {
+        return { click() {} };
+    },
+};
+const nativeBridge = {
+    getVar(key) {
+        assert.equal(key, 'app_data_json');
+        return JSON.stringify(nativeInitialState);
+    },
+    setVar(key, value) {
+        nativeWrites.push({ key, value });
+    },
+};
+const nativeWindow = {
+    $quickerSync: nativeBridge,
+    chrome: { webview: { postMessage() {} } },
+    fetch: async () => { throw new Error('not used'); },
+    open() {},
+    location: nativeLocation,
+    document: nativeDocument,
+};
+const nativeContext = vm.createContext({
+    URL,
+    Response,
+    clearTimeout,
+    console,
+    document: nativeDocument,
+    localStorage: {
+        getItem() { return null; },
+        setItem() {},
+        removeItem() {},
+        key() { return null; },
+        length: 0,
+    },
+    location: nativeLocation,
+    queueMicrotask,
+    setTimeout,
+    structuredClone,
+    window: nativeWindow,
+});
+
+vm.runInContext(shim, nativeContext, { filename: 'standalone-shim-native.js' });
+assert.equal(nativeWindow.__DEEPCONVO_NATIVE_QUICKER_HOST__, true);
+assert.equal(nativeWindow.__DEEPCONVO_LEGACY_QUICKER_HOST__, false);
+
+await nativeWindow.chrome.storage.local.set({ mindmap_theme: 'dark' });
+assert.ok(nativeWrites.length > 0, '原生 WebView2 应通过 $quickerSync 写回动作状态');
+assert.equal(nativeWrites.at(-1).key, 'app_data_json');
+
+const nativeBookmarkData = [{ id: 'folder_1', title: '测试文件夹', type: 'folder', children: [] }];
+await nativeWindow.chrome.runtime.sendMessage({
+    action: 'IDB_SET',
+    data: { bookmarkData: nativeBookmarkData },
+});
+const nativeBookmarkResult = await nativeWindow.chrome.runtime.sendMessage({
+    action: 'IDB_GET',
+    keys: 'bookmarkData',
+});
+assert.equal(nativeBookmarkResult.success, true);
+assert.deepEqual(nativeBookmarkResult.data.bookmarkData, nativeBookmarkData);
+
+const nativeMapSnapshot = {
+    data: { id: 'root', topic: '原生 WebView 收藏脑图' },
+    view: { tx: 10, ty: 20, scale: 1 },
+    scrollMap: {},
+};
+await nativeWindow.chrome.runtime.sendMessage({
+    action: 'IDB_SET',
+    data: { 'MindMapData.__REF__native_file-extra': nativeMapSnapshot },
+});
+
+const nativePersisted = JSON.parse(nativeWrites.at(-1).value);
+assert.equal(nativePersisted.chrome.mindmap_theme, 'dark');
+assert.equal(nativePersisted.chrome.currentFileID, 'native_file');
+assert.deepEqual(nativePersisted.chrome.MindMapData, nativeMapSnapshot);
+assert.deepEqual(nativePersisted.idb.bookmarkData, nativeBookmarkData);
+assert.deepEqual(nativePersisted.idb['MindMapData.__REF__native_file-extra'], nativeMapSnapshot);
+
+console.log('存储同步校验通过：旧宿主和 Quicker 原生 WebView2 均可持久化收藏夹与脑图。');
