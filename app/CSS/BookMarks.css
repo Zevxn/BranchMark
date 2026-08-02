@@ -168,7 +168,7 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 .bookmark-panel {
     position: fixed;
     top: 50%; right: 0;
-    width: 360px; max-height: 80vh; height: auto;
+    width: 320px; max-height: 80vh; height: auto;
     transform: translate(100%, -50%);
     background: var(--bg-panel);
     backdrop-filter: var(--backdrop);

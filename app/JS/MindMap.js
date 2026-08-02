@@ -2084,7 +2084,7 @@ function saveStorage() {
         clearTimeout(saveToCloudTimer);
         saveToCloudTimer = setTimeout(() => {
             saveMindMapData(true,false);
-        },60*1000)
+        },20*1000)
     }
     
 };

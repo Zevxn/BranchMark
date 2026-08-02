@@ -267,3 +267,16 @@ async function saveFileDirectly(filename, content) {
         return false;
     }
 }
+
+
+document.addEventListener('dblclick', (e) => {
+    if(!e.target.closest('.bookmark-manager-container')&&
+    !e.target.closest('.card-dock-body')&&
+    !e.target.closest('.node-card')&&
+    !e.target.closest('.toolbar')&&
+    !e.target.closest('.item-content')&&
+    !document.querySelector('.bookmark-panel').classList.contains('fixed')){
+        document.getElementById('favBtn').classList.toggle('hide-btn');
+        document.querySelector('.toolbar').classList.toggle('hide-bar');
+    }
+});

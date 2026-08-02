@@ -1,0 +1,4 @@
+interface:
+  display_name: "构建 Quicker HTML 动作"
+  short_description: "开发兼容 Quicker WebView2 与普通浏览器的本地 HTML 应用"
+  default_prompt: "使用 $build-quicker-html-actions 将这个本地 HTML 应用适配为可靠的 Quicker WebView2 动作前端。"
