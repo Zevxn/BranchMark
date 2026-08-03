@@ -497,16 +497,17 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 .dropdown-display.open .dropdown-arrow { transform: rotate(180deg); }
 
 .modal-footer { display: flex; justify-content: flex-end; gap: 12px; }
-.btn { padding: 6px 16px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s ease; }
+.mymodal .btn,
+button[data-action="create-first-folder"] { padding: 6px 16px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s ease; }
 
 button[data-action="create-first-folder"],
 .mymodal .btn-primary { background: var(--accent-orange); color: white;}
 button[data-action="create-first-folder"]:hover,
 .mymodal .btn-primary:hover { background: var(--accent-orange-hover); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(74, 108, 247, 0.25); }
-.btn-secondary { background: rgba(226, 232, 240, 0.5); color: var(--text-secondary); }
-.btn-secondary:hover { background: rgba(203, 213, 225, 0.5); transform: translateY(-2px); }
-.btn-danger { background: rgb(239, 68, 68); color: white; }
-.btn-danger:hover { background: rgb(220, 38, 38); transform: translateY(-2px); }
+.mymodal .btn-secondary { background: rgba(226, 232, 240, 0.5); color: var(--text-secondary); }
+.mymodal .btn-secondary:hover { background: rgba(203, 213, 225, 0.5); transform: translateY(-2px); }
+.mymodal .btn-danger { background: rgb(239, 68, 68); color: white; }
+.mymodal .btn-danger:hover { background: rgb(220, 38, 38); transform: translateY(-2px); }
 
 /* ==========================================================================
    7. 空状态与杂项

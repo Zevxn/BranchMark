@@ -241,10 +241,14 @@
             display: none;
         }
         .toolbar.hide-bar{ top: -65px; } 
-        .btn { border: 1px solid transparent; background: transparent; padding: 6px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px; font-size: 14px; color: var(--text-color-secondary); position: relative; }
-        .btn:hover:not(:disabled):not(.primary) { background: var(--btn-hover); color: var(--primary); }
-        .btn.primary { background: var(--primary); color: white; }
-        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .toolbar .btn,
+        .modal-head .btn { border: 1px solid transparent; background: transparent; padding: 6px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px; font-size: 14px; color: var(--text-color-secondary); position: relative; }
+        .toolbar .btn:hover:not(:disabled):not(.primary),
+        .modal-head .btn:hover:not(:disabled):not(.primary) { background: var(--btn-hover); color: var(--primary); }
+        .toolbar .btn.primary,
+        .modal-head .btn.primary { background: var(--primary); color: white; }
+        .toolbar .btn:disabled,
+        .modal-head .btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .divider { width: 1px; height: 16px; background: var(--line-color); margin: 0 4px; opacity: 0.5; }
         .color-popup { 
             position: fixed; /* 修改为 fixed，脱离工具栏的 overflow 限制 */
@@ -1171,6 +1175,9 @@
             <i class="ri-rainbow-line"></i>
         </button>
         <button class="btn" id="btn-center"><i class="ri-focus-3-line" title="中心归位"></i></button>
+        <button class="btn" id="btn-compact-view" type="button" title="开启精简视图，仅本次运行有效" aria-label="切换精简视图" aria-pressed="false">
+            <i class="ri-menu-fold-line"></i>
+        </button>
         <div class="divider"></div>
         <button class="btn" id="btn-new"><i class="ri-file-add-line" title="新建脑图"></i></button>
         <button class="btn" id="btn-save"><i class="ri-save-3-fill" title="保存脑图"></i></button>

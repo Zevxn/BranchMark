@@ -146,7 +146,8 @@ let state = {
     startPos: {x:0,y:0}, viewStart: {x:0,y:0},
     drag: { source: null, nodeId: null, data: null, title: '', targetId: null, dropType: null },
     resize: { node: null, dir: '', startW: 0, startH: 0, mx: 0, my: 0 },
-    rainbowMode: false 
+    rainbowMode: false,
+    compactView: false
 };
 const CARD_BG='95%';
 let isUndoRedo = false;
@@ -621,6 +622,12 @@ function initializeMapToolbar() {
         // renderTree(); // 重新渲染，应用颜色
     };
 
+    $('#btn-compact-view').onclick = () => {
+        syncCurrentInput();
+        state.compactView = !state.compactView;
+        renderTree();
+    };
+
     $('#btn-center').onclick=()=>{ state.view={tx:window.innerWidth / 2,ty:window.innerHeight / 2,scale:1}; updateTransform(); saveStorage(); };
     $('#btn-new').onclick=()=>{void newMindMap();}
     $('#btn-save').onclick=()=>{void saveMindMapData(true);}
@@ -687,6 +694,7 @@ function initializeMapContextMenu() {
         const toSimpleItem=contextMenu.querySelector('.menu-item[data-action="to-simple"]');
         const card = e.target.closest('.node-card');
         const node = findNode(state.data, card.dataset.nodeId);
+        const isCompactCollapsed = isTemporarilyCollapsed(node);
 
         if (!card) {
             contextMenu.classList.remove('active');
@@ -700,6 +708,12 @@ function initializeMapContextMenu() {
             expandItem.style.display='none';
             collapseItem.style.display='none';
             menuHeight=287;
+        }else if (isCompactCollapsed){ // 临时精简视图不允许暗中修改持久折叠状态
+            toStandardItem.style.display='none';
+            toSimpleItem.style.display='none';
+            expandItem.style.display='none';
+            collapseItem.style.display='none';
+            menuHeight=247;
         }else{                  // 标准卡片模式
             if (node.contentCollapsed){ // 折叠状态
                 toStandardItem.style.display='none';
@@ -2137,6 +2151,17 @@ function redo() { if(state.historyIndex < state.history.length - 1) { state.hist
 
 
 
+function isTemporarilyCollapsed(node) {
+    return Boolean(
+        state.compactView &&
+        node &&
+        !node.isSimple &&
+        node.content &&
+        node.topic &&
+        node.topic.trim()
+    );
+}
+
 function createNodeHTML(node, isLeft, inheritedColor = null) {
     const isSelected = state.selectedIds.has(node.id);
     const isRoot = node.id === state.data.id;
@@ -2153,13 +2178,15 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
 
     const hasContent = !!node.content;
     const hasChildren = node.children && node.children.length > 0;
+    const isCompactCollapsed = isTemporarilyCollapsed(node);
+    const isContentCollapsed = Boolean(node.contentCollapsed || isCompactCollapsed);
     // const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''}`;
     const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''} ${isTopicEmpty?'topic-empty':''}`;
     // --- 尺寸样式 ---
     let cardStyle = '';
     
     // 宽度
-    if (!node.contentCollapsed && node.widthMode === 'manual' && node.width) {
+    if (!isContentCollapsed && node.widthMode === 'manual' && node.width) {
         cardStyle += `width:${node.width}px; `;
     } else {
         cardStyle += `width:fit-content; `; // 标准模式自动宽度
@@ -2208,7 +2235,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
         }
     }
 
-    const bodyContent = (hasContent && !node.contentCollapsed) ? renderMarkdown(node.content) : '';
+    const bodyContent = (hasContent && !isContentCollapsed) ? renderMarkdown(node.content) : '';
     const toggleIcon = isSimple ? 'ri-layout-top-2-line' : 'ri-sticky-note-line';
     const toggleTitle = isSimple ? '切换回标准卡片' : '切换为便利贴模式';
 
@@ -2231,7 +2258,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
     }
 
     // 修复：确保左侧节点也有正确的 Resize 手柄 (左边 resize-l, 左下角 resize-bl)
-    const resizeHandles = (!node.contentCollapsed || isSimple) ? (
+    const resizeHandles = (!isContentCollapsed || isSimple) ? (
         isLeft ? 
         `<div class="resize-handle resize-l" data-resize="w"></div><div class="resize-handle resize-b" data-resize="h"></div><div class="resize-handle resize-bl" data-resize="wh"></div>` :
         `<div class="resize-handle resize-r" data-resize="w"></div><div class="resize-handle resize-b" data-resize="h"></div><div class="resize-handle resize-br" data-resize="wh"></div>`
@@ -2247,17 +2274,17 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
         <div class="${cardClass}" style="${cardStyle}" data-node-id="${node.id}" id="card-${node.id}" ${dataColorAttr}>
             <div class="card-header" style="${headerStyle}">
                 <div class="topic-wrapper">
-                    ${hasContent &&  node.contentCollapsed ? '<i class="ri-file-list-2-line content-indicator"></i>' : ''}
+                    ${hasContent && isContentCollapsed ? '<i class="ri-file-list-2-line content-indicator"></i>' : ''}
                     <span class="node-topic" contenteditable="true">${escapeHtml(node.topic)}</span>
                 </div>
                 
                 <div class="header-tools">
                     ${!isRoot ? `<i class="tool-icon ${toggleIcon}" data-action="toggle-simple" title="${toggleTitle}"></i>` : ''}
-                    ${hasContent && !node.contentCollapsed && !isSimple ? `<i class="ri-aspect-ratio-line tool-icon" data-action="auto-height" title="自适应尺寸"></i>` : ''}
-                    ${hasContent && !isSimple ? `<i class="tool-icon ${node.contentCollapsed?'ri-arrow-down-s-line':'ri-arrow-up-s-line'}" data-action="toggle-content"></i>` : ''}
+                    ${hasContent && !isContentCollapsed && !isSimple ? `<i class="ri-aspect-ratio-line tool-icon" data-action="auto-height" title="自适应尺寸"></i>` : ''}
+                    ${hasContent && !isSimple && !isCompactCollapsed ? `<i class="tool-icon ${node.contentCollapsed?'ri-arrow-down-s-line':'ri-arrow-up-s-line'}" data-action="toggle-content"></i>` : ''}
                 </div>
             </div>
-            ${hasContent && !node.contentCollapsed && !isSimple ? `<div class="card-body md-content" style="${bodyHeightStyle} ${bodyBgStyle}">${bodyContent}</div>` : ''}
+            ${hasContent && !isContentCollapsed && !isSimple ? `<div class="card-body md-content" style="${bodyHeightStyle} ${bodyBgStyle}">${bodyContent}</div>` : ''}
             ${resizeHandles}
             ${foldBtn}
         </div>
@@ -2567,6 +2594,18 @@ function updateToolbar() {
     $('#btn-undo').disabled = state.historyIndex <= 0; $('#btn-redo').disabled = state.historyIndex >= state.history.length - 1;
     $('#btn-color').disabled = !hasSel;
     $('#btn-color').disabled = !hasSel || state.rainbowMode; 
+
+    const compactButton = $('#btn-compact-view');
+    if (compactButton) {
+        compactButton.classList.toggle('primary', state.compactView);
+        compactButton.setAttribute('aria-pressed', String(state.compactView));
+        compactButton.title = state.compactView
+            ? '退出精简视图'
+            : '开启精简视图，仅本次运行有效';
+        compactButton.querySelector('i').className = state.compactView
+            ? 'ri-menu-unfold-line'
+            : 'ri-menu-fold-line';
+    }
 };
 
 function findNode(r,id) {
