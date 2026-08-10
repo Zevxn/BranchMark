@@ -3243,8 +3243,118 @@ function replaceTextInEditor(textarea, originalText, newText) {
 
 
 // =============================================================================
-// #region 新增：原生文字拖拽支持 (已增强：支持兄弟节点插入)
+// #region 原生文字与 Markdown 文件拖拽支持
 // =============================================================================
+function isMarkdownFile(file) {
+    return Boolean(file && typeof file.name === 'string' && /\.md$/i.test(file.name));
+}
+
+function replaceLegacyMathDelimiters(text) {
+    return text
+        .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => '$$' + expression + '$$')
+        .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => '$' + expression + '$');
+}
+
+function normalizeMathOutsideInlineCode(text) {
+    let result = '';
+    let cursor = 0;
+
+    while (cursor < text.length) {
+        const openingIndex = text.indexOf('`', cursor);
+        if (openingIndex === -1) {
+            result += replaceLegacyMathDelimiters(text.slice(cursor));
+            break;
+        }
+
+        let runLength = 1;
+        while (text[openingIndex + runLength] === '`') runLength += 1;
+        const delimiter = '`'.repeat(runLength);
+        const closingIndex = text.indexOf(delimiter, openingIndex + runLength);
+
+        result += replaceLegacyMathDelimiters(text.slice(cursor, openingIndex));
+        if (closingIndex === -1) {
+            result += text.slice(openingIndex);
+            break;
+        }
+
+        const codeEnd = closingIndex + runLength;
+        result += text.slice(openingIndex, codeEnd);
+        cursor = codeEnd;
+    }
+
+    return result;
+}
+
+function normalizeMarkdownMathDelimiters(markdown) {
+    if (typeof markdown !== 'string' || !markdown) return markdown || '';
+
+    let result = '';
+    let proseBuffer = '';
+    let cursor = 0;
+    let fenceCharacter = '';
+    let fenceLength = 0;
+
+    const flushProse = () => {
+        result += normalizeMathOutsideInlineCode(proseBuffer);
+        proseBuffer = '';
+    };
+
+    while (cursor < markdown.length) {
+        const newlineIndex = markdown.indexOf('\n', cursor);
+        const lineEnd = newlineIndex === -1 ? markdown.length : newlineIndex + 1;
+        const line = markdown.slice(cursor, lineEnd);
+        const lineWithoutEnding = line.endsWith('\n') ? line.slice(0, -1) : line;
+
+        if (!fenceCharacter) {
+            const openingFence = lineWithoutEnding.match(/^[ \t]{0,3}(`{3,}|~{3,})/);
+            if (openingFence) {
+                flushProse();
+                fenceCharacter = openingFence[1][0];
+                fenceLength = openingFence[1].length;
+                result += line;
+            } else {
+                proseBuffer += line;
+            }
+        } else {
+            result += line;
+            const closingFence = lineWithoutEnding.match(/^[ \t]{0,3}(`+|~+)[ \t]*\r?$/);
+            if (closingFence && closingFence[1][0] === fenceCharacter && closingFence[1].length >= fenceLength) {
+                fenceCharacter = '';
+                fenceLength = 0;
+            }
+        }
+
+        cursor = lineEnd;
+    }
+
+    flushProse();
+    return result;
+}
+
+function readDroppedFileAsText(file) {
+    if (file && typeof file.text === 'function') {
+        return file.text();
+    }
+
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ''));
+        reader.onerror = () => reject(reader.error || new Error('无法读取 Markdown 文件'));
+        reader.readAsText(file);
+    });
+}
+
+async function readDroppedMarkdownFiles(dataTransfer) {
+    const markdownFiles = Array.from(dataTransfer?.files || []).filter(isMarkdownFile);
+    return Promise.all(markdownFiles.map(async file => {
+        const content = await readDroppedFileAsText(file);
+        return {
+            topic: file.name.replace(/\.md$/i, ''),
+            content: normalizeMarkdownMathDelimiters(content)
+        };
+    }));
+}
+
 function initializeNativeDragDrop() {
     const app = document.getElementById('app');
     const insertLine = document.getElementById('insertLine'); // 复用现有的插入线元素
@@ -3312,7 +3422,7 @@ function initializeNativeDragDrop() {
     });
 
     // 3. 放置 (核心逻辑)
-    app.addEventListener('drop', (e) => {
+    app.addEventListener('drop', async (e) => {
         e.preventDefault();
         
         // 清除所有高亮和辅助线
@@ -3321,10 +3431,6 @@ function initializeNativeDragDrop() {
 
         const card = e.target.closest('.node-card');
         if (!card) return;
-
-        // 获取拖拽的纯文本数据
-        const text = e.dataTransfer.getData('text/plain');
-        if (!text || !text.trim()) return;
 
         // 获取放置类型 (依赖 dragover 时计算的状态，或者重新计算)
         // 为了稳健性，这里建议重新计算一次，防止 dragover 状态未及时更新
@@ -3339,36 +3445,65 @@ function initializeNativeDragDrop() {
         }
 
         const targetId = card.dataset.nodeId;
+        let nodePayloads = [];
+        let isMarkdownDrop = false;
+
+        try {
+            nodePayloads = await readDroppedMarkdownFiles(e.dataTransfer);
+            isMarkdownDrop = nodePayloads.length > 0;
+        } catch (error) {
+            showTopToast(`❌ Markdown 文件读取失败：${error.message || '未知错误'}`);
+            delete card.dataset.dragState;
+            return;
+        }
+
+        if (!isMarkdownDrop) {
+            // 资源管理器拖入的非 Markdown 文件不应退化为“文件路径文字”节点。
+            if (e.dataTransfer?.files?.length) {
+                delete card.dataset.dragState;
+                return;
+            }
+
+            const text = e.dataTransfer?.getData('text/plain') || '';
+            if (!text.trim()) {
+                delete card.dataset.dragState;
+                return;
+            }
+
+            const [header, body] = extractMarkdownHeader(normalizeMarkdownMathDelimiters(text));
+            nodePayloads = [{ topic: header, content: body }];
+        }
+
         const targetNode = findNode(state.data, targetId);
         
         if (targetNode) {
-            // 构造新节点
-            const [header, body] = extractMarkdownHeader(text);
-            const newNode = {
+            // 文件拖拽可一次创建多个节点；文字拖拽仍只创建一个节点。
+            const newNodes = nodePayloads.map(({ topic, content }) => ({
                 id: generateNodeId(),
-                topic: header,
-                content: body,
+                topic,
+                content,
                 isSimple: false,
                 heightMode: 'auto',
                 widthMode: 'auto',
                 width: 360,
                 children: []
-            };
+            }));
 
             // --- 分支 A: 添加子节点 ---
             if (dropType === 'CHILD') {
                 // 处理根节点的方向逻辑
                 if (targetId === state.data.id) {
                     const rRect = card.getBoundingClientRect();
-                    newNode.dir = (e.clientX < rRect.left + rRect.width / 2) ? 'left' : 'right';
+                    const direction = (e.clientX < rRect.left + rRect.width / 2) ? 'left' : 'right';
+                    newNodes.forEach(node => { node.dir = direction; });
                 } else {
                     // 如果不是根节点，且有方向属性（比如在 Dock 或其他特定逻辑下），可以继承
                     // 这里通常不需要处理，因为子节点方向由布局算法自动处理
-                    delete newNode.dir;
+                    newNodes.forEach(node => { delete node.dir; });
                 }
 
                 if (!targetNode.children) targetNode.children = [];
-                targetNode.children.push(newNode);
+                targetNode.children.push(...newNodes);
                 targetNode.folded = false; 
                 
                 recordHistory();
@@ -3379,19 +3514,23 @@ function initializeNativeDragDrop() {
                 const parent = findParent(state.data, targetId);
                 if (parent) {
                     // 1. 继承方向 (重要：保持在同一侧)
-                    newNode.dir = targetNode.dir;
+                    newNodes.forEach(node => { node.dir = targetNode.dir; });
 
                     // 2. 找到插入位置
                     const index = parent.children.findIndex(c => c.id === targetId);
                     
                     if (index !== -1) {
                         const insertIndex = (dropType === 'BEFORE') ? index : index + 1;
-                        parent.children.splice(insertIndex, 0, newNode);
+                        parent.children.splice(insertIndex, 0, ...newNodes);
                         
                         recordHistory();
                         updateChildrenDOM(parent.id);
                     }
                 }
+            }
+
+            if (isMarkdownDrop) {
+                showTopToast(`✅ 已从 ${newNodes.length} 个 Markdown 文件创建节点`);
             }
         }
         
