@@ -1399,6 +1399,27 @@ function downloadMermaidSvg() {
 // ==========================================
 // #region Mermaid SVG 转图片并复制功能
 // ==========================================
+function svgSourceToDataUrl(source) {
+    // WebView2 may treat a blob: URL created under a virtual host as a
+    // different origin when the SVG contains Mermaid foreignObject labels.
+    // A fully encoded data URL keeps the image self-contained and the canvas
+    // origin-clean, so it can be exported with toBlob().
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
+}
+
+function canvasToPngBlob(canvas) {
+    return new Promise((resolve, reject) => {
+        try {
+            canvas.toBlob(blob => {
+                if (blob) resolve(blob);
+                else reject(new Error('Canvas 未能生成 PNG 图片'));
+            }, 'image/png');
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
 function copyMermaidAsPng() {
     const container = document.getElementById('mermaidModalBody');
     const svgOriginal = container.querySelector('svg');
@@ -1426,49 +1447,49 @@ function copyMermaidAsPng() {
     }
 
     const img = new Image();
-    const svgBlob = new Blob([source], {type: 'image/svg+xml;charset=utf-8'});
-    const url = URL.createObjectURL(svgBlob);
+    const svgDataUrl = svgSourceToDataUrl(source);
 
-    img.onload = function() {
-        const canvas = document.createElement('canvas');
-        const bbox = svgOriginal.viewBox.baseVal || svgOriginal.getBoundingClientRect();
-        let w = bbox.width || svgOriginal.clientWidth;
-        let h = bbox.height || svgOriginal.clientHeight;
+    img.onload = async function() {
+        try {
+            const canvas = document.createElement('canvas');
+            const bbox = svgOriginal.viewBox.baseVal || svgOriginal.getBoundingClientRect();
+            const w = bbox.width || svgOriginal.clientWidth;
+            const h = bbox.height || svgOriginal.clientHeight;
 
-        const scale = 4; 
-        canvas.width = w * scale;
-        canvas.height = h * scale;
-
-        const ctx = canvas.getContext('2d');
-        ctx.scale(scale, scale);
-        
-        ctx.drawImage(img, 0, 0, w, h);
-
-        canvas.toBlob(async (blob) => {
-            try {
-                if (navigator.clipboard && navigator.clipboard.write) {
-                    await navigator.clipboard.write([
-                        new ClipboardItem({ 'image/png': blob })
-                    ]);
-                    showTopToast('✅ PNG 图片已复制');
-
-                } else {
-                    alert('❌ 浏览器不支持图片复制，请右键另存为。');
-                }
-            } catch (err) {
-                console.log('复制失败:', err);
-                alert('❌ 复制失败: ' + err.message);
+            if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+                throw new Error('图表尺寸无效');
             }
-            URL.revokeObjectURL(url);
-        });
+
+            const scale = 4;
+            canvas.width = Math.ceil(w * scale);
+            canvas.height = Math.ceil(h * scale);
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('无法创建 Canvas 2D 上下文');
+            ctx.scale(scale, scale);
+            ctx.drawImage(img, 0, 0, w, h);
+
+            const blob = await canvasToPngBlob(canvas);
+            if (navigator.clipboard && navigator.clipboard.write) {
+                await navigator.clipboard.write([
+                    new ClipboardItem({ 'image/png': blob })
+                ]);
+                showTopToast('✅ PNG 图片已复制');
+            } else {
+                alert('❌ 浏览器不支持图片复制，请右键另存为。');
+            }
+        } catch (error) {
+            console.error('[Mermaid] PNG 复制失败:', error);
+            alert('❌ 复制失败: ' + (error.message || String(error)));
+        }
     };
     
-    img.onerror = function(e) {
-        console.log('SVG 加载失败', e);
+    img.onerror = function(error) {
+        console.error('[Mermaid] SVG 加载失败:', error);
         showTopToast('❌ 转换图片失败');
     };
 
-    img.src = url;
+    img.src = svgDataUrl;
 }
 
 
