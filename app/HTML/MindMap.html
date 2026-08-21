@@ -644,9 +644,15 @@
             -webkit-mask-image: linear-gradient(to right, transparent, black 50px);
             mask-image: linear-gradient(to right, transparent, black 50px);
         }
+        .node-card:not(.simple) .header-tools .tool-icon {
+            pointer-events: none;
+        }
         /* 悬停时卡片头部时出现工具栏 */
         .node-card:not(.simple) .card-header:hover .header-tools {
             opacity: 1;
+            pointer-events: none; /* 渐变挡板不得遮挡窄卡片的拖动命中区 */
+        }
+        .node-card:not(.simple) .card-header:hover .header-tools .tool-icon {
             pointer-events: auto;
         }
         /* --- 便利贴模式 (Simple Mode) 滚动与布局修复 ------------ */
