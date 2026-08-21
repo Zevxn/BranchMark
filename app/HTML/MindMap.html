@@ -250,6 +250,131 @@
         .toolbar .btn:disabled,
         .modal-head .btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .divider { width: 1px; height: 16px; background: var(--line-color); margin: 0 4px; opacity: 0.5; }
+        .map-search-panel {
+            position: fixed;
+            top: 66px;
+            right: 14px;
+            width: min(460px, calc(100vw - 28px));
+            max-height: min(58vh, 520px);
+            transform: translateY(-8px);
+            z-index: 1150;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            color: var(--text-color);
+            background: var(--toolbar-bg);
+            border: 1px solid var(--toolbar-border);
+            border-radius: 10px;
+            box-shadow: 0 10px 32px var(--shadow-color-hover);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s;
+        }
+        .map-search-panel.active {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+            transform: translateY(0);
+        }
+        .map-search-bar {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+            align-items: center;
+            gap: 4px;
+            min-height: 46px;
+            padding: 6px 7px 6px 12px;
+            border-bottom: 1px solid var(--toolbar-border);
+        }
+        .map-search-bar > .ri-search-line {
+            color: var(--text-color-secondary);
+            font-size: 17px;
+        }
+        .map-search-input {
+            width: 100%;
+            min-width: 0;
+            padding: 7px 4px;
+            color: var(--text-color);
+            background: transparent;
+            border: 0;
+            outline: 0;
+            font-size: 14px;
+        }
+        .map-search-input::placeholder { color: var(--text-color-secondary); }
+        .map-search-count {
+            min-width: 42px;
+            color: var(--text-color-secondary);
+            font-size: 12px;
+            text-align: right;
+            white-space: nowrap;
+        }
+        .map-search-action {
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            display: inline-grid;
+            place-items: center;
+            color: var(--text-color-secondary);
+            background: transparent;
+            border: 0;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .map-search-action:hover:not(:disabled) {
+            color: var(--primary);
+            background: var(--btn-hover);
+        }
+        .map-search-action:disabled { opacity: 0.35; cursor: default; }
+        .map-search-results {
+            max-height: min(45vh, 420px);
+            overflow-y: auto;
+            padding: 6px;
+        }
+        .map-search-result {
+            width: 100%;
+            padding: 9px 10px;
+            display: block;
+            color: var(--text-color);
+            background: transparent;
+            border: 0;
+            border-radius: 7px;
+            text-align: left;
+            cursor: pointer;
+        }
+        .map-search-result:hover,
+        .map-search-result.active {
+            background: var(--btn-hover);
+        }
+        .map-search-result.active {
+            box-shadow: inset 3px 0 0 var(--primary);
+        }
+        .map-search-result-title {
+            display: block;
+            overflow: hidden;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.4;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .map-search-result-path,
+        .map-search-result-snippet {
+            display: block;
+            overflow: hidden;
+            margin-top: 2px;
+            color: var(--text-color-secondary);
+            font-size: 12px;
+            line-height: 1.4;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .map-search-result-path { color: var(--primary); opacity: 0.82; }
+        .map-search-empty {
+            padding: 22px 16px;
+            color: var(--text-color-secondary);
+            font-size: 13px;
+            text-align: center;
+        }
         .color-popup { 
             position: fixed; /* 修改为 fixed，脱离工具栏的 overflow 限制 */
             top: 0; 
@@ -464,6 +589,22 @@
                 0 0 0 1px #fff,                /* 内圈白描边，增加对比度 */
                 0 0 0 4px var(--shadow-color-active) !important; /* 外圈主色光晕 */
             z-index: 100; 
+        }
+        .node-card.search-active::after {
+            content: '';
+            position: absolute;
+            inset: -8px;
+            z-index: 110;
+            pointer-events: none;
+            border: 2px solid #faad14;
+            border-radius: 13px;
+            box-shadow: 0 0 0 0 rgba(250, 173, 20, 0.48);
+            animation: map-search-pulse 1s ease-out forwards;
+        }
+        @keyframes map-search-pulse {
+            0% { opacity: 0; transform: scale(0.96); box-shadow: 0 0 0 0 rgba(250, 173, 20, 0.5); }
+            22% { opacity: 1; }
+            100% { opacity: 0; transform: scale(1.02); box-shadow: 0 0 0 12px rgba(250, 173, 20, 0); }
         }
         /* 适配暗黑模式 */
         :root[data-theme="dark"] {
@@ -1180,6 +1321,9 @@
         <button class="btn" id="btn-rainbow" title="切换彩虹分支模式">
             <i class="ri-rainbow-line"></i>
         </button>
+        <button class="btn" id="btn-search" type="button" title="搜索定位 (Ctrl+F)" aria-label="搜索定位">
+            <i class="ri-search-line"></i>
+        </button>
         <button class="btn" id="btn-center"><i class="ri-focus-3-line" title="中心归位"></i></button>
         <button class="btn" id="btn-compact-view" type="button" title="开启精简视图，仅本次运行有效" aria-label="切换精简视图" aria-pressed="false">
             <i class="ri-menu-fold-line"></i>
@@ -1204,6 +1348,20 @@
             <i class="ri-moon-line"></i>
         </button>
     </div>
+
+    <section class="map-search-panel" id="mapSearchPanel" role="dialog" aria-label="搜索卡片" aria-hidden="true">
+        <div class="map-search-bar">
+            <i class="ri-search-line" aria-hidden="true"></i>
+            <input class="map-search-input" id="mapSearchInput" type="search" placeholder="搜索标题或正文" autocomplete="off" spellcheck="false">
+            <span class="map-search-count" id="mapSearchCount" aria-live="polite">0/0</span>
+            <button class="map-search-action" id="btn-search-prev" type="button" title="上一个 (Shift+Enter)" aria-label="上一个结果" disabled><i class="ri-arrow-up-s-line"></i></button>
+            <button class="map-search-action" id="btn-search-next" type="button" title="下一个 (Enter)" aria-label="下一个结果" disabled><i class="ri-arrow-down-s-line"></i></button>
+            <button class="map-search-action" id="btn-search-close" type="button" title="关闭 (Esc)" aria-label="关闭搜索"><i class="ri-close-line"></i></button>
+        </div>
+        <div class="map-search-results" id="mapSearchResults" role="listbox" aria-label="搜索结果">
+            <div class="map-search-empty">输入关键词，搜索卡片标题和正文</div>
+        </div>
+    </section>
 
     <div class="color-popup" id="colorPopup">
         <div class="color-swatch" style="background:#ffffff" data-color=""></div>

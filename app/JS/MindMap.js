@@ -56,6 +56,7 @@ function applyImportedMindMap(content) {
         state.view = imported.view || state.view;
         state.history = [];
         state.historyIndex = -1;
+        resetMapSearch();
         sessionStorage.removeItem('currentFileID');
         recordHistory();
         renderTree();
@@ -149,6 +150,15 @@ let state = {
     rainbowMode: false,
     compactView: false
 };
+const mapSearchState = {
+    query: '',
+    results: [],
+    activeIndex: -1,
+    hasLocated: false,
+    revealedNodeIds: new Set(),
+    revealedRootDirections: new Set(),
+    pulseTimer: null
+};
 const CARD_BG='95%';
 let isUndoRedo = false;
 let saveTimer = null;
@@ -221,6 +231,7 @@ async function updateState(MindMapData,newCurrentFileID,pageTitle,otherPageOpen=
     state.scrollMap = new Map(Object.entries(MindMapData.scrollMap || {}));
     state.history=[];
     state.historyIndex=-1;
+    resetMapSearch();
     recordHistory();
     renderTree();
     sessionStorage.setItem('currentFileID', newCurrentFileID);
@@ -275,6 +286,7 @@ function new_MindMap(){
     state.view = {tx:window.innerWidth/2,ty:window.innerHeight/2,scale:1};
     state.history=[];
     state.historyIndex=-1;
+    resetMapSearch();
     recordHistory();
     renderTree();
     sessionStorage.removeItem('currentFileID');
@@ -329,6 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeNativeDragDrop(); // 初始化原生拖拽
     initializeEditorToolbar();  // 初始化md编辑器
     initializeMapToolbar();     // 初始化思维导图工具栏
+    initializeMapSearch();      // 初始化搜索定位
     initializeEditorContextMenu(); // 初始化md编辑器右键菜单
 
     $('#dock-body').addEventListener('wheel', (e) => { 
@@ -422,11 +435,26 @@ document.addEventListener('DOMContentLoaded', () => {
         // 是否有文本被选中 (关键修复：防止复制文字时触发节点复制)
         const hasSelection = window.getSelection() && window.getSelection().toString().length > 0;
 
+        // 搜索定位优先于浏览器页面查找，但编辑器打开时仍保留编辑器自身行为。
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !isModalActive) {
+            e.preventDefault();
+            openMapSearch();
+            return;
+        }
+
         // ▼▼▼ 优先处理：全局保存 (Ctrl + S) ▼▼▼
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
             e.preventDefault();
             if (typeof syncCurrentInput === 'function') syncCurrentInput(); 
             saveMindMapData(true);
+            return;
+        }
+
+        if (isMapSearchOpen()) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeMapSearch();
+            }
             return;
         }
 
@@ -651,6 +679,7 @@ function initializeMapToolbar() {
                     state.view=j.view||state.view;
                     state.history=[];
                     state.historyIndex=-1;
+                    resetMapSearch();
                     sessionStorage.removeItem('currentFileID');
                     recordHistory();
                     renderTree();
@@ -1110,14 +1139,17 @@ function initializeMapClickEvents() {
         if(foldBtn) {
             const action = foldBtn.dataset.action;
             if(action === 'fold-root-left') {
+                mapSearchState.revealedRootDirections.delete('left');
                 state.data.foldedLeft = !state.data.foldedLeft; recordHistory(); renderTree(); return;
             }
             if(action === 'fold-root-right') {
+                mapSearchState.revealedRootDirections.delete('right');
                 state.data.foldedRight = !state.data.foldedRight; recordHistory(); renderTree(); return;
             }
             if(action === 'fold') {
                 syncCurrentInput();
                 const n = findNode(state.data, foldBtn.closest('.node-card').dataset.nodeId);
+                mapSearchState.revealedNodeIds.delete(n.id);
                 n.folded = !n.folded; recordHistory(); updateChildrenDOM(n.id); return;
             }
         }
@@ -1296,6 +1328,7 @@ function initializeMapMouseEvents() {
            e.target.closest('.color-popup') || 
            e.target.closest('#contextMenu') || 
            e.target.closest('#editorContextMenu') ||
+           e.target.closest('.map-search-panel') ||
            e.target.closest('.fold-btn') ||    // 新增
            e.target.closest('.header-tools')   // 新增
         ) return;
@@ -1866,6 +1899,305 @@ function insertTextFormat(prefix, suffix, restoreFocus = true) {
     }, 100);
 };
 
+// =============================================================================
+// #region 搜索定位
+// =============================================================================
+function normalizeMapSearchText(value) {
+    const text = String(value ?? '');
+    const normalized = typeof text.normalize === 'function' ? text.normalize('NFKC') : text;
+    return normalized.toLowerCase();
+}
+
+function stripMarkdownForSearch(value) {
+    return String(value ?? '')
+        .replace(/```[\s\S]*?```/g, block => block.replace(/```[^\n]*\n?|```/g, ' '))
+        .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/(^|\s)[#>*_~`|+-]+(?=\s|$)/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function makeMapSearchSnippet(content, terms) {
+    const plainText = stripMarkdownForSearch(content);
+    if (!plainText) return '';
+
+    const normalized = normalizeMapSearchText(plainText);
+    const firstMatch = terms.reduce((best, term) => {
+        const index = normalized.indexOf(term);
+        return index >= 0 && (best < 0 || index < best) ? index : best;
+    }, -1);
+    const start = Math.max(0, firstMatch < 0 ? 0 : firstMatch - 32);
+    const snippet = plainText.slice(start, start + 108);
+    return `${start > 0 ? '…' : ''}${snippet}${start + 108 < plainText.length ? '…' : ''}`;
+}
+
+function collectMapSearchResults(root, query) {
+    const terms = normalizeMapSearchText(query).trim().split(/[\s\u3000]+/u).filter(Boolean);
+    if (!root || terms.length === 0) return [];
+
+    const results = [];
+    let treeOrder = 0;
+    const visit = (node, ancestors) => {
+        if (!node) return;
+        const topic = String(node.topic ?? '').trim();
+        const content = String(node.content ?? '');
+        const normalizedTopic = normalizeMapSearchText(topic);
+        const normalizedContent = normalizeMapSearchText(stripMarkdownForSearch(content));
+        const searchableText = `${normalizedTopic}\n${normalizedContent}`;
+
+        if (terms.every(term => searchableText.includes(term))) {
+            const titleMatches = terms.filter(term => normalizedTopic.includes(term)).length;
+            const titleRank = titleMatches === terms.length ? 0 : titleMatches > 0 ? 1 : 2;
+            const route = [...ancestors, node];
+            const rootChild = route.length > 1 ? route[1] : null;
+            results.push({
+                id: node.id,
+                topic: topic || '未命名卡片',
+                snippet: makeMapSearchSnippet(content, terms),
+                path: ancestors.map(item => String(item.topic ?? '').trim()).filter(Boolean),
+                pathIds: ancestors.map(item => item.id),
+                rootDirection: rootChild ? (rootChild.dir === 'left' ? 'left' : 'right') : null,
+                titleRank,
+                treeOrder: treeOrder++
+            });
+        } else {
+            treeOrder++;
+        }
+
+        (node.children || []).forEach(child => visit(child, [...ancestors, node]));
+    };
+
+    visit(root, []);
+    return results.sort((a, b) => a.titleRank - b.titleRank || a.treeOrder - b.treeOrder);
+}
+
+function isMapSearchOpen() {
+    return Boolean($('#mapSearchPanel')?.classList.contains('active'));
+}
+
+function isMapNodeTemporarilyExpanded(nodeId) {
+    return mapSearchState.revealedNodeIds.has(nodeId);
+}
+
+function isMapRootDirectionTemporarilyExpanded(direction) {
+    return mapSearchState.revealedRootDirections.has(direction);
+}
+
+function clearMapSearchReveal() {
+    const hadReveal = mapSearchState.revealedNodeIds.size > 0
+        || mapSearchState.revealedRootDirections.size > 0;
+    mapSearchState.revealedNodeIds.clear();
+    mapSearchState.revealedRootDirections.clear();
+    return hadReveal;
+}
+
+function renderMapSearchResults() {
+    const container = $('#mapSearchResults');
+    const count = $('#mapSearchCount');
+    const previousButton = $('#btn-search-prev');
+    const nextButton = $('#btn-search-next');
+    if (!container || !count) return;
+
+    const total = mapSearchState.results.length;
+    const current = total > 0 ? mapSearchState.activeIndex + 1 : 0;
+    count.textContent = `${current}/${total}`;
+    if (previousButton) previousButton.disabled = total === 0;
+    if (nextButton) nextButton.disabled = total === 0;
+    container.replaceChildren();
+
+    if (!mapSearchState.query.trim()) {
+        const empty = document.createElement('div');
+        empty.className = 'map-search-empty';
+        empty.textContent = '输入关键词，搜索卡片标题和正文';
+        container.appendChild(empty);
+        return;
+    }
+    if (total === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'map-search-empty';
+        empty.textContent = '没有找到匹配的卡片';
+        container.appendChild(empty);
+        return;
+    }
+
+    mapSearchState.results.forEach((result, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `map-search-result${index === mapSearchState.activeIndex ? ' active' : ''}`;
+        button.dataset.searchIndex = String(index);
+        button.setAttribute('role', 'option');
+        button.setAttribute('aria-selected', String(index === mapSearchState.activeIndex));
+
+        const title = document.createElement('span');
+        title.className = 'map-search-result-title';
+        title.textContent = result.topic;
+        button.appendChild(title);
+
+        if (result.path.length > 0) {
+            const path = document.createElement('span');
+            path.className = 'map-search-result-path';
+            path.textContent = result.path.join(' › ');
+            button.appendChild(path);
+        }
+        if (result.snippet) {
+            const snippet = document.createElement('span');
+            snippet.className = 'map-search-result-snippet';
+            snippet.textContent = result.snippet;
+            button.appendChild(snippet);
+        }
+        container.appendChild(button);
+    });
+}
+
+function executeMapSearch(query) {
+    const revealChanged = clearMapSearchReveal();
+    mapSearchState.query = String(query ?? '');
+    mapSearchState.results = collectMapSearchResults(state.data, mapSearchState.query);
+    mapSearchState.activeIndex = mapSearchState.results.length > 0 ? 0 : -1;
+    mapSearchState.hasLocated = false;
+    if (revealChanged) renderTree();
+    renderMapSearchResults();
+}
+
+function openMapSearch() {
+    const panel = $('#mapSearchPanel');
+    const input = $('#mapSearchInput');
+    if (!panel || !input) return;
+    panel.classList.add('active');
+    panel.setAttribute('aria-hidden', 'false');
+    executeMapSearch(input.value);
+    requestAnimationFrame(() => {
+        input.focus();
+        input.select();
+    });
+}
+
+function closeMapSearch() {
+    const panel = $('#mapSearchPanel');
+    if (!panel) return;
+    if (panel.contains(document.activeElement)) document.activeElement.blur();
+    panel.classList.remove('active');
+    panel.setAttribute('aria-hidden', 'true');
+    document.querySelector('.node-card.search-active')?.classList.remove('search-active');
+}
+
+function resetMapSearch() {
+    clearMapSearchReveal();
+    if (mapSearchState.pulseTimer) clearTimeout(mapSearchState.pulseTimer);
+    mapSearchState.pulseTimer = null;
+    mapSearchState.query = '';
+    mapSearchState.results = [];
+    mapSearchState.activeIndex = -1;
+    mapSearchState.hasLocated = false;
+    const input = $('#mapSearchInput');
+    if (input) input.value = '';
+    closeMapSearch();
+    renderMapSearchResults();
+}
+
+function centerMapNodeInVisibleArea(card) {
+    const cardRect = card.getBoundingClientRect();
+    const panel = $('#mapSearchPanel');
+    const panelRect = isMapSearchOpen() && panel ? panel.getBoundingClientRect() : null;
+    let targetX = window.innerWidth / 2;
+    let targetY = window.innerHeight / 2;
+
+    if (panelRect && panelRect.width < window.innerWidth * 0.55) {
+        targetX = Math.max(80, panelRect.left / 2);
+    } else if (panelRect) {
+        const spaceBelow = window.innerHeight - panelRect.bottom;
+        if (spaceBelow > 100) targetY = panelRect.bottom + spaceBelow / 2;
+    }
+
+    state.view.tx += targetX - (cardRect.left + cardRect.width / 2);
+    state.view.ty += targetY - (cardRect.top + cardRect.height / 2);
+    updateTransform();
+}
+
+function pulseMapSearchTarget(card) {
+    if (mapSearchState.pulseTimer) clearTimeout(mapSearchState.pulseTimer);
+    document.querySelector('.node-card.search-active')?.classList.remove('search-active');
+    void card.offsetWidth;
+    card.classList.add('search-active');
+    mapSearchState.pulseTimer = setTimeout(() => {
+        card.classList.remove('search-active');
+        mapSearchState.pulseTimer = null;
+    }, 1050);
+}
+
+function locateMapSearchResult(index) {
+    const result = mapSearchState.results[index];
+    if (!result) return;
+
+    mapSearchState.activeIndex = index;
+    mapSearchState.hasLocated = true;
+    clearMapSearchReveal();
+    result.pathIds.forEach(id => {
+        if (id !== state.data.id) mapSearchState.revealedNodeIds.add(id);
+    });
+    if (result.rootDirection) mapSearchState.revealedRootDirections.add(result.rootDirection);
+    renderTree();
+
+    state.selectedIds.clear();
+    state.selectedIds.add(result.id);
+    updateSelection();
+    renderMapSearchResults();
+    $('#mapSearchResults')?.querySelector(`[data-search-index="${index}"]`)?.scrollIntoView({ block: 'nearest' });
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        const card = document.getElementById(`card-${result.id}`);
+        if (!card) return;
+        centerMapNodeInVisibleArea(card);
+        pulseMapSearchTarget(card);
+    }));
+}
+
+function navigateMapSearch(direction) {
+    const total = mapSearchState.results.length;
+    if (total === 0) return;
+    const nextIndex = mapSearchState.hasLocated
+        ? (mapSearchState.activeIndex + direction + total) % total
+        : (direction < 0 ? total - 1 : 0);
+    locateMapSearchResult(nextIndex);
+}
+
+function initializeMapSearch() {
+    const panel = $('#mapSearchPanel');
+    const input = $('#mapSearchInput');
+    const results = $('#mapSearchResults');
+    if (!panel || !input || !results) return;
+
+    $('#btn-search').onclick = openMapSearch;
+    $('#btn-search-close').onclick = closeMapSearch;
+    $('#btn-search-prev').onclick = () => navigateMapSearch(-1);
+    $('#btn-search-next').onclick = () => navigateMapSearch(1);
+
+    input.addEventListener('input', () => executeMapSearch(input.value));
+    results.addEventListener('click', (event) => {
+        const item = event.target.closest('[data-search-index]');
+        if (item) locateMapSearchResult(Number(item.dataset.searchIndex));
+    });
+    panel.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            closeMapSearch();
+        } else if (event.key === 'Enter') {
+            event.preventDefault();
+            event.stopPropagation();
+            navigateMapSearch(event.shiftKey ? -1 : 1);
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            event.stopPropagation();
+            navigateMapSearch(event.key === 'ArrowDown' ? 1 : -1);
+        }
+    });
+    panel.addEventListener('mousedown', event => event.stopPropagation());
+}
+// #endregion
+
 // 通用的应用颜色函数
 function applyCustomColorToSelection (color, isFinalStep) {
     saveGlobalScrolls();
@@ -2178,6 +2510,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
 
     const hasContent = !!node.content;
     const hasChildren = node.children && node.children.length > 0;
+    const areChildrenVisible = !node.folded || isMapNodeTemporarilyExpanded(node.id);
     const isCompactCollapsed = isTemporarilyCollapsed(node);
     const isContentCollapsed = Boolean(node.contentCollapsed || isCompactCollapsed);
     // const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''}`;
@@ -2240,7 +2573,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
     const toggleTitle = isSimple ? '切换回标准卡片' : '切换为便利贴模式';
 
     let childrenHTML = '';
-    if(hasChildren && !node.folded) {
+    if(hasChildren && areChildrenVisible) {
         childrenHTML = `<div class="children-container ${isLeft?'left-side':''}" id="children-${node.id}">
             ${node.children.map(child => {
                 let nextColor = null;
@@ -2265,7 +2598,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
     ) : '';
 
     const foldBtn = (!isRoot && hasChildren) ? 
-        `<div class="fold-btn ${!node.folded?'has-children':''} ${isLeft?'left-side':''}" data-action="fold"><i class="${node.folded?'ri-add-line':'ri-subtract-line'}"></i></div>` : '';
+        `<div class="fold-btn ${areChildrenVisible?'has-children':''} ${isLeft?'left-side':''}" data-action="fold"><i class="${areChildrenVisible?'ri-subtract-line':'ri-add-line'}"></i></div>` : '';
 
     const dataColorAttr = (state.rainbowMode && displayColor) ? `data-rainbow-color="${displayColor}"` : '';
 
@@ -2296,6 +2629,8 @@ function renderTree() {
     const root = state.data;
     const leftKids = (root.children || []).filter(c => c.dir === 'left');
     const rightKids = (root.children || []).filter(c => c.dir !== 'left');
+    const isLeftVisible = !root.foldedLeft || isMapRootDirectionTemporarilyExpanded('left');
+    const isRightVisible = !root.foldedRight || isMapRootDirectionTemporarilyExpanded('right');
     // 注意：我们需要获取所有子节点的总数来计算色相分布，或者简单地让左边和右边各自计算
     // 为了颜色统一，我们在 map 时重新计算正确的 index 或者传递颜色
     
@@ -2312,21 +2647,21 @@ function renderTree() {
     // ... (中间 fold-btn 逻辑保持不变) ...
     if(leftKids.length > 0) {
         const btn = document.createElement('div');
-        btn.className = `fold-btn root-left ${!root.foldedLeft?'has-children':''}`;
+        btn.className = `fold-btn root-left ${isLeftVisible?'has-children':''}`;
         btn.dataset.action = 'fold-root-left';
-        btn.innerHTML = `<i class="${root.foldedLeft?'ri-add-line':'ri-subtract-line'}"></i>`;
+        btn.innerHTML = `<i class="${isLeftVisible?'ri-subtract-line':'ri-add-line'}"></i>`;
         rootCardEl.appendChild(btn);
     }
     if(rightKids.length > 0) {
         const btn = document.createElement('div');
-        btn.className = `fold-btn root-right ${!root.foldedRight?'has-children':''}`;
+        btn.className = `fold-btn root-right ${isRightVisible?'has-children':''}`;
         btn.dataset.action = 'fold-root-right';
-        btn.innerHTML = `<i class="${root.foldedRight?'ri-add-line':'ri-subtract-line'}"></i>`;
+        btn.innerHTML = `<i class="${isRightVisible?'ri-subtract-line':'ri-add-line'}"></i>`;
         rootCardEl.appendChild(btn);
     }
     const rootCard = rootCardEl.outerHTML;
 
-    const leftHTML = (leftKids.length > 0 && !root.foldedLeft) ? 
+    const leftHTML = (leftKids.length > 0 && isLeftVisible) ?
         `<div class="children-container left-side">${leftKids.map(c => {
             // ▼▼▼ 修改：直接根据 ID 获取固定颜色 ▼▼▼
             const hue = state.rainbowMode ? getStableHue(c.id) : 0;
@@ -2335,7 +2670,7 @@ function renderTree() {
             return `<div class="child-unit left-side"><div class="child-cross-line"></div>${createNodeHTML(c, true, color)}</div>`;
         }).join('')}</div>` : '';
     
-    const rightHTML = (rightKids.length > 0 && !root.foldedRight) ? 
+    const rightHTML = (rightKids.length > 0 && isRightVisible) ?
         `<div class="children-container">${rightKids.map(c => {
             // ▼▼▼ 修改：直接根据 ID 获取固定颜色 ▼▼▼
             const hue = state.rainbowMode ? getStableHue(c.id) : 0;
@@ -2416,19 +2751,20 @@ function updateChildrenDOM(nodeId) {
 
     const card = document.getElementById(`card-${nodeId}`);
     let foldBtn = card.querySelector('.fold-btn');
+    const areChildrenVisible = !node.folded || isMapNodeTemporarilyExpanded(node.id);
     
     if(node.children && node.children.length > 0) {
         if(!foldBtn) {
             foldBtn = document.createElement('div');
-            foldBtn.className = `fold-btn ${!node.folded?'has-children':''} ${isLeft?'left-side':''}`;
+            foldBtn.className = `fold-btn ${areChildrenVisible?'has-children':''} ${isLeft?'left-side':''}`;
             foldBtn.dataset.action = 'fold';
-            foldBtn.innerHTML = `<i class="${node.folded?'ri-add-line':'ri-subtract-line'}"></i>`;
+            foldBtn.innerHTML = `<i class="${areChildrenVisible?'ri-subtract-line':'ri-add-line'}"></i>`;
             card.appendChild(foldBtn);
         } else {
-            foldBtn.className = `fold-btn ${!node.folded?'has-children':''} ${isLeft?'left-side':''}`;
-            foldBtn.innerHTML = `<i class="${node.folded?'ri-add-line':'ri-subtract-line'}"></i>`;
+            foldBtn.className = `fold-btn ${areChildrenVisible?'has-children':''} ${isLeft?'left-side':''}`;
+            foldBtn.innerHTML = `<i class="${areChildrenVisible?'ri-subtract-line':'ri-add-line'}"></i>`;
         }
-        if(!node.folded) {
+        if(areChildrenVisible) {
             const childrenHTML = `<div class="children-container ${isLeft?'left-side':''}" id="children-${node.id}">
                 ${node.children.map(child => `
                     <div class="child-unit ${isLeft?'left-side':''}">
