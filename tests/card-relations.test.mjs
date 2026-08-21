@@ -15,6 +15,16 @@ assert.match(html, /\.relation-hit\s*\{[^}]*pointer-events:\s*stroke/s,
     '关联线应使用透明宽描边提供稳定的点击区域');
 assert.match(html, /\.relation-group\.selected \.relation-line/,
     '选中的关联线应有明确视觉状态');
+assert.match(html, /id=["']relationEditor["'][\s\S]*?id=["']relationLabelInput["']/,
+    '点击关联后应提供可编辑标签的紧凑面板');
+assert.equal((html.match(/data-relation-direction=/g) || []).length, 3,
+    '关联编辑器应支持无向、A 到 B、B 到 A 三种方向');
+assert.equal((html.match(/data-relation-style=/g) || []).length, 2,
+    '关联编辑器应支持虚线与实线');
+assert.match(html, /id=["']relationCustomColor["'][^>]*type=["']color["']/,
+    '关联编辑器应支持自定义颜色');
+assert.doesNotMatch(html, /\.relation-group\.selected \.relation-line\s*\{[^}]*stroke-dasharray:\s*none/s,
+    '选中关系时不应覆盖用户设置的虚线样式');
 
 assert.match(mindMap, /relations:\s*\[\]/,
     '新建思维导图应初始化关联数据集合');
@@ -24,6 +34,14 @@ assert.match(mindMap, /isDuplicateMindMapRelation\(sourceId, targetId\)/,
     '无向关联应阻止反向重复连接');
 assert.match(mindMap, /ensureMindMapRelations\(\)\.push\(relation\)[\s\S]*?recordHistory\(\)/,
     '建立关联后应写入思维导图数据并记录撤销历史');
+assert.match(mindMap, /label:\s*'',\s*direction:\s*'none',\s*lineStyle:\s*'dashed',\s*color:\s*''/s,
+    '新建关系应保存 V1.5 的兼容默认样式');
+assert.match(mindMap, /visiblePath\.setAttribute\('marker-end'/,
+    '有向关系应在 SVG 端点绘制箭头');
+assert.match(mindMap, /labelElement\.textContent\s*=\s*label/,
+    '关联标签应通过 textContent 安全写入 SVG');
+assert.match(mindMap, /updateSelectedMindMapRelation\('direction'/,
+    '方向编辑应更新关联数据并进入历史记录');
 assert.match(mindMap, /collectMindMapNodeIds\(findNode\(state\.data,id\), deletedNodeIds\)[\s\S]*?removeMindMapRelationsForNodes\(deletedNodeIds\)/,
     '删除卡片或子树时应同步清理相关关联');
 assert.match(mindMap, /if \(!sourceCard \|\| !targetCard\) return;/,
@@ -39,8 +57,13 @@ const sideSource = mindMap.slice(
     mindMap.indexOf('function getCanvasRelationSides'),
     mindMap.indexOf('function appendMindMapRelationsToCanvas'),
 );
+const appendSource = mindMap.slice(
+    mindMap.indexOf('function appendMindMapRelationsToCanvas'),
+    mindMap.indexOf('// #endregion', mindMap.indexOf('function appendMindMapRelationsToCanvas')),
+);
 assert.ok(pathSource.startsWith('function getMindMapRelationPath'), '应能提取关联曲线路径计算函数');
 assert.ok(sideSource.startsWith('function getCanvasRelationSides'), '应能提取 Canvas 连接侧计算函数');
+assert.ok(appendSource.startsWith('function appendMindMapRelationsToCanvas'), '应能提取 Canvas 关联导出函数');
 
 const context = vm.createContext({});
 vm.runInContext(`${pathSource}\n${sideSource}`, context);
@@ -59,4 +82,30 @@ const verticalSides = vm.runInContext('getCanvasRelationSides(sourceNode, target
 assert.deepEqual({ ...verticalSides }, { fromSide: 'bottom', toSide: 'top' },
     '竖向 Canvas 中上下分布的关联应使用底部到顶部连接');
 
-console.log('卡片关联校验通过：创建、选择、删除、折叠显示、坐标计算与 Canvas 导出逻辑完整。');
+context.getMindMapRelations = () => [{
+    id: 'relation-1', sourceId: 'a', targetId: 'b', direction: 'reverse',
+    label: '依赖于', color: '#1971c2', lineStyle: 'solid'
+}];
+context.getMindMapRelationDirection = relation => relation.direction || 'none';
+context.getMindMapRelationLabel = relation => relation.label || '';
+context.getMindMapRelationColor = relation => relation.color || '';
+vm.runInContext(appendSource, context);
+context.canvasNodes = [
+    { id: 'a', x: 0, y: 0, width: 100, height: 50 },
+    { id: 'b', x: 200, y: 0, width: 100, height: 50 },
+];
+context.canvasEdges = [];
+vm.runInContext('appendMindMapRelationsToCanvas(canvasNodes, canvasEdges)', context);
+assert.deepEqual({ ...context.canvasEdges[0] }, {
+    id: 'relation-1',
+    fromNode: 'b',
+    fromSide: 'left',
+    fromEnd: 'none',
+    toNode: 'a',
+    toSide: 'right',
+    toEnd: 'arrow',
+    label: '依赖于',
+    color: '#1971c2',
+}, '反向关系导出时应翻转端点，并保留箭头、标签和颜色');
+
+console.log('卡片关联校验通过：V1 创建/删除兼容，V1.5 编辑、渲染、历史与 Canvas 导出逻辑完整。');

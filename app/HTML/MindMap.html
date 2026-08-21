@@ -277,6 +277,134 @@
             pointer-events: auto;
             transform: translateY(0);
         }
+
+        .relation-editor {
+            position: fixed;
+            top: 66px;
+            right: 14px;
+            width: min(320px, calc(100vw - 28px));
+            padding: 12px;
+            box-sizing: border-box;
+            color: var(--text-color);
+            background: var(--toolbar-bg);
+            border: 1px solid var(--toolbar-border);
+            border-radius: 12px;
+            box-shadow: 0 10px 30px var(--shadow-color-hover);
+            z-index: 1200;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-6px) scale(0.98);
+            transform-origin: top right;
+            transition: opacity 0.14s ease, transform 0.14s ease, visibility 0.14s;
+        }
+        .relation-editor.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0) scale(1);
+        }
+        .relation-editor-head,
+        .relation-editor-row,
+        .relation-editor-colors {
+            display: flex;
+            align-items: center;
+        }
+        .relation-editor-head { gap: 8px; margin-bottom: 10px; }
+        .relation-editor-title {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            color: var(--text-color-secondary);
+            font-size: 12px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .relation-editor-close {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            display: grid;
+            place-items: center;
+            color: var(--text-color-secondary);
+            background: transparent;
+            border: 0;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .relation-editor-close:hover { color: var(--primary); background: var(--btn-hover); }
+        .relation-editor-field { display: grid; gap: 6px; margin-top: 10px; }
+        .relation-editor-label {
+            color: var(--text-color-secondary);
+            font-size: 12px;
+        }
+        .relation-label-input {
+            width: 100%;
+            height: 34px;
+            padding: 0 10px;
+            box-sizing: border-box;
+            color: var(--text-color);
+            background: var(--card-bg);
+            border: 1px solid var(--toolbar-border);
+            border-radius: 7px;
+            outline: none;
+        }
+        .relation-label-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--shadow-color-active); }
+        .relation-editor-row { gap: 6px; }
+        .relation-choice {
+            flex: 1;
+            min-width: 0;
+            height: 32px;
+            padding: 0 8px;
+            color: var(--text-color-secondary);
+            background: var(--card-bg);
+            border: 1px solid var(--toolbar-border);
+            border-radius: 7px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .relation-choice:hover { color: var(--primary); border-color: var(--primary); }
+        .relation-choice.active {
+            color: var(--primary);
+            background: color-mix(in srgb, var(--primary) 10%, var(--card-bg));
+            border-color: var(--primary);
+        }
+        .relation-editor-colors { gap: 8px; flex-wrap: wrap; }
+        .relation-color-choice {
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: 2px solid var(--toolbar-bg);
+            border-radius: 50%;
+            box-shadow: 0 0 0 1px var(--toolbar-border);
+            cursor: pointer;
+        }
+        .relation-color-choice:hover,
+        .relation-color-choice.active { box-shadow: 0 0 0 2px var(--primary); }
+        .relation-color-choice[data-relation-color=""] {
+            background: linear-gradient(135deg, var(--text-color-secondary) 0 45%, transparent 46% 54%, var(--text-color-secondary) 55% 100%);
+        }
+        .relation-custom-color {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            overflow: hidden;
+            background: transparent;
+            border: 0;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .relation-custom-color::-webkit-color-swatch-wrapper { padding: 2px; }
+        .relation-custom-color::-webkit-color-swatch { border: 1px solid var(--toolbar-border); border-radius: 50%; }
+        .relation-editor-delete {
+            width: 100%;
+            height: 34px;
+            margin-top: 12px;
+            color: #d9363e;
+            background: transparent;
+            border: 1px solid color-mix(in srgb, #d9363e 45%, var(--toolbar-border));
+            border-radius: 7px;
+            cursor: pointer;
+        }
+        .relation-editor-delete:hover { color: #fff; background: #d9363e; border-color: #d9363e; }
         .map-search-bar {
             display: grid;
             grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
@@ -426,7 +554,7 @@
         }
         .relation-line {
             fill: none;
-            stroke: var(--text-color-secondary);
+            stroke: var(--relation-color, var(--text-color-secondary));
             stroke-width: 2.5;
             stroke-linecap: round;
             stroke-dasharray: 8 7;
@@ -443,13 +571,25 @@
         }
         .relation-group:hover .relation-line,
         .relation-group.selected .relation-line {
-            stroke: var(--primary);
             stroke-width: 3.5;
             opacity: 1;
         }
+        .relation-group.solid .relation-line { stroke-dasharray: none; }
         .relation-group.selected .relation-line {
-            stroke-dasharray: none;
             filter: drop-shadow(0 0 4px var(--shadow-color-active));
+        }
+        .relation-label {
+            fill: var(--relation-color, var(--text-color));
+            stroke: var(--bg-color);
+            stroke-width: 5px;
+            stroke-linejoin: round;
+            paint-order: stroke fill;
+            text-anchor: middle;
+            dominant-baseline: central;
+            font-size: 13px;
+            font-weight: 600;
+            pointer-events: none;
+            user-select: none;
         }
         .cursor-grab { cursor: grab; }
         .cursor-grabbing { cursor: grabbing; }
@@ -1399,6 +1539,46 @@
         <div class="map-search-results" id="mapSearchResults" role="listbox" aria-label="搜索结果">
             <div class="map-search-empty">输入关键词，搜索卡片标题和正文</div>
         </div>
+    </section>
+
+    <section class="relation-editor" id="relationEditor" role="dialog" aria-label="编辑卡片关联" aria-hidden="true">
+        <div class="relation-editor-head">
+            <i class="ri-links-line" aria-hidden="true"></i>
+            <span class="relation-editor-title" id="relationEditorTitle">编辑关联</span>
+            <button class="relation-editor-close" id="btn-relation-editor-close" type="button" title="关闭" aria-label="关闭关联编辑器"><i class="ri-close-line"></i></button>
+        </div>
+        <label class="relation-editor-field">
+            <span class="relation-editor-label">标签</span>
+            <input class="relation-label-input" id="relationLabelInput" type="text" maxlength="80" placeholder="可选，例如：依赖于" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="relation-editor-field">
+            <span class="relation-editor-label">方向</span>
+            <div class="relation-editor-row" role="group" aria-label="关联方向">
+                <button class="relation-choice" type="button" data-relation-direction="none">无向</button>
+                <button class="relation-choice" type="button" data-relation-direction="forward">A → B</button>
+                <button class="relation-choice" type="button" data-relation-direction="reverse">B → A</button>
+            </div>
+        </div>
+        <div class="relation-editor-field">
+            <span class="relation-editor-label">线型</span>
+            <div class="relation-editor-row" role="group" aria-label="关联线型">
+                <button class="relation-choice" type="button" data-relation-style="dashed">虚线</button>
+                <button class="relation-choice" type="button" data-relation-style="solid">实线</button>
+            </div>
+        </div>
+        <div class="relation-editor-field">
+            <span class="relation-editor-label">颜色</span>
+            <div class="relation-editor-colors" role="group" aria-label="关联颜色">
+                <button class="relation-color-choice" type="button" data-relation-color="" title="跟随主题" aria-label="跟随主题"></button>
+                <button class="relation-color-choice" type="button" data-relation-color="#e5484d" style="background:#e5484d" title="红色" aria-label="红色"></button>
+                <button class="relation-color-choice" type="button" data-relation-color="#f59f00" style="background:#f59f00" title="橙色" aria-label="橙色"></button>
+                <button class="relation-color-choice" type="button" data-relation-color="#2f9e44" style="background:#2f9e44" title="绿色" aria-label="绿色"></button>
+                <button class="relation-color-choice" type="button" data-relation-color="#1971c2" style="background:#1971c2" title="蓝色" aria-label="蓝色"></button>
+                <button class="relation-color-choice" type="button" data-relation-color="#7950f2" style="background:#7950f2" title="紫色" aria-label="紫色"></button>
+                <input class="relation-custom-color" id="relationCustomColor" type="color" value="#1971c2" title="自定义颜色" aria-label="自定义关联颜色">
+            </div>
+        </div>
+        <button class="relation-editor-delete" id="btn-delete-relation" type="button"><i class="ri-delete-bin-line"></i> 删除关联</button>
     </section>
 
     <div class="color-popup" id="colorPopup">

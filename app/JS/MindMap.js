@@ -54,6 +54,7 @@ function applyImportedMindMap(content) {
         if (!imported || !imported.data) throw new Error('文件中没有思维导图数据');
         state.data = imported.data;
         state.selectedRelationId = null;
+        closeMindMapRelationEditor();
         state.view = imported.view || state.view;
         state.history = [];
         state.historyIndex = -1;
@@ -229,6 +230,7 @@ async function updateState(MindMapData,newCurrentFileID,pageTitle,otherPageOpen=
     document.title = pageTitle;
     state.data = MindMapData.data || defaultTreeData;
     state.selectedRelationId = null;
+    closeMindMapRelationEditor();
     state.view = MindMapData.view || {tx:window.innerWidth/2,ty:window.innerHeight/2,scale:1};
     state.scrollMap = new Map(Object.entries(MindMapData.scrollMap || {}));
     state.history=[];
@@ -286,6 +288,7 @@ function new_MindMap(){
     sessionStorage.setItem('pageTitle', '新建思维导图');
     state.data = JSON.parse(JSON.stringify(defaultTreeData));   // 深拷贝
     state.selectedRelationId = null;
+    closeMindMapRelationEditor();
     state.view = {tx:window.innerWidth/2,ty:window.innerHeight/2,scale:1};
     state.history=[];
     state.historyIndex=-1;
@@ -692,6 +695,7 @@ function initializeMapToolbar() {
                  if(j.data){
                     state.data=j.data;
                     state.selectedRelationId = null;
+                    closeMindMapRelationEditor();
                     state.view=j.view||state.view;
                     state.history=[];
                     state.historyIndex=-1;
@@ -1921,6 +1925,8 @@ function insertTextFormat(prefix, suffix, restoreFocus = true) {
 // #region 卡片关联
 // =============================================================================
 const MINDMAP_RELATION_SVG_NS = 'http://www.w3.org/2000/svg';
+const MINDMAP_RELATION_DIRECTIONS = new Set(['none', 'forward', 'reverse']);
+const MINDMAP_RELATION_LINE_STYLES = new Set(['dashed', 'solid']);
 let relationRenderFrame = null;
 
 function getMindMapRelations() {
@@ -1930,6 +1936,119 @@ function getMindMapRelations() {
 function ensureMindMapRelations() {
     if (!Array.isArray(state.data.relations)) state.data.relations = [];
     return state.data.relations;
+}
+
+function getMindMapRelationById(relationId) {
+    return getMindMapRelations().find(relation => relation.id === relationId) || null;
+}
+
+function getMindMapRelationDirection(relation) {
+    return MINDMAP_RELATION_DIRECTIONS.has(relation?.direction) ? relation.direction : 'none';
+}
+
+function getMindMapRelationLineStyle(relation) {
+    return MINDMAP_RELATION_LINE_STYLES.has(relation?.lineStyle) ? relation.lineStyle : 'dashed';
+}
+
+function getMindMapRelationColor(relation) {
+    const color = String(relation?.color || '').trim().toLowerCase();
+    return /^#[0-9a-f]{6}$/.test(color) ? color : '';
+}
+
+function getMindMapRelationLabel(relation) {
+    return String(relation?.label || '').slice(0, 80);
+}
+
+function getMindMapNodeLabel(nodeId) {
+    const node = findNode(state.data, nodeId);
+    const label = String(node?.topic || '').replace(/\s+/g, ' ').trim();
+    return label || '未命名卡片';
+}
+
+function closeMindMapRelationEditor() {
+    const panel = $('#relationEditor');
+    if (!panel) return;
+    panel.classList.remove('active');
+    panel.setAttribute('aria-hidden', 'true');
+}
+
+function commitMindMapRelationEditor() {
+    const panel = $('#relationEditor');
+    const relation = getMindMapRelationById(state.selectedRelationId);
+    if (!panel?.classList.contains('active') || !relation) return;
+    const labelInput = $('#relationLabelInput');
+    if (labelInput) relation.label = labelInput.value.slice(0, 80);
+    recordHistory();
+}
+
+function syncMindMapRelationEditor(relation) {
+    const panel = $('#relationEditor');
+    if (!panel || !relation) return;
+    const sourceLabel = getMindMapNodeLabel(relation.sourceId);
+    const targetLabel = getMindMapNodeLabel(relation.targetId);
+    $('#relationEditorTitle').textContent = `${sourceLabel}  ·  ${targetLabel}`;
+    $('#relationLabelInput').value = getMindMapRelationLabel(relation);
+
+    const direction = getMindMapRelationDirection(relation);
+    panel.querySelectorAll('[data-relation-direction]').forEach(button => {
+        const active = button.dataset.relationDirection === direction;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+        if (button.dataset.relationDirection === 'forward') button.title = `${sourceLabel} → ${targetLabel}`;
+        if (button.dataset.relationDirection === 'reverse') button.title = `${targetLabel} → ${sourceLabel}`;
+    });
+
+    const lineStyle = getMindMapRelationLineStyle(relation);
+    panel.querySelectorAll('[data-relation-style]').forEach(button => {
+        const active = button.dataset.relationStyle === lineStyle;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+    });
+
+    const color = getMindMapRelationColor(relation);
+    panel.querySelectorAll('[data-relation-color]').forEach(button => {
+        const active = button.dataset.relationColor === color;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+    });
+    if (color) $('#relationCustomColor').value = color;
+}
+
+function positionMindMapRelationEditor(clientPoint) {
+    const panel = $('#relationEditor');
+    if (!panel) return;
+    if (!clientPoint) {
+        panel.style.left = '';
+        panel.style.top = '';
+        panel.style.right = '';
+        return;
+    }
+    const width = panel.offsetWidth || 320;
+    const height = panel.offsetHeight || 330;
+    const left = Math.max(10, Math.min(clientPoint.x + 12, window.innerWidth - width - 10));
+    const top = Math.max(10, Math.min(clientPoint.y + 12, window.innerHeight - height - 10));
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+    panel.style.right = 'auto';
+}
+
+function openMindMapRelationEditor(relationId, clientPoint) {
+    const relation = getMindMapRelationById(relationId);
+    const panel = $('#relationEditor');
+    if (!relation || !panel) return;
+    syncMindMapRelationEditor(relation);
+    panel.classList.add('active');
+    panel.setAttribute('aria-hidden', 'false');
+    positionMindMapRelationEditor(clientPoint);
+}
+
+function updateSelectedMindMapRelation(property, value, shouldRecord = true) {
+    const relation = getMindMapRelationById(state.selectedRelationId);
+    if (!relation) return;
+    relation[property] = value;
+    syncMindMapRelationEditor(relation);
+    scheduleRenderMindMapRelations();
+    if (shouldRecord) recordHistory();
 }
 
 function collectMindMapNodeIds(node, targetSet = new Set()) {
@@ -1947,6 +2066,7 @@ function removeMindMapRelationsForNodes(nodeIds) {
     );
     if (state.selectedRelationId && !state.data.relations.some(item => item.id === state.selectedRelationId)) {
         state.selectedRelationId = null;
+        closeMindMapRelationEditor();
     }
     return state.data.relations.length !== previousLength;
 }
@@ -1970,7 +2090,11 @@ function addRelationBetweenSelectedCards() {
     const relation = {
         id: `relation_${generateNodeId()}`,
         sourceId,
-        targetId
+        targetId,
+        label: '',
+        direction: 'none',
+        lineStyle: 'dashed',
+        color: ''
     };
     ensureMindMapRelations().push(relation);
     state.selectedRelationId = relation.id;
@@ -1978,6 +2102,7 @@ function addRelationBetweenSelectedCards() {
     recordHistory();
     updateSelection();
     scheduleRenderMindMapRelations();
+    openMindMapRelationEditor(relation.id);
     if (typeof showTopToast === 'function') showTopToast('🔗 已建立卡片关联');
 }
 
@@ -1987,6 +2112,7 @@ function deleteSelectedMindMapRelation() {
     const previousLength = state.data.relations.length;
     state.data.relations = state.data.relations.filter(relation => relation.id !== relationId);
     state.selectedRelationId = null;
+    closeMindMapRelationEditor();
     if (state.data.relations.length !== previousLength) {
         recordHistory();
         if (typeof showTopToast === 'function') showTopToast('🗑️ 已删除卡片关联');
@@ -1997,17 +2123,21 @@ function deleteSelectedMindMapRelation() {
 
 function clearSelectedMindMapRelation() {
     if (!state.selectedRelationId) return;
+    commitMindMapRelationEditor();
     state.selectedRelationId = null;
+    closeMindMapRelationEditor();
     scheduleRenderMindMapRelations();
     updateToolbar();
 }
 
-function selectMindMapRelation(relationId) {
+function selectMindMapRelation(relationId, clientPoint) {
     if (!getMindMapRelations().some(relation => relation.id === relationId)) return;
+    if (state.selectedRelationId && state.selectedRelationId !== relationId) commitMindMapRelationEditor();
     state.selectedRelationId = relationId;
     state.selectedIds.clear();
     updateSelection();
     scheduleRenderMindMapRelations();
+    openMindMapRelationEditor(relationId, clientPoint);
 }
 
 function getMindMapRelationPath(sourceRect, targetRect, view = state.view) {
@@ -2067,25 +2197,54 @@ function renderMindMapRelations() {
     const relations = getMindMapRelations();
     if (state.selectedRelationId && !relations.some(relation => relation.id === state.selectedRelationId)) {
         state.selectedRelationId = null;
+        closeMindMapRelationEditor();
     }
 
-    relations.forEach(relation => {
+    const defs = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'defs');
+    layer.appendChild(defs);
+
+    relations.forEach((relation, index) => {
         const sourceCard = document.getElementById(`card-${relation.sourceId}`);
         const targetCard = document.getElementById(`card-${relation.targetId}`);
         if (!sourceCard || !targetCard) return;
 
+        const direction = getMindMapRelationDirection(relation);
+        const relationColor = getMindMapRelationColor(relation);
+        const fromCard = direction === 'reverse' ? targetCard : sourceCard;
+        const toCard = direction === 'reverse' ? sourceCard : targetCard;
+
         const pathData = getMindMapRelationPath(
-            sourceCard.getBoundingClientRect(),
-            targetCard.getBoundingClientRect()
+            fromCard.getBoundingClientRect(),
+            toCard.getBoundingClientRect()
         );
         const group = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'g');
         group.classList.add('relation-group');
+        group.classList.toggle('solid', getMindMapRelationLineStyle(relation) === 'solid');
         group.classList.toggle('selected', relation.id === state.selectedRelationId);
         group.dataset.relationId = relation.id;
+        group.style.setProperty('--relation-color', relationColor || 'var(--text-color-secondary)');
 
         const visiblePath = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'path');
         visiblePath.classList.add('relation-line');
         visiblePath.setAttribute('d', pathData);
+        if (direction !== 'none') {
+            const markerId = `relation-arrow-${index}`;
+            const marker = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'marker');
+            marker.setAttribute('id', markerId);
+            marker.setAttribute('viewBox', '0 0 8 8');
+            marker.setAttribute('markerWidth', '8');
+            marker.setAttribute('markerHeight', '8');
+            marker.setAttribute('refX', '7');
+            marker.setAttribute('refY', '4');
+            marker.setAttribute('orient', 'auto');
+            marker.setAttribute('markerUnits', 'strokeWidth');
+            const arrow = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'path');
+            arrow.setAttribute('d', 'M 0 0 L 8 4 L 0 8 Z');
+            arrow.style.fill = relationColor || 'var(--text-color-secondary)';
+            marker.appendChild(arrow);
+            defs.appendChild(marker);
+            visiblePath.setAttribute('marker-end', `url(#${markerId})`);
+        }
         group.appendChild(visiblePath);
 
         const hitPath = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'path');
@@ -2094,6 +2253,21 @@ function renderMindMapRelations() {
         hitPath.setAttribute('d', pathData);
         group.appendChild(hitPath);
         layer.appendChild(group);
+
+        const label = getMindMapRelationLabel(relation).trim();
+        if (label) {
+            const labelElement = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'text');
+            labelElement.classList.add('relation-label');
+            labelElement.textContent = label;
+            try {
+                const midpoint = visiblePath.getPointAtLength(visiblePath.getTotalLength() / 2);
+                labelElement.setAttribute('x', String(midpoint.x));
+                labelElement.setAttribute('y', String(midpoint.y - 10));
+            } catch (error) {
+                console.warn('[MindMap] 无法计算关联标签位置:', error);
+            }
+            group.appendChild(labelElement);
+        }
     });
 }
 
@@ -2104,14 +2278,63 @@ function scheduleRenderMindMapRelations() {
 
 function initializeMindMapRelations() {
     const layer = $('#relation-layer');
-    if (!layer) return;
+    const panel = $('#relationEditor');
+    if (!layer || !panel) return;
     layer.addEventListener('mousedown', event => {
         if (event.button !== 0) return;
         const hitPath = event.target.closest('.relation-hit');
         if (!hitPath) return;
         event.preventDefault();
         event.stopPropagation();
-        selectMindMapRelation(hitPath.dataset.relationId);
+        selectMindMapRelation(hitPath.dataset.relationId, { x: event.clientX, y: event.clientY });
+    });
+    panel.addEventListener('mousedown', event => event.stopPropagation());
+    $('#btn-relation-editor-close').addEventListener('click', clearSelectedMindMapRelation);
+    $('#btn-delete-relation').addEventListener('click', deleteSelectedMindMapRelation);
+
+    const labelInput = $('#relationLabelInput');
+    labelInput.addEventListener('input', () => {
+        const relation = getMindMapRelationById(state.selectedRelationId);
+        if (!relation) return;
+        relation.label = labelInput.value.slice(0, 80);
+        scheduleRenderMindMapRelations();
+    });
+    labelInput.addEventListener('change', recordHistory);
+    labelInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            labelInput.blur();
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            clearSelectedMindMapRelation();
+        }
+    });
+
+    panel.querySelectorAll('[data-relation-direction]').forEach(button => {
+        button.addEventListener('click', () => {
+            updateSelectedMindMapRelation('direction', button.dataset.relationDirection);
+        });
+    });
+    panel.querySelectorAll('[data-relation-style]').forEach(button => {
+        button.addEventListener('click', () => {
+            updateSelectedMindMapRelation('lineStyle', button.dataset.relationStyle);
+        });
+    });
+    panel.querySelectorAll('[data-relation-color]').forEach(button => {
+        button.addEventListener('click', () => {
+            updateSelectedMindMapRelation('color', button.dataset.relationColor);
+        });
+    });
+    const customColor = $('#relationCustomColor');
+    customColor.addEventListener('input', () => {
+        updateSelectedMindMapRelation('color', customColor.value.toLowerCase(), false);
+    });
+    customColor.addEventListener('change', recordHistory);
+    panel.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && event.target !== labelInput) {
+            event.preventDefault();
+            clearSelectedMindMapRelation();
+        }
     });
     scheduleRenderMindMapRelations();
 }
@@ -2134,17 +2357,27 @@ function getCanvasRelationSides(sourceNode, targetNode) {
 function appendMindMapRelationsToCanvas(canvasNodes, canvasEdges) {
     const nodeMap = new Map(canvasNodes.map(node => [node.id, node]));
     getMindMapRelations().forEach(relation => {
-        const sourceNode = nodeMap.get(relation.sourceId);
-        const targetNode = nodeMap.get(relation.targetId);
+        const direction = getMindMapRelationDirection(relation);
+        const fromNodeId = direction === 'reverse' ? relation.targetId : relation.sourceId;
+        const toNodeId = direction === 'reverse' ? relation.sourceId : relation.targetId;
+        const sourceNode = nodeMap.get(fromNodeId);
+        const targetNode = nodeMap.get(toNodeId);
         if (!sourceNode || !targetNode) return;
         const sides = getCanvasRelationSides(sourceNode, targetNode);
-        canvasEdges.push({
+        const edge = {
             id: relation.id,
-            fromNode: relation.sourceId,
+            fromNode: fromNodeId,
             fromSide: sides.fromSide,
-            toNode: relation.targetId,
-            toSide: sides.toSide
-        });
+            fromEnd: 'none',
+            toNode: toNodeId,
+            toSide: sides.toSide,
+            toEnd: direction === 'none' ? 'none' : 'arrow'
+        };
+        const label = getMindMapRelationLabel(relation).trim();
+        const color = getMindMapRelationColor(relation);
+        if (label) edge.label = label;
+        if (color) edge.color = color;
+        canvasEdges.push(edge);
     });
 }
 // #endregion
@@ -2391,6 +2624,7 @@ function locateMapSearchResult(index) {
     renderTree();
 
     state.selectedRelationId = null;
+    closeMindMapRelationEditor();
     state.selectedIds.clear();
     state.selectedIds.add(result.id);
     updateSelection();
@@ -2714,6 +2948,7 @@ function restoreHistory() {
     state.data = prevData;
     state.selectedIds.clear(); 
     state.selectedRelationId = null;
+    closeMindMapRelationEditor();
     
     if (isStructureSame) {
         // 情况 A：仅颜色变化 -> 使用无损更新
