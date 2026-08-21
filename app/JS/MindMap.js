@@ -1927,7 +1927,22 @@ function insertTextFormat(prefix, suffix, restoreFocus = true) {
 const MINDMAP_RELATION_SVG_NS = 'http://www.w3.org/2000/svg';
 const MINDMAP_RELATION_DIRECTIONS = new Set(['none', 'forward', 'reverse']);
 const MINDMAP_RELATION_LINE_STYLES = new Set(['dashed', 'solid']);
+const MINDMAP_RELATION_ROUTING_PADDING = 18;
+const MINDMAP_RELATION_SOURCE_CLEARANCE = 28;
+const MINDMAP_RELATION_TARGET_APPROACH = 48;
+const MINDMAP_RELATION_ARROW_SIZE = 12;
+const MINDMAP_RELATION_FOLD_BUTTON_PADDING = 6;
+const MINDMAP_RELATION_OBSTACLE_EDGE_PENALTY = 36;
+const MINDMAP_RELATION_CHANNEL_DEVIATION_PENALTY = 48;
+const MINDMAP_RELATION_TERMINAL_ALIGNMENT_PENALTY = 48;
+const MINDMAP_RELATION_LANE_GAP = 12;
+const MINDMAP_RELATION_TURN_PENALTY = 28;
+const MINDMAP_RELATION_CROSSING_PENALTY = 420;
+const MINDMAP_RELATION_OVERLAP_PENALTY = 720;
+const MINDMAP_RELATION_RESERVED_SIDE_PENALTY = 1200;
+const MINDMAP_RELATION_ROUTE_CANDIDATES = 12;
 let relationRenderFrame = null;
+let relationRouteCache = { key: '', routes: new Map() };
 
 function getMindMapRelations() {
     return Array.isArray(state.data?.relations) ? state.data.relations : [];
@@ -2188,6 +2203,739 @@ function getMindMapRelationPath(sourceRect, targetRect, view = state.view) {
     return `M ${round(from.x)} ${round(from.y)} C ${round(control1.x)} ${round(control1.y)}, ${round(control2.x)} ${round(control2.y)}, ${round(to.x)} ${round(to.y)}`;
 }
 
+function getMindMapCanvasRect(element, view = state.view) {
+    const rect = element.getBoundingClientRect();
+    const scale = view.scale || 1;
+    const left = (rect.left - view.tx) / scale;
+    const top = (rect.top - view.ty) / scale;
+    const width = rect.width / scale;
+    const height = rect.height / scale;
+    return {
+        id: element.dataset.nodeId,
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
+        width,
+        height
+    };
+}
+
+function expandMindMapRelationObstacle(rect, padding = MINDMAP_RELATION_ROUTING_PADDING) {
+    return {
+        id: rect.id,
+        left: rect.left - padding,
+        top: rect.top - padding,
+        right: rect.right + padding,
+        bottom: rect.bottom + padding
+    };
+}
+
+function getMindMapRelationSideVector(side) {
+    if (side === 'left') return { x: -1, y: 0 };
+    if (side === 'right') return { x: 1, y: 0 };
+    if (side === 'top') return { x: 0, y: -1 };
+    return { x: 0, y: 1 };
+}
+
+function clampMindMapRelationPort(value, min, max) {
+    if (min > max) return (min + max) / 2;
+    return Math.max(min, Math.min(value, max));
+}
+
+function getMindMapRelationPort(
+    rect,
+    side,
+    laneOffset = 0,
+    padding = MINDMAP_RELATION_ROUTING_PADDING,
+    preferredAlong = null
+) {
+    const horizontalSide = side === 'left' || side === 'right';
+    const inset = 12;
+    const centerAlong = horizontalSide ? rect.top + rect.height / 2 : rect.left + rect.width / 2;
+    const desiredAlong = Number.isFinite(preferredAlong) ? preferredAlong : centerAlong;
+    const along = horizontalSide
+        ? clampMindMapRelationPort(desiredAlong + laneOffset, rect.top + inset, rect.bottom - inset)
+        : clampMindMapRelationPort(desiredAlong + laneOffset, rect.left + inset, rect.right - inset);
+    const port = horizontalSide
+        ? { x: side === 'left' ? rect.left : rect.right, y: along }
+        : { x: along, y: side === 'top' ? rect.top : rect.bottom };
+    const vector = getMindMapRelationSideVector(side);
+    return {
+        port,
+        routePoint: {
+            x: port.x + vector.x * padding,
+            y: port.y + vector.y * padding
+        }
+    };
+}
+
+function getMindMapRelationReservedSides(nodeId) {
+    const reservedSides = new Set();
+    if (nodeId === state.data.id) {
+        const children = state.data.children || [];
+        if (children.some(child => child.dir === 'left')) reservedSides.add('left');
+        if (children.some(child => child.dir !== 'left')) reservedSides.add('right');
+        return reservedSides;
+    }
+    reservedSides.add(isDescendantOfLeft(nodeId) ? 'right' : 'left');
+    return reservedSides;
+}
+
+function getMindMapRelationSideCandidates(
+    sourceRect,
+    targetRect,
+    sourceReservedSides = new Set(),
+    targetReservedSides = new Set()
+) {
+    const sides = ['left', 'right', 'top', 'bottom'];
+    const sourceCenter = { x: sourceRect.left + sourceRect.width / 2, y: sourceRect.top + sourceRect.height / 2 };
+    const targetCenter = { x: targetRect.left + targetRect.width / 2, y: targetRect.top + targetRect.height / 2 };
+    const dx = targetCenter.x - sourceCenter.x;
+    const dy = targetCenter.y - sourceCenter.y;
+    const distance = Math.max(1, Math.hypot(dx, dy));
+    const candidates = [];
+
+    sides.forEach(sourceSide => {
+        sides.forEach(targetSide => {
+            const sourceUsesVerticalEdge = sourceSide === 'left' || sourceSide === 'right';
+            const targetUsesVerticalEdge = targetSide === 'left' || targetSide === 'right';
+            const sourcePreferredAlong = sourceUsesVerticalEdge ? sourceCenter.y : sourceCenter.x;
+            const targetPreferredAlong = targetUsesVerticalEdge ? targetCenter.y : targetCenter.x;
+            const sourcePort = getMindMapRelationPort(
+                sourceRect,
+                sourceSide,
+                0,
+                MINDMAP_RELATION_SOURCE_CLEARANCE,
+                sourcePreferredAlong
+            );
+            const targetPort = getMindMapRelationPort(
+                targetRect,
+                targetSide,
+                0,
+                MINDMAP_RELATION_TARGET_APPROACH,
+                targetPreferredAlong
+            );
+            const sourceVector = getMindMapRelationSideVector(sourceSide);
+            const targetVector = getMindMapRelationSideVector(targetSide);
+            const sourceAlignment = (sourceVector.x * dx + sourceVector.y * dy) / distance;
+            const targetAlignment = (targetVector.x * -dx + targetVector.y * -dy) / distance;
+            const alignmentPenalty = (2 - sourceAlignment - targetAlignment) * 100;
+            const reservedSidePenalty = (sourceReservedSides.has(sourceSide) ? MINDMAP_RELATION_RESERVED_SIDE_PENALTY : 0)
+                + (targetReservedSides.has(targetSide) ? MINDMAP_RELATION_RESERVED_SIDE_PENALTY : 0);
+            const estimatedDistance = Math.abs(sourcePort.routePoint.x - targetPort.routePoint.x)
+                + Math.abs(sourcePort.routePoint.y - targetPort.routePoint.y);
+            candidates.push({
+                sourceSide,
+                targetSide,
+                sourcePort,
+                targetPort,
+                estimatedDistance,
+                alignmentPenalty,
+                reservedSidePenalty,
+                estimate: estimatedDistance + alignmentPenalty + reservedSidePenalty
+            });
+        });
+    });
+
+    return candidates
+        .sort((a, b) => a.estimate - b.estimate)
+        .slice(0, MINDMAP_RELATION_ROUTE_CANDIDATES);
+}
+
+function isMindMapRelationPointInsideObstacle(point, obstacle, epsilon = 0.1) {
+    return point.x > obstacle.left + epsilon
+        && point.x < obstacle.right - epsilon
+        && point.y > obstacle.top + epsilon
+        && point.y < obstacle.bottom - epsilon;
+}
+
+function isMindMapRelationSegmentClear(from, to, obstacles) {
+    const epsilon = 0.1;
+    if (Math.abs(from.y - to.y) < epsilon) {
+        const y = from.y;
+        const minX = Math.min(from.x, to.x);
+        const maxX = Math.max(from.x, to.x);
+        return !obstacles.some(obstacle =>
+            y > obstacle.top + epsilon
+            && y < obstacle.bottom - epsilon
+            && Math.max(minX, obstacle.left) < Math.min(maxX, obstacle.right) - epsilon
+        );
+    }
+    if (Math.abs(from.x - to.x) < epsilon) {
+        const x = from.x;
+        const minY = Math.min(from.y, to.y);
+        const maxY = Math.max(from.y, to.y);
+        return !obstacles.some(obstacle =>
+            x > obstacle.left + epsilon
+            && x < obstacle.right - epsilon
+            && Math.max(minY, obstacle.top) < Math.min(maxY, obstacle.bottom) - epsilon
+        );
+    }
+    return false;
+}
+
+function getMindMapRelationObstacleEdgePenalty(from, to, obstacles) {
+    const epsilon = 0.1;
+    const horizontal = Math.abs(from.y - to.y) < epsilon;
+    const segmentMin = horizontal ? Math.min(from.x, to.x) : Math.min(from.y, to.y);
+    const segmentMax = horizontal ? Math.max(from.x, to.x) : Math.max(from.y, to.y);
+    const followsObstacleEdge = obstacles.some(obstacle => {
+        const coordinate = horizontal ? from.y : from.x;
+        const onEdge = horizontal
+            ? Math.abs(coordinate - obstacle.top) < epsilon || Math.abs(coordinate - obstacle.bottom) < epsilon
+            : Math.abs(coordinate - obstacle.left) < epsilon || Math.abs(coordinate - obstacle.right) < epsilon;
+        if (!onEdge) return false;
+        const obstacleMin = horizontal ? obstacle.left : obstacle.top;
+        const obstacleMax = horizontal ? obstacle.right : obstacle.bottom;
+        return Math.max(segmentMin, obstacleMin) < Math.min(segmentMax, obstacleMax) - epsilon;
+    });
+    return followsObstacleEdge ? MINDMAP_RELATION_OBSTACLE_EDGE_PENALTY : 0;
+}
+
+function getMindMapRelationChannelDeviationPenalty(from, to, preferredChannels) {
+    const epsilon = 0.1;
+    const horizontal = Math.abs(from.y - to.y) < epsilon;
+    const segmentMin = horizontal ? Math.min(from.x, to.x) : Math.min(from.y, to.y);
+    const segmentMax = horizontal ? Math.max(from.x, to.x) : Math.max(from.y, to.y);
+    const matchingChannels = preferredChannels.filter(channel => {
+        if (channel.axis !== (horizontal ? 'y' : 'x')) return false;
+        const channelMin = Number.isFinite(channel.min) ? channel.min : -Infinity;
+        const channelMax = Number.isFinite(channel.max) ? channel.max : Infinity;
+        return Math.max(segmentMin, channelMin) < Math.min(segmentMax, channelMax) - epsilon;
+    });
+    if (matchingChannels.length === 0) return 0;
+    const coordinate = horizontal ? from.y : from.x;
+    if (matchingChannels.some(channel => Math.abs(coordinate - channel.coordinate) < epsilon)) return 0;
+    const nearPreferredChannel = matchingChannels.some(channel =>
+        Math.abs(coordinate - channel.coordinate) <= MINDMAP_RELATION_ROUTING_PADDING * 2
+    );
+    return nearPreferredChannel ? MINDMAP_RELATION_CHANNEL_DEVIATION_PENALTY : 0;
+}
+
+function getMindMapRelationTerminalAlignmentPenalty(
+    from,
+    to,
+    end,
+    terminalDirection,
+    preferredChannels
+) {
+    const epsilon = 0.1;
+    const horizontal = Math.abs(from.y - to.y) < epsilon;
+    const moveDirection = horizontal ? 1 : 2;
+    if (!terminalDirection || moveDirection !== terminalDirection) return 0;
+
+    const coordinate = horizontal ? from.y : from.x;
+    const targetCoordinate = horizontal ? end.y : end.x;
+    if (Math.abs(coordinate - targetCoordinate) < epsilon) return 0;
+
+    const segmentMin = horizontal ? Math.min(from.x, to.x) : Math.min(from.y, to.y);
+    const segmentMax = horizontal ? Math.max(from.x, to.x) : Math.max(from.y, to.y);
+    const followsPreferredChannel = preferredChannels.some(channel => {
+        if (channel.axis !== (horizontal ? 'y' : 'x')) return false;
+        if (Math.abs(coordinate - channel.coordinate) >= epsilon) return false;
+        const channelMin = Number.isFinite(channel.min) ? channel.min : -Infinity;
+        const channelMax = Number.isFinite(channel.max) ? channel.max : Infinity;
+        return Math.max(segmentMin, channelMin) < Math.min(segmentMax, channelMax) - epsilon;
+    });
+    return followsPreferredChannel ? 0 : MINDMAP_RELATION_TERMINAL_ALIGNMENT_PENALTY;
+}
+
+function getMindMapRelationSegmentInteractionPenalty(from, to, occupiedSegments, routeTerminals = []) {
+    const epsilon = 0.1;
+    const horizontal = Math.abs(from.y - to.y) < epsilon;
+    let penalty = 0;
+    occupiedSegments.forEach(segment => {
+        const occupiedHorizontal = Math.abs(segment.from.y - segment.to.y) < epsilon;
+        if (horizontal === occupiedHorizontal) {
+            const sameLine = horizontal
+                ? Math.abs(from.y - segment.from.y) < epsilon
+                : Math.abs(from.x - segment.from.x) < epsilon;
+            if (!sameLine) return;
+            const currentMin = horizontal ? Math.min(from.x, to.x) : Math.min(from.y, to.y);
+            const currentMax = horizontal ? Math.max(from.x, to.x) : Math.max(from.y, to.y);
+            const occupiedMin = horizontal ? Math.min(segment.from.x, segment.to.x) : Math.min(segment.from.y, segment.to.y);
+            const occupiedMax = horizontal ? Math.max(segment.from.x, segment.to.x) : Math.max(segment.from.y, segment.to.y);
+            const overlap = Math.min(currentMax, occupiedMax) - Math.max(currentMin, occupiedMin);
+            if (overlap > epsilon) penalty += MINDMAP_RELATION_OVERLAP_PENALTY + overlap * 6;
+            return;
+        }
+
+        const horizontalSegment = horizontal ? { from, to } : segment;
+        const verticalSegment = horizontal ? segment : { from, to };
+        const horizontalMin = Math.min(horizontalSegment.from.x, horizontalSegment.to.x);
+        const horizontalMax = Math.max(horizontalSegment.from.x, horizontalSegment.to.x);
+        const verticalMin = Math.min(verticalSegment.from.y, verticalSegment.to.y);
+        const verticalMax = Math.max(verticalSegment.from.y, verticalSegment.to.y);
+        const crossingX = verticalSegment.from.x;
+        const crossingY = horizontalSegment.from.y;
+        const intersects = crossingX >= horizontalMin - epsilon
+            && crossingX <= horizontalMax + epsilon
+            && crossingY >= verticalMin - epsilon
+            && crossingY <= verticalMax + epsilon;
+        const nearTerminal = routeTerminals.some(point =>
+            Math.hypot(crossingX - point.x, crossingY - point.y) <= MINDMAP_RELATION_LANE_GAP * 1.5
+        );
+        if (intersects && !nearTerminal) penalty += MINDMAP_RELATION_CROSSING_PENALTY;
+    });
+    return penalty;
+}
+
+function pushMindMapRelationQueue(queue, item) {
+    queue.push(item);
+    let index = queue.length - 1;
+    while (index > 0) {
+        const parent = Math.floor((index - 1) / 2);
+        if (queue[parent].priority <= item.priority) break;
+        queue[index] = queue[parent];
+        index = parent;
+    }
+    queue[index] = item;
+}
+
+function popMindMapRelationQueue(queue) {
+    if (queue.length === 0) return null;
+    const first = queue[0];
+    const last = queue.pop();
+    if (queue.length === 0) return first;
+    let index = 0;
+    while (true) {
+        let child = index * 2 + 1;
+        if (child >= queue.length) break;
+        if (child + 1 < queue.length && queue[child + 1].priority < queue[child].priority) child++;
+        if (queue[child].priority >= last.priority) break;
+        queue[index] = queue[child];
+        index = child;
+    }
+    queue[index] = last;
+    return first;
+}
+
+function findMindMapOrthogonalRoute(
+    start,
+    end,
+    obstacles,
+    occupiedSegments = [],
+    preferredChannels = [],
+    terminalDirection = 0
+) {
+    const round = value => Math.round(value * 10) / 10;
+    const xs = [start.x, end.x];
+    const ys = [start.y, end.y];
+    preferredChannels.forEach(channel => {
+        if (channel.axis === 'x') {
+            xs.push(channel.coordinate);
+            if (Number.isFinite(channel.min)) ys.push(channel.min);
+            if (Number.isFinite(channel.max)) ys.push(channel.max);
+        }
+        if (channel.axis === 'y') {
+            ys.push(channel.coordinate);
+            if (Number.isFinite(channel.min)) xs.push(channel.min);
+            if (Number.isFinite(channel.max)) xs.push(channel.max);
+        }
+    });
+    obstacles.forEach(obstacle => {
+        xs.push(obstacle.left, obstacle.right);
+        ys.push(obstacle.top, obstacle.bottom);
+    });
+    occupiedSegments.forEach(segment => {
+        if (Math.abs(segment.from.x - segment.to.x) < 0.1) {
+            xs.push(segment.from.x - MINDMAP_RELATION_LANE_GAP, segment.from.x + MINDMAP_RELATION_LANE_GAP);
+            const minY = Math.min(segment.from.y, segment.to.y);
+            const maxY = Math.max(segment.from.y, segment.to.y);
+            ys.push(minY, maxY, minY - MINDMAP_RELATION_LANE_GAP, maxY + MINDMAP_RELATION_LANE_GAP);
+        } else {
+            ys.push(segment.from.y - MINDMAP_RELATION_LANE_GAP, segment.from.y + MINDMAP_RELATION_LANE_GAP);
+            const minX = Math.min(segment.from.x, segment.to.x);
+            const maxX = Math.max(segment.from.x, segment.to.x);
+            xs.push(minX, maxX, minX - MINDMAP_RELATION_LANE_GAP, maxX + MINDMAP_RELATION_LANE_GAP);
+        }
+    });
+    if (obstacles.length > 0) {
+        xs.push(Math.min(...obstacles.map(item => item.left)) - MINDMAP_RELATION_LANE_GAP);
+        xs.push(Math.max(...obstacles.map(item => item.right)) + MINDMAP_RELATION_LANE_GAP);
+        ys.push(Math.min(...obstacles.map(item => item.top)) - MINDMAP_RELATION_LANE_GAP);
+        ys.push(Math.max(...obstacles.map(item => item.bottom)) + MINDMAP_RELATION_LANE_GAP);
+    }
+
+    const xValues = Array.from(new Set(xs.map(round))).sort((a, b) => a - b);
+    const yValues = Array.from(new Set(ys.map(round))).sort((a, b) => a - b);
+    const startX = xValues.indexOf(round(start.x));
+    const startY = yValues.indexOf(round(start.y));
+    const endX = xValues.indexOf(round(end.x));
+    const endY = yValues.indexOf(round(end.y));
+    if (startX < 0 || startY < 0 || endX < 0 || endY < 0) return null;
+
+    const queue = [];
+    const distances = new Map();
+    const parents = new Map();
+    const startKey = `${startX},${startY},0`;
+    distances.set(startKey, 0);
+    pushMindMapRelationQueue(queue, {
+        xIndex: startX,
+        yIndex: startY,
+        direction: 0,
+        cost: 0,
+        priority: Math.abs(start.x - end.x) + Math.abs(start.y - end.y),
+        key: startKey
+    });
+
+    let completed = null;
+    while (queue.length > 0) {
+        const current = popMindMapRelationQueue(queue);
+        if (current.cost !== distances.get(current.key)) continue;
+        if (current.xIndex === endX && current.yIndex === endY) {
+            completed = current;
+            break;
+        }
+
+        const moves = [
+            { xIndex: current.xIndex - 1, yIndex: current.yIndex, direction: 1 },
+            { xIndex: current.xIndex + 1, yIndex: current.yIndex, direction: 1 },
+            { xIndex: current.xIndex, yIndex: current.yIndex - 1, direction: 2 },
+            { xIndex: current.xIndex, yIndex: current.yIndex + 1, direction: 2 }
+        ];
+        moves.forEach(move => {
+            if (move.xIndex < 0 || move.xIndex >= xValues.length || move.yIndex < 0 || move.yIndex >= yValues.length) return;
+            const from = { x: xValues[current.xIndex], y: yValues[current.yIndex] };
+            const to = { x: xValues[move.xIndex], y: yValues[move.yIndex] };
+            if (obstacles.some(obstacle => isMindMapRelationPointInsideObstacle(to, obstacle))) return;
+            if (!isMindMapRelationSegmentClear(from, to, obstacles)) return;
+            const length = Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
+            const turnPenalty = current.direction !== 0 && current.direction !== move.direction
+                ? MINDMAP_RELATION_TURN_PENALTY
+                : 0;
+            const interactionPenalty = getMindMapRelationSegmentInteractionPenalty(from, to, occupiedSegments, [start, end]);
+            const obstacleEdgePenalty = getMindMapRelationObstacleEdgePenalty(from, to, obstacles);
+            const channelDeviationPenalty = getMindMapRelationChannelDeviationPenalty(from, to, preferredChannels);
+            const terminalAlignmentPenalty = getMindMapRelationTerminalAlignmentPenalty(
+                from,
+                to,
+                end,
+                terminalDirection,
+                preferredChannels
+            );
+            const nextCost = current.cost
+                + length
+                + turnPenalty
+                + interactionPenalty
+                + obstacleEdgePenalty
+                + channelDeviationPenalty
+                + terminalAlignmentPenalty;
+            const nextKey = `${move.xIndex},${move.yIndex},${move.direction}`;
+            if (nextCost >= (distances.get(nextKey) ?? Infinity)) return;
+            distances.set(nextKey, nextCost);
+            parents.set(nextKey, current.key);
+            const heuristic = Math.abs(to.x - end.x) + Math.abs(to.y - end.y);
+            pushMindMapRelationQueue(queue, {
+                ...move,
+                cost: nextCost,
+                priority: nextCost + heuristic,
+                key: nextKey
+            });
+        });
+    }
+
+    if (!completed) return null;
+    const points = [];
+    let key = completed.key;
+    while (key) {
+        const [xIndex, yIndex] = key.split(',').map(Number);
+        points.push({ x: xValues[xIndex], y: yValues[yIndex] });
+        key = parents.get(key);
+    }
+    points.reverse();
+    return { points: simplifyMindMapRelationPoints(points), cost: completed.cost };
+}
+
+function simplifyMindMapRelationPoints(points) {
+    const simplified = [];
+    points.forEach(point => {
+        const last = simplified[simplified.length - 1];
+        if (last && Math.abs(last.x - point.x) < 0.1 && Math.abs(last.y - point.y) < 0.1) return;
+        if (simplified.length >= 2) {
+            const previous = simplified[simplified.length - 2];
+            const collinearX = Math.abs(previous.x - last.x) < 0.1 && Math.abs(last.x - point.x) < 0.1;
+            const collinearY = Math.abs(previous.y - last.y) < 0.1 && Math.abs(last.y - point.y) < 0.1;
+            if (collinearX || collinearY) {
+                simplified[simplified.length - 1] = point;
+                return;
+            }
+        }
+        simplified.push(point);
+    });
+    return simplified;
+}
+
+function getMindMapRelationSegments(points) {
+    const segments = [];
+    for (let index = 1; index < points.length; index++) {
+        segments.push({ from: points[index - 1], to: points[index] });
+    }
+    return segments;
+}
+
+function getMindMapRelationCornerCurve(previous, current, next, radius) {
+    const incomingLength = Math.hypot(current.x - previous.x, current.y - previous.y);
+    const outgoingLength = Math.hypot(next.x - current.x, next.y - current.y);
+    if (incomingLength < 0.1 || outgoingLength < 0.1) return null;
+
+    const incoming = {
+        x: (current.x - previous.x) / incomingLength,
+        y: (current.y - previous.y) / incomingLength
+    };
+    const outgoing = {
+        x: (next.x - current.x) / outgoingLength,
+        y: (next.y - current.y) / outgoingLength
+    };
+    const dot = Math.max(-1, Math.min(1, incoming.x * outgoing.x + incoming.y * outgoing.y));
+    const turnAngle = Math.acos(dot);
+    if (turnAngle < 0.01 || Math.PI - turnAngle < 0.01) return null;
+
+    const tangentDistance = Math.min(radius, incomingLength / 2, outgoingLength / 2);
+    const tangentHalfAngle = Math.tan(turnAngle / 2);
+    if (!Number.isFinite(tangentHalfAngle) || Math.abs(tangentHalfAngle) < 0.001) return null;
+    const circleRadius = tangentDistance / tangentHalfAngle;
+    const handleLength = Math.min(
+        tangentDistance,
+        Math.abs((4 / 3) * circleRadius * Math.tan(turnAngle / 4))
+    );
+    const before = {
+        x: current.x - incoming.x * tangentDistance,
+        y: current.y - incoming.y * tangentDistance
+    };
+    const after = {
+        x: current.x + outgoing.x * tangentDistance,
+        y: current.y + outgoing.y * tangentDistance
+    };
+    return {
+        before,
+        after,
+        control1: {
+            x: before.x + incoming.x * handleLength,
+            y: before.y + incoming.y * handleLength
+        },
+        control2: {
+            x: after.x - outgoing.x * handleLength,
+            y: after.y - outgoing.y * handleLength
+        }
+    };
+}
+
+function getMindMapRoundedOrthogonalPath(points, radius = 16) {
+    if (!points || points.length < 2) return '';
+    const round = value => Math.round(value * 10) / 10;
+    const pointText = point => `${round(point.x)} ${round(point.y)}`;
+    let path = `M ${pointText(points[0])}`;
+    for (let index = 1; index < points.length - 1; index++) {
+        const previous = points[index - 1];
+        const current = points[index];
+        const next = points[index + 1];
+        const curve = getMindMapRelationCornerCurve(previous, current, next, radius);
+        if (!curve) {
+            path += ` L ${pointText(current)}`;
+            continue;
+        }
+        path += ` L ${pointText(curve.before)}`;
+        path += ` C ${pointText(curve.control1)}, ${pointText(curve.control2)}, ${pointText(curve.after)}`;
+    }
+    path += ` L ${pointText(points[points.length - 1])}`;
+    return path;
+}
+
+function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegments, preferredChannels = []) {
+    const candidates = getMindMapRelationSideCandidates(
+        sourceRect,
+        targetRect,
+        getMindMapRelationReservedSides(sourceRect.id),
+        getMindMapRelationReservedSides(targetRect.id)
+    );
+    const centerDistance = Math.hypot(
+        (targetRect.left + targetRect.width / 2) - (sourceRect.left + sourceRect.width / 2),
+        (targetRect.top + targetRect.height / 2) - (sourceRect.top + sourceRect.height / 2)
+    );
+    const routingMargin = Math.max(120, Math.min(320, centerDistance * 0.2));
+    const routingBounds = {
+        left: Math.min(sourceRect.left, targetRect.left) - routingMargin,
+        right: Math.max(sourceRect.right, targetRect.right) + routingMargin,
+        top: Math.min(sourceRect.top, targetRect.top) - routingMargin,
+        bottom: Math.max(sourceRect.bottom, targetRect.bottom) + routingMargin
+    };
+    const routingObstacles = obstacles.filter(obstacle =>
+        obstacle.right >= routingBounds.left
+        && obstacle.left <= routingBounds.right
+        && obstacle.bottom >= routingBounds.top
+        && obstacle.top <= routingBounds.bottom
+    );
+    const routingChannels = preferredChannels.filter(channel =>
+        channel.axis === 'x'
+            ? channel.coordinate >= routingBounds.left && channel.coordinate <= routingBounds.right
+            : channel.coordinate >= routingBounds.top && channel.coordinate <= routingBounds.bottom
+    );
+    let bestRoute = null;
+
+    candidates.forEach(candidate => {
+        const route = findMindMapOrthogonalRoute(
+            candidate.sourcePort.routePoint,
+            candidate.targetPort.routePoint,
+            routingObstacles,
+            occupiedSegments,
+            routingChannels,
+            candidate.targetSide === 'left' || candidate.targetSide === 'right' ? 1 : 2
+        );
+        if (!route) return;
+        const totalCost = route.cost
+            + candidate.alignmentPenalty
+            + candidate.reservedSidePenalty
+            + candidate.estimatedDistance * 0.06;
+        if (bestRoute && bestRoute.cost <= totalCost) return;
+        const points = simplifyMindMapRelationPoints([
+            candidate.sourcePort.port,
+            candidate.sourcePort.routePoint,
+            ...route.points,
+            candidate.targetPort.routePoint,
+            candidate.targetPort.port
+        ]);
+        bestRoute = {
+            cost: totalCost,
+            points,
+            path: getMindMapRoundedOrthogonalPath(points),
+            sourceSide: candidate.sourceSide,
+            targetSide: candidate.targetSide
+        };
+    });
+
+    return bestRoute;
+}
+
+function getMindMapRelationFoldCorridors(cardRects) {
+    const corridors = [];
+    document.querySelectorAll('.fold-btn').forEach((button, index) => {
+        if (button.getClientRects().length === 0) return;
+        const ownerId = button.closest('.node-card')?.dataset.nodeId;
+        const ownerNode = ownerId ? findNode(state.data, ownerId) : null;
+        if (!ownerNode?.children?.length) return;
+
+        const isLeft = button.classList.contains('left-side') || button.classList.contains('root-left');
+        const childIds = ownerId === state.data.id
+            ? ownerNode.children.filter(child => (child.dir === 'left') === isLeft).map(child => child.id)
+            : ownerNode.children.map(child => child.id);
+        const childRects = childIds.map(id => cardRects.get(id)).filter(Boolean);
+        if (childRects.length === 0) return;
+
+        const buttonRect = getMindMapCanvasRect(button);
+        const childBoundary = isLeft
+            ? Math.max(...childRects.map(rect => rect.right))
+            : Math.min(...childRects.map(rect => rect.left));
+        const buttonBoundary = isLeft ? buttonRect.left : buttonRect.right;
+        const gap = isLeft ? buttonBoundary - childBoundary : childBoundary - buttonBoundary;
+        if (gap < MINDMAP_RELATION_FOLD_BUTTON_PADDING * 2 + 2) return;
+
+        const neighborIds = childRects
+            .filter(rect => Math.abs((isLeft ? rect.right : rect.left) - childBoundary) < 0.5)
+            .map(rect => rect.id);
+        const ownerRect = cardRects.get(ownerId);
+        const verticalRects = [buttonRect, ...childRects, ...(ownerRect ? [ownerRect] : [])];
+        corridors.push({
+            id: `fold-corridor:${ownerId}:${index}`,
+            axis: 'x',
+            coordinate: (buttonBoundary + childBoundary) / 2,
+            min: Math.min(...verticalRects.map(rect => rect.top)) - MINDMAP_RELATION_ROUTING_PADDING,
+            max: Math.max(...verticalRects.map(rect => rect.bottom)) + MINDMAP_RELATION_ROUTING_PADDING,
+            side: isLeft ? 'left' : 'right',
+            neighborIds
+        });
+    });
+    return corridors;
+}
+
+function getMindMapRelationRoutingKey(relations, cardRects, controlObstacles = [], preferredChannels = []) {
+    const geometry = Array.from(cardRects.values()).map(rect => [
+        rect.id,
+        Math.round(rect.left * 10),
+        Math.round(rect.top * 10),
+        Math.round(rect.right * 10),
+        Math.round(rect.bottom * 10)
+    ]);
+    const relationState = relations.map(relation => [
+        relation.id,
+        relation.sourceId,
+        relation.targetId,
+        getMindMapRelationDirection(relation)
+    ]);
+    const controlGeometry = controlObstacles.map(obstacle => [
+        obstacle.id,
+        Math.round(obstacle.left * 10),
+        Math.round(obstacle.top * 10),
+        Math.round(obstacle.right * 10),
+        Math.round(obstacle.bottom * 10)
+    ]);
+    const channelGeometry = preferredChannels.map(channel => [
+        channel.id,
+        channel.axis,
+        Math.round(channel.coordinate * 10),
+        Math.round(channel.min * 10),
+        Math.round(channel.max * 10),
+        channel.side,
+        channel.neighborIds
+    ]);
+    return JSON.stringify([geometry, controlGeometry, channelGeometry, relationState]);
+}
+
+function buildMindMapRelationRoutes(relations, cardRects, controlObstacles = [], preferredChannels = []) {
+    const cacheKey = getMindMapRelationRoutingKey(relations, cardRects, controlObstacles, preferredChannels);
+    if (cacheKey === relationRouteCache.key) return relationRouteCache.routes;
+
+    const cardObstacles = new Map(Array.from(cardRects.entries()).map(([id, rect]) => [
+        id,
+        expandMindMapRelationObstacle(rect)
+    ]));
+    preferredChannels.forEach(channel => {
+        channel.neighborIds.forEach(nodeId => {
+            const obstacle = cardObstacles.get(nodeId);
+            const cardRect = cardRects.get(nodeId);
+            if (!obstacle || !cardRect || channel.axis !== 'x') return;
+            if (channel.side === 'right') {
+                obstacle.left = Math.max(
+                    obstacle.left,
+                    Math.min(cardRect.left, channel.coordinate + MINDMAP_RELATION_FOLD_BUTTON_PADDING)
+                );
+            } else {
+                obstacle.right = Math.min(
+                    obstacle.right,
+                    Math.max(cardRect.right, channel.coordinate - MINDMAP_RELATION_FOLD_BUTTON_PADDING)
+                );
+            }
+        });
+    });
+    const obstacles = [
+        ...cardObstacles.values(),
+        ...controlObstacles
+    ];
+    const occupiedSegments = [];
+    const routes = new Map();
+    relations.forEach(relation => {
+        const direction = getMindMapRelationDirection(relation);
+        const sourceId = direction === 'reverse' ? relation.targetId : relation.sourceId;
+        const targetId = direction === 'reverse' ? relation.sourceId : relation.targetId;
+        const sourceRect = cardRects.get(sourceId);
+        const targetRect = cardRects.get(targetId);
+        if (!sourceRect || !targetRect) return;
+        const route = routeMindMapRelation(
+            sourceRect,
+            targetRect,
+            obstacles,
+            occupiedSegments,
+            preferredChannels
+        );
+        if (!route) return;
+        routes.set(relation.id, route);
+        occupiedSegments.push(...getMindMapRelationSegments(route.points));
+    });
+    relationRouteCache = { key: cacheKey, routes };
+    return routes;
+}
+
 function renderMindMapRelations() {
     relationRenderFrame = null;
     const layer = $('#relation-layer');
@@ -2202,6 +2950,28 @@ function renderMindMapRelations() {
 
     const defs = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'defs');
     layer.appendChild(defs);
+    const cardRects = new Map();
+    document.querySelectorAll('.node-card').forEach(card => {
+        const rect = getMindMapCanvasRect(card);
+        if (rect.id) cardRects.set(rect.id, rect);
+    });
+    const foldButtonCorridors = getMindMapRelationFoldCorridors(cardRects);
+    const foldButtonObstacles = Array.from(document.querySelectorAll('.fold-btn'))
+        .filter(button => button.getClientRects().length > 0)
+        .map((button, index) => {
+            const rect = getMindMapCanvasRect(button);
+            const cardId = button.closest('.node-card')?.dataset.nodeId || 'unknown';
+            return expandMindMapRelationObstacle(
+                { ...rect, id: `fold-button:${cardId}:${index}` },
+                MINDMAP_RELATION_FOLD_BUTTON_PADDING
+            );
+        });
+    const routes = buildMindMapRelationRoutes(
+        relations,
+        cardRects,
+        foldButtonObstacles,
+        foldButtonCorridors
+    );
 
     relations.forEach((relation, index) => {
         const sourceCard = document.getElementById(`card-${relation.sourceId}`);
@@ -2210,15 +2980,16 @@ function renderMindMapRelations() {
 
         const direction = getMindMapRelationDirection(relation);
         const relationColor = getMindMapRelationColor(relation);
+        const route = routes.get(relation.id);
         const fromCard = direction === 'reverse' ? targetCard : sourceCard;
         const toCard = direction === 'reverse' ? sourceCard : targetCard;
-
-        const pathData = getMindMapRelationPath(
+        const pathData = route?.path || getMindMapRelationPath(
             fromCard.getBoundingClientRect(),
             toCard.getBoundingClientRect()
         );
         const group = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'g');
         group.classList.add('relation-group');
+        group.classList.toggle('routed', Boolean(route));
         group.classList.toggle('solid', getMindMapRelationLineStyle(relation) === 'solid');
         group.classList.toggle('selected', relation.id === state.selectedRelationId);
         group.dataset.relationId = relation.id;
@@ -2231,15 +3002,15 @@ function renderMindMapRelations() {
             const markerId = `relation-arrow-${index}`;
             const marker = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'marker');
             marker.setAttribute('id', markerId);
-            marker.setAttribute('viewBox', '0 0 8 8');
-            marker.setAttribute('markerWidth', '8');
-            marker.setAttribute('markerHeight', '8');
-            marker.setAttribute('refX', '7');
-            marker.setAttribute('refY', '4');
+            marker.setAttribute('viewBox', `0 0 ${MINDMAP_RELATION_ARROW_SIZE} ${MINDMAP_RELATION_ARROW_SIZE}`);
+            marker.setAttribute('markerWidth', String(MINDMAP_RELATION_ARROW_SIZE));
+            marker.setAttribute('markerHeight', String(MINDMAP_RELATION_ARROW_SIZE));
+            marker.setAttribute('refX', String(MINDMAP_RELATION_ARROW_SIZE - 1));
+            marker.setAttribute('refY', String(MINDMAP_RELATION_ARROW_SIZE / 2));
             marker.setAttribute('orient', 'auto');
-            marker.setAttribute('markerUnits', 'strokeWidth');
+            marker.setAttribute('markerUnits', 'userSpaceOnUse');
             const arrow = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'path');
-            arrow.setAttribute('d', 'M 0 0 L 8 4 L 0 8 Z');
+            arrow.setAttribute('d', `M 0 0 L ${MINDMAP_RELATION_ARROW_SIZE} ${MINDMAP_RELATION_ARROW_SIZE / 2} L 0 ${MINDMAP_RELATION_ARROW_SIZE} Z`);
             arrow.style.fill = relationColor || 'var(--text-color-secondary)';
             marker.appendChild(arrow);
             defs.appendChild(marker);
