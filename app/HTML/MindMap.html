@@ -414,6 +414,43 @@
         /* ====== 画布 ========================================================================== */
         #app { width: 100%; height: 100%; position: relative; z-index: 0; }
         .canvas-layer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+        .relation-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 1px;
+            height: 1px;
+            overflow: visible;
+            z-index: 5;
+            pointer-events: none;
+        }
+        .relation-line {
+            fill: none;
+            stroke: var(--text-color-secondary);
+            stroke-width: 2.5;
+            stroke-linecap: round;
+            stroke-dasharray: 8 7;
+            opacity: 0.72;
+            pointer-events: none;
+            transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.15s ease;
+        }
+        .relation-hit {
+            fill: none;
+            stroke: transparent;
+            stroke-width: 16;
+            pointer-events: stroke;
+            cursor: pointer;
+        }
+        .relation-group:hover .relation-line,
+        .relation-group.selected .relation-line {
+            stroke: var(--primary);
+            stroke-width: 3.5;
+            opacity: 1;
+        }
+        .relation-group.selected .relation-line {
+            stroke-dasharray: none;
+            filter: drop-shadow(0 0 4px var(--shadow-color-active));
+        }
         .cursor-grab { cursor: grab; }
         .cursor-grabbing { cursor: grabbing; }
         .cursor-grabbing, .cursor-grabbing * { 
@@ -1313,6 +1350,7 @@
         <div class="divider"></div>
         <button class="btn" id="btn-add-child" disabled title="新建子卡片"><i class="ri-git-branch-line"></i></button>
         <button class="btn" id="btn-add-sibling" disabled title="新建兄弟卡片"><i class="ri-node-tree"></i></button>
+        <button class="btn" id="btn-add-relation" disabled title="关联两张已选卡片"><i class="ri-links-line"></i></button>
         <button class="btn" id="btn-delete" style="color:#ff4d4f" disabled title="删除卡片"><i class="ri-delete-bin-line"></i></button>
         <div class="divider"></div>
         <button class="btn" id="btn-color" disabled title="设置卡片颜色">
@@ -1389,6 +1427,7 @@
 
     <div id="app">
         <div class="canvas-layer" id="canvas-layer">
+            <svg class="relation-layer" id="relation-layer" aria-label="卡片关联线"></svg>
             <div class="root-locator" id="tree-root"></div>
         </div>
         <!-- 框选功能”（Marquee Selection / Box Selection）时的那个蓝色半透明矩形框 -->

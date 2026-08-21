@@ -53,6 +53,7 @@ function applyImportedMindMap(content) {
         const imported = JSON.parse(content);
         if (!imported || !imported.data) throw new Error('文件中没有思维导图数据');
         state.data = imported.data;
+        state.selectedRelationId = null;
         state.view = imported.view || state.view;
         state.history = [];
         state.historyIndex = -1;
@@ -130,7 +131,7 @@ function initializeMindMapImport() {
 
 const defaultTreeData = {
     id: 'root', topic: 'MindMap', content: '## 主题',
-    widthMode: 'auto', heightMode: 'auto', children: [],
+    widthMode: 'auto', heightMode: 'auto', children: [], relations: [],
     foldedLeft: false, foldedRight: false
 };
 let dockData = JSON.parse(sessionStorage.getItem('DockData'))||[]; // 初始为空数组
@@ -141,7 +142,7 @@ let state = {
     data: saveData.data || JSON.parse(JSON.stringify(defaultTreeData)),
     view: saveData.view || {"tx":window.innerWidth/2,"ty":window.innerHeight/2,"scale":1},
     scrollMap: new Map(Object.entries(saveData.scrollMap || {})),
-    selectedIds: new Set(), history: [], historyIndex: -1,
+    selectedIds: new Set(), selectedRelationId: null, history: [], historyIndex: -1,
     mode: 'IDLE', dockCollapsed: false, activeDockIndex: -1,
     editingNode: null, isReadOnly: false,
     startPos: {x:0,y:0}, viewStart: {x:0,y:0},
@@ -227,6 +228,7 @@ async function updateState(MindMapData,newCurrentFileID,pageTitle,otherPageOpen=
     if (!otherPageOpen) await saveMindMapData(true,false);  // 询问保存当前文件
     document.title = pageTitle;
     state.data = MindMapData.data || defaultTreeData;
+    state.selectedRelationId = null;
     state.view = MindMapData.view || {tx:window.innerWidth/2,ty:window.innerHeight/2,scale:1};
     state.scrollMap = new Map(Object.entries(MindMapData.scrollMap || {}));
     state.history=[];
@@ -283,6 +285,7 @@ function new_MindMap(){
     document.title = '新建思维导图';
     sessionStorage.setItem('pageTitle', '新建思维导图');
     state.data = JSON.parse(JSON.stringify(defaultTreeData));   // 深拷贝
+    state.selectedRelationId = null;
     state.view = {tx:window.innerWidth/2,ty:window.innerHeight/2,scale:1};
     state.history=[];
     state.historyIndex=-1;
@@ -342,6 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeEditorToolbar();  // 初始化md编辑器
     initializeMapToolbar();     // 初始化思维导图工具栏
     initializeMapSearch();      // 初始化搜索定位
+    initializeMindMapRelations(); // 初始化卡片关联线
     initializeEditorContextMenu(); // 初始化md编辑器右键菜单
 
     $('#dock-body').addEventListener('wheel', (e) => { 
@@ -519,7 +523,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 删除节点 (Delete)
         if (e.key === 'Delete') { 
-            e.preventDefault(); $('#btn-delete').click(); return;
+            e.preventDefault();
+            if (state.selectedRelationId) deleteSelectedMindMapRelation();
+            else $('#btn-delete').click();
+            return;
         }
     });
 
@@ -559,15 +566,23 @@ function initializeMapToolbar() {
             recordHistory(); updateChildrenDOM(p.id); 
         } 
     };
+    $('#btn-add-relation').onclick = addRelationBetweenSelectedCards;
     $('#btn-delete').onclick=()=>{ 
         syncCurrentInput(); 
+        if(state.selectedRelationId) {
+            deleteSelectedMindMapRelation();
+            return;
+        }
         const parents=new Set(); 
+        const deletedNodeIds = new Set();
         state.selectedIds.forEach(id=>{
             if(id!==state.data.id){
+                collectMindMapNodeIds(findNode(state.data,id), deletedNodeIds);
                 const p=findParent(state.data,id);
                 if(p){ p.children=p.children.filter(c=>c.id!==id); parents.add(p.id); }
             }
         }); 
+        removeMindMapRelationsForNodes(deletedNodeIds);
         state.selectedIds.clear(); recordHistory(); parents.forEach(pid=>updateChildrenDOM(pid)); 
     };
 
@@ -676,6 +691,7 @@ function initializeMapToolbar() {
                 const j=JSON.parse(ev.target.result);
                  if(j.data){
                     state.data=j.data;
+                    state.selectedRelationId = null;
                     state.view=j.view||state.view;
                     state.history=[];
                     state.historyIndex=-1;
@@ -1329,10 +1345,12 @@ function initializeMapMouseEvents() {
            e.target.closest('#contextMenu') || 
            e.target.closest('#editorContextMenu') ||
            e.target.closest('.map-search-panel') ||
+           e.target.closest('.relation-hit') ||
            e.target.closest('.fold-btn') ||    // 新增
            e.target.closest('.header-tools')   // 新增
         ) return;
         if (e.target.closest('.bookmark-manager-container')) return;
+        clearSelectedMindMapRelation();
         state.startPos = {x:e.clientX, y:e.clientY}; state.viewStart = {x:state.view.tx, y:state.view.ty};
 
         if(e.target.classList.contains('resize-handle')) {
@@ -1900,6 +1918,238 @@ function insertTextFormat(prefix, suffix, restoreFocus = true) {
 };
 
 // =============================================================================
+// #region 卡片关联
+// =============================================================================
+const MINDMAP_RELATION_SVG_NS = 'http://www.w3.org/2000/svg';
+let relationRenderFrame = null;
+
+function getMindMapRelations() {
+    return Array.isArray(state.data?.relations) ? state.data.relations : [];
+}
+
+function ensureMindMapRelations() {
+    if (!Array.isArray(state.data.relations)) state.data.relations = [];
+    return state.data.relations;
+}
+
+function collectMindMapNodeIds(node, targetSet = new Set()) {
+    if (!node) return targetSet;
+    targetSet.add(node.id);
+    (node.children || []).forEach(child => collectMindMapNodeIds(child, targetSet));
+    return targetSet;
+}
+
+function removeMindMapRelationsForNodes(nodeIds) {
+    if (!nodeIds || nodeIds.size === 0 || !Array.isArray(state.data.relations)) return false;
+    const previousLength = state.data.relations.length;
+    state.data.relations = state.data.relations.filter(relation =>
+        !nodeIds.has(relation.sourceId) && !nodeIds.has(relation.targetId)
+    );
+    if (state.selectedRelationId && !state.data.relations.some(item => item.id === state.selectedRelationId)) {
+        state.selectedRelationId = null;
+    }
+    return state.data.relations.length !== previousLength;
+}
+
+function isDuplicateMindMapRelation(sourceId, targetId) {
+    return getMindMapRelations().some(relation =>
+        (relation.sourceId === sourceId && relation.targetId === targetId)
+        || (relation.sourceId === targetId && relation.targetId === sourceId)
+    );
+}
+
+function addRelationBetweenSelectedCards() {
+    if (state.selectedIds.size !== 2) return;
+    const [sourceId, targetId] = Array.from(state.selectedIds);
+    if (sourceId === targetId || !findNode(state.data, sourceId) || !findNode(state.data, targetId)) return;
+    if (isDuplicateMindMapRelation(sourceId, targetId)) {
+        if (typeof showTopToast === 'function') showTopToast('⚠️ 这两张卡片已经有关联');
+        return;
+    }
+
+    const relation = {
+        id: `relation_${generateNodeId()}`,
+        sourceId,
+        targetId
+    };
+    ensureMindMapRelations().push(relation);
+    state.selectedRelationId = relation.id;
+    state.selectedIds.clear();
+    recordHistory();
+    updateSelection();
+    scheduleRenderMindMapRelations();
+    if (typeof showTopToast === 'function') showTopToast('🔗 已建立卡片关联');
+}
+
+function deleteSelectedMindMapRelation() {
+    const relationId = state.selectedRelationId;
+    if (!relationId || !Array.isArray(state.data.relations)) return;
+    const previousLength = state.data.relations.length;
+    state.data.relations = state.data.relations.filter(relation => relation.id !== relationId);
+    state.selectedRelationId = null;
+    if (state.data.relations.length !== previousLength) {
+        recordHistory();
+        if (typeof showTopToast === 'function') showTopToast('🗑️ 已删除卡片关联');
+    }
+    scheduleRenderMindMapRelations();
+    updateToolbar();
+}
+
+function clearSelectedMindMapRelation() {
+    if (!state.selectedRelationId) return;
+    state.selectedRelationId = null;
+    scheduleRenderMindMapRelations();
+    updateToolbar();
+}
+
+function selectMindMapRelation(relationId) {
+    if (!getMindMapRelations().some(relation => relation.id === relationId)) return;
+    state.selectedRelationId = relationId;
+    state.selectedIds.clear();
+    updateSelection();
+    scheduleRenderMindMapRelations();
+}
+
+function getMindMapRelationPath(sourceRect, targetRect, view = state.view) {
+    const sourceCenter = {
+        x: sourceRect.left + sourceRect.width / 2,
+        y: sourceRect.top + sourceRect.height / 2
+    };
+    const targetCenter = {
+        x: targetRect.left + targetRect.width / 2,
+        y: targetRect.top + targetRect.height / 2
+    };
+    const dx = targetCenter.x - sourceCenter.x;
+    const dy = targetCenter.y - sourceCenter.y;
+    const horizontal = Math.abs(dx) >= Math.abs(dy);
+    const scale = view.scale || 1;
+    const toCanvasPoint = point => ({
+        x: (point.x - view.tx) / scale,
+        y: (point.y - view.ty) / scale
+    });
+
+    let sourcePoint;
+    let targetPoint;
+    if (horizontal) {
+        sourcePoint = { x: dx >= 0 ? sourceRect.right : sourceRect.left, y: sourceCenter.y };
+        targetPoint = { x: dx >= 0 ? targetRect.left : targetRect.right, y: targetCenter.y };
+    } else {
+        sourcePoint = { x: sourceCenter.x, y: dy >= 0 ? sourceRect.bottom : sourceRect.top };
+        targetPoint = { x: targetCenter.x, y: dy >= 0 ? targetRect.top : targetRect.bottom };
+    }
+
+    const from = toCanvasPoint(sourcePoint);
+    const to = toCanvasPoint(targetPoint);
+    const distance = horizontal ? Math.abs(to.x - from.x) : Math.abs(to.y - from.y);
+    const curve = Math.max(42, distance * 0.42);
+    let control1;
+    let control2;
+    if (horizontal) {
+        const direction = to.x >= from.x ? 1 : -1;
+        control1 = { x: from.x + direction * curve, y: from.y };
+        control2 = { x: to.x - direction * curve, y: to.y };
+    } else {
+        const direction = to.y >= from.y ? 1 : -1;
+        control1 = { x: from.x, y: from.y + direction * curve };
+        control2 = { x: to.x, y: to.y - direction * curve };
+    }
+
+    const round = value => Math.round(value * 10) / 10;
+    return `M ${round(from.x)} ${round(from.y)} C ${round(control1.x)} ${round(control1.y)}, ${round(control2.x)} ${round(control2.y)}, ${round(to.x)} ${round(to.y)}`;
+}
+
+function renderMindMapRelations() {
+    relationRenderFrame = null;
+    const layer = $('#relation-layer');
+    if (!layer) return;
+    layer.replaceChildren();
+
+    const relations = getMindMapRelations();
+    if (state.selectedRelationId && !relations.some(relation => relation.id === state.selectedRelationId)) {
+        state.selectedRelationId = null;
+    }
+
+    relations.forEach(relation => {
+        const sourceCard = document.getElementById(`card-${relation.sourceId}`);
+        const targetCard = document.getElementById(`card-${relation.targetId}`);
+        if (!sourceCard || !targetCard) return;
+
+        const pathData = getMindMapRelationPath(
+            sourceCard.getBoundingClientRect(),
+            targetCard.getBoundingClientRect()
+        );
+        const group = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'g');
+        group.classList.add('relation-group');
+        group.classList.toggle('selected', relation.id === state.selectedRelationId);
+        group.dataset.relationId = relation.id;
+
+        const visiblePath = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'path');
+        visiblePath.classList.add('relation-line');
+        visiblePath.setAttribute('d', pathData);
+        group.appendChild(visiblePath);
+
+        const hitPath = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'path');
+        hitPath.classList.add('relation-hit');
+        hitPath.dataset.relationId = relation.id;
+        hitPath.setAttribute('d', pathData);
+        group.appendChild(hitPath);
+        layer.appendChild(group);
+    });
+}
+
+function scheduleRenderMindMapRelations() {
+    if (relationRenderFrame !== null) return;
+    relationRenderFrame = requestAnimationFrame(renderMindMapRelations);
+}
+
+function initializeMindMapRelations() {
+    const layer = $('#relation-layer');
+    if (!layer) return;
+    layer.addEventListener('mousedown', event => {
+        if (event.button !== 0) return;
+        const hitPath = event.target.closest('.relation-hit');
+        if (!hitPath) return;
+        event.preventDefault();
+        event.stopPropagation();
+        selectMindMapRelation(hitPath.dataset.relationId);
+    });
+    scheduleRenderMindMapRelations();
+}
+
+function getCanvasRelationSides(sourceNode, targetNode) {
+    const sourceCenter = { x: sourceNode.x + sourceNode.width / 2, y: sourceNode.y + sourceNode.height / 2 };
+    const targetCenter = { x: targetNode.x + targetNode.width / 2, y: targetNode.y + targetNode.height / 2 };
+    const dx = targetCenter.x - sourceCenter.x;
+    const dy = targetCenter.y - sourceCenter.y;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+        return dx >= 0
+            ? { fromSide: 'right', toSide: 'left' }
+            : { fromSide: 'left', toSide: 'right' };
+    }
+    return dy >= 0
+        ? { fromSide: 'bottom', toSide: 'top' }
+        : { fromSide: 'top', toSide: 'bottom' };
+}
+
+function appendMindMapRelationsToCanvas(canvasNodes, canvasEdges) {
+    const nodeMap = new Map(canvasNodes.map(node => [node.id, node]));
+    getMindMapRelations().forEach(relation => {
+        const sourceNode = nodeMap.get(relation.sourceId);
+        const targetNode = nodeMap.get(relation.targetId);
+        if (!sourceNode || !targetNode) return;
+        const sides = getCanvasRelationSides(sourceNode, targetNode);
+        canvasEdges.push({
+            id: relation.id,
+            fromNode: relation.sourceId,
+            fromSide: sides.fromSide,
+            toNode: relation.targetId,
+            toSide: sides.toSide
+        });
+    });
+}
+// #endregion
+
+// =============================================================================
 // #region 搜索定位
 // =============================================================================
 function normalizeMapSearchText(value) {
@@ -2140,6 +2390,7 @@ function locateMapSearchResult(index) {
     if (result.rootDirection) mapSearchState.revealedRootDirections.add(result.rootDirection);
     renderTree();
 
+    state.selectedRelationId = null;
     state.selectedIds.clear();
     state.selectedIds.add(result.id);
     updateSelection();
@@ -2462,6 +2713,7 @@ function restoreHistory() {
     // 更新数据
     state.data = prevData;
     state.selectedIds.clear(); 
+    state.selectedRelationId = null;
     
     if (isStructureSame) {
         // 情况 A：仅颜色变化 -> 使用无损更新
@@ -2690,6 +2942,7 @@ function renderTree() {
     $('#tree-root').querySelectorAll('.card-body').forEach(processRichContent);
     restoreGlobalScrolls();
     updateTransform(); 
+    scheduleRenderMindMapRelations();
     if (window.rootObserver) {
         window.rootObserver.disconnect();
     }
@@ -2700,6 +2953,7 @@ function renderTree() {
         // 使用 requestAnimationFrame 避免 "ResizeObserver loop limit exceeded" 错误
         requestAnimationFrame(() => {
             stabilizeRoot();
+            scheduleRenderMindMapRelations();
         });
     });
 
@@ -2782,6 +3036,7 @@ function updateChildrenDOM(nodeId) {
     
     stabilizeRoot();
     restoreGlobalScrolls();
+    scheduleRenderMindMapRelations();
 };
 
 function updateNodeDOM(nodeId) {
@@ -2890,6 +3145,7 @@ function updateNodeDOM(nodeId) {
     }
     stabilizeRoot();
     restoreGlobalScrolls();
+    scheduleRenderMindMapRelations();
 }
 // 修复：暴力清除高亮后重新添加，防止高亮卡死
 function updateSelection() {
@@ -2926,7 +3182,12 @@ function updateTransform() {
 
 function updateToolbar() {
     const hasSel = state.selectedIds.size > 0;
-    $('#btn-add-child').disabled = !hasSel; $('#btn-add-sibling').disabled = !hasSel; $('#btn-delete').disabled = !hasSel;
+    const hasRelation = Boolean(state.selectedRelationId);
+    $('#btn-add-child').disabled = !hasSel;
+    $('#btn-add-sibling').disabled = !hasSel;
+    $('#btn-add-relation').disabled = state.selectedIds.size !== 2;
+    $('#btn-delete').disabled = !hasSel && !hasRelation;
+    $('#btn-delete').title = hasRelation ? '删除关联' : '删除卡片';
     $('#btn-undo').disabled = state.historyIndex <= 0; $('#btn-redo').disabled = state.historyIndex >= state.history.length - 1;
     $('#btn-color').disabled = !hasSel;
     $('#btn-color').disabled = !hasSel || state.rainbowMode; 
@@ -4084,6 +4345,7 @@ async function exportToCanvas() {
 
     // 开始遍历
     traverse(state.data, null);
+    appendMindMapRelationsToCanvas(nodes, edges);
 
     // 生成 JSON 字符串
     const canvasData = {
@@ -4258,6 +4520,7 @@ async function exportToVerticalCanvas() {
     
     // 4. 生成数据
     generateJson(vRoot);
+    appendMindMapRelationsToCanvas(nodes, edges);
 
     // 5. 导出文件
     const canvasData = { nodes, edges };
