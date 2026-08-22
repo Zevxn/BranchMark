@@ -160,8 +160,10 @@ const mapSearchState = {
     hasLocated: false,
     revealedNodeIds: new Set(),
     revealedRootDirections: new Set(),
-    pulseTimer: null
+    pulseTimer: null,
+    clipboardRequestId: 0
 };
+const MAP_SEARCH_CLIPBOARD_MAX_CHARS = 15;
 const CARD_BG='95%';
 let isUndoRedo = false;
 let saveTimer = null;
@@ -400,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 修复后的代码 ---
     document.addEventListener('keydown', (e) => { 
         // 判断当前事件源是否为节点标题，且按下的是 Enter 键
-        if(e.target.classList.contains('node-topic') && e.key==='Enter') { 
+        if(e.target.classList.contains('node-topic') && e.key==='Enter' && !(e.ctrlKey || e.metaKey)) {
             
             // 1. 获取当前所在的卡片 DOM
             const card = e.target.closest('.node-card');
@@ -449,7 +451,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 搜索定位优先于浏览器页面查找，但编辑器打开时仍保留编辑器自身行为。
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !isModalActive) {
             e.preventDefault();
-            openMapSearch();
+            openMapSearch({ prefillFromClipboard: true });
             return;
         }
 
@@ -461,11 +463,37 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // 编辑模式快捷键优先于输入状态拦截，Esc 会复用“完成”按钮的保存与关闭逻辑。
+        if (isModalActive && e.key === 'Escape') {
+            e.preventDefault();
+            $('#btn-close-modal').click();
+            return;
+        }
+
         if (isMapSearchOpen()) {
             if (e.key === 'Escape') {
                 e.preventDefault();
                 closeMapSearch();
             }
+            return;
+        }
+
+        // Ctrl+Enter：从画布或节点标题进入当前单选卡片的 Markdown 源码编辑。
+        if (!isModalActive && (e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            const canOpenEditor = !isInput || activeEl.classList.contains('node-topic');
+            if (canOpenEditor && state.selectedIds.size === 1) {
+                e.preventDefault();
+                syncCurrentInput();
+                const node = findNode(state.data, Array.from(state.selectedIds)[0]);
+                if (node) openMindMapEditor(node, false, true);
+            }
+            return;
+        }
+
+        // Ctrl+A：仅在画布状态全选脑图卡片，输入框内仍保留原生文字全选。
+        if (!isModalActive && !isInput && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+            e.preventDefault();
+            selectAllMindMapNodes();
             return;
         }
 
@@ -1161,15 +1189,37 @@ function initializeEditorContextMenu() {
 // =============================================================================
 // #region 鼠标点击事件
 // =============================================================================
+function selectAllMindMapNodes() {
+    clearSelectedMindMapRelation();
+    clearSelectedMindMapSummary();
+    state.selectedIds.clear();
+    collectMindMapNodeIds(state.data).forEach(nodeId => state.selectedIds.add(nodeId));
+    window.getSelection()?.removeAllRanges();
+    updateSelection();
+}
+
+function openMindMapEditor(node, readOnly = false, focusSource = false) {
+    if (!node) return;
+    syncCurrentInput();
+    state.editingNode = node;
+    state.isReadOnly = readOnly;
+    $('#editorModal').classList.add('active');
+    $('#modalWin').className = readOnly ? 'modal-win narrow' : 'modal-win';
+    $('#modalTopicInput').value = node.topic;
+    $('#modalTopicInput').disabled = readOnly;
+    const sourceEditor = $('#editorTextarea');
+    sourceEditor.value = node.content || '';
+    sourceEditor.parentElement.style.display = readOnly ? 'none' : 'flex';
+    $('#previewContent').innerHTML = renderMarkdown(node.content);
+    processRichContent($('#previewContent'));
+    $('#btn-close-modal').innerText = readOnly ? '关闭' : '完成';
+    if (focusSource && !readOnly) {
+        sourceEditor.focus();
+        sourceEditor.setSelectionRange(sourceEditor.value.length, sourceEditor.value.length);
+    }
+}
+
 function initializeMapClickEvents() {
-    const openEditor = (node, readOnly=false) => {
-        syncCurrentInput(); state.editingNode=node; state.isReadOnly=readOnly;
-        $('#editorModal').classList.add('active'); $('#modalWin').className=readOnly?'modal-win narrow':'modal-win';
-        $('#modalTopicInput').value=node.topic; $('#modalTopicInput').disabled=readOnly;
-        $('#editorTextarea').value=node.content||''; $('#editorTextarea').parentElement.style.display=readOnly?'none':'flex';
-        $('#previewContent').innerHTML=renderMarkdown(node.content); processRichContent($('#previewContent'));
-        $('#btn-close-modal').innerText=readOnly?'关闭':'完成';
-    };
     document.addEventListener('click', (e) => {
         const t = e.target;
         if(!t.closest('#btn-color') && !t.closest('.color-popup')) $('#colorPopup').classList.remove('show');
@@ -1221,7 +1271,7 @@ function initializeMapClickEvents() {
         const dockCard = t.closest('.dock-card');
         if(dockCard) {
             const idx = parseInt(dockCard.dataset.index);
-            openEditor({ topic: dockData[idx].question, content: dockData[idx].answer }, true);
+            openMindMapEditor({ topic: dockData[idx].question, content: dockData[idx].answer }, true);
             return;
         }
 
@@ -1242,13 +1292,13 @@ function initializeMapClickEvents() {
         if(header && !t.closest('.header-tools') && !t.classList.contains('node-topic')) {
             const n = findNode(state.data, header.closest('.node-card').dataset.nodeId);
             // 便利贴模式也可以双击打开编辑器 (可选)
-            if (n) openEditor(n); 
+            if (n) openMindMapEditor(n);
             return;
         }
         const body = t.closest('.card-body');
         if(body) {
             const n = findNode(state.data, body.closest('.node-card').dataset.nodeId);
-            openEditor(n); 
+            openMindMapEditor(n);
             return;
         }
     });
@@ -3652,22 +3702,49 @@ function executeMapSearch(query) {
     renderMapSearchResults();
 }
 
-function openMapSearch() {
+function getMapSearchClipboardQuery(value) {
+    const query = String(value ?? '').trim();
+    const characterCount = Array.from(query).length;
+    return characterCount > 0 && characterCount <= MAP_SEARCH_CLIPBOARD_MAX_CHARS ? query : '';
+}
+
+async function applyMapSearchClipboardQuery(input, initialValue, requestId) {
+    if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') return;
+    try {
+        const query = getMapSearchClipboardQuery(await navigator.clipboard.readText());
+        const canApply = query
+            && requestId === mapSearchState.clipboardRequestId
+            && isMapSearchOpen()
+            && document.activeElement === input
+            && input.value === initialValue;
+        if (!canApply) return;
+        input.value = query;
+        executeMapSearch(query);
+    } catch (_) {
+        // WebView2 或浏览器未授予剪贴板读取权限时，保留当前搜索词和正常聚焦行为。
+    }
+}
+
+function openMapSearch({ prefillFromClipboard = false } = {}) {
     const panel = $('#mapSearchPanel');
     const input = $('#mapSearchInput');
     if (!panel || !input) return;
+    const initialValue = input.value;
+    const requestId = ++mapSearchState.clipboardRequestId;
     panel.classList.add('active');
     panel.setAttribute('aria-hidden', 'false');
     executeMapSearch(input.value);
-    requestAnimationFrame(() => {
-        input.focus();
-        input.select();
-    });
+    input.focus();
+    input.select();
+    if (prefillFromClipboard) {
+        void applyMapSearchClipboardQuery(input, initialValue, requestId);
+    }
 }
 
 function closeMapSearch() {
     const panel = $('#mapSearchPanel');
     if (!panel) return;
+    mapSearchState.clipboardRequestId += 1;
     if (panel.contains(document.activeElement)) document.activeElement.blur();
     panel.classList.remove('active');
     panel.setAttribute('aria-hidden', 'true');
@@ -3763,7 +3840,7 @@ function initializeMapSearch() {
     const results = $('#mapSearchResults');
     if (!panel || !input || !results) return;
 
-    $('#btn-search').onclick = openMapSearch;
+    $('#btn-search').onclick = () => openMapSearch();
     $('#btn-search-close').onclick = closeMapSearch;
     $('#btn-search-prev').onclick = () => navigateMapSearch(-1);
     $('#btn-search-next').onclick = () => navigateMapSearch(1);

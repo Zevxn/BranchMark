@@ -20,8 +20,14 @@ for (const id of [
     assert.match(html, new RegExp(`id=["']${id}["']`), `搜索界面应包含 #${id}`);
 }
 
-assert.match(mindMap, /e\.key\.toLowerCase\(\) === 'f'[\s\S]*?openMapSearch\(\)/,
+assert.match(mindMap, /e\.key\.toLowerCase\(\) === 'f'[\s\S]*?openMapSearch\(\{ prefillFromClipboard: true \}\)/,
     'Ctrl+F 应打开思维导图搜索，而不是浏览器页面查找');
+assert.match(mindMap, /function openMapSearch\(\{ prefillFromClipboard = false \} = \{\}\)[\s\S]*?input\.focus\(\);\s*input\.select\(\)/,
+    '搜索打开后应立即聚焦并选中搜索输入框');
+assert.match(mindMap, /navigator\.clipboard\.readText\(\)[\s\S]*?requestId === mapSearchState\.clipboardRequestId[\s\S]*?input\.value === initialValue/,
+    '短剪贴板文本只能在请求仍有效且用户尚未输入时自动填充');
+assert.match(mindMap, /\$\('#btn-search'\)\.onclick = \(\) => openMapSearch\(\)/,
+    '工具栏搜索按钮不应自动读取剪贴板');
 assert.match(mindMap, /state\.selectedIds\.clear\(\);\s*state\.selectedIds\.add\(result\.id\);/,
     '定位结果后应将目标卡片设为单选');
 assert.match(mindMap, /state\.view\.tx \+= targetX[\s\S]*?state\.view\.ty \+= targetY[\s\S]*?updateTransform\(\)/,
@@ -98,4 +104,19 @@ context.query = '   ';
 assert.equal(vm.runInContext('collectMapSearchResults(tree, query).length', context), 0,
     '空白关键词不应返回全部卡片');
 
-console.log('搜索定位校验通过：界面、检索、排序、路径临时展开与居中选择逻辑完整。');
+const clipboardQueryStart = mindMap.indexOf('function getMapSearchClipboardQuery');
+const clipboardQueryEnd = mindMap.indexOf('async function applyMapSearchClipboardQuery', clipboardQueryStart);
+assert.ok(clipboardQueryStart >= 0 && clipboardQueryEnd > clipboardQueryStart,
+    '应能提取剪贴板搜索词校验函数');
+const clipboardContext = vm.createContext({});
+vm.runInContext(`const MAP_SEARCH_CLIPBOARD_MAX_CHARS = 15; ${mindMap.slice(clipboardQueryStart, clipboardQueryEnd)}`, clipboardContext);
+clipboardContext.shortText = `  ${'中'.repeat(15)}  `;
+clipboardContext.longText = '中'.repeat(16);
+assert.equal(vm.runInContext('getMapSearchClipboardQuery(shortText)', clipboardContext), '中'.repeat(15),
+    '剪贴板文本应去除首尾空白，并允许恰好 15 个字符');
+assert.equal(vm.runInContext('getMapSearchClipboardQuery(longText)', clipboardContext), '',
+    '超过 15 个字符的剪贴板文本不得自动填入');
+assert.equal(vm.runInContext("getMapSearchClipboardQuery('   ')", clipboardContext), '',
+    '空白剪贴板文本不得覆盖现有搜索词');
+
+console.log('搜索定位校验通过：聚焦、短剪贴板预填、检索排序、路径展开与居中选择逻辑完整。');
