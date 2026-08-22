@@ -592,6 +592,109 @@
             pointer-events: none;
             user-select: none;
         }
+        .summary-brace-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 1px;
+            height: 1px;
+            overflow: visible;
+            z-index: 6;
+            pointer-events: none;
+        }
+        .summary-brace {
+            fill: none;
+            stroke: var(--summary-color, var(--primary));
+            stroke-width: 2.5;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            opacity: 0.82;
+            vector-effect: non-scaling-stroke;
+        }
+        .summary-brace.active {
+            opacity: 1;
+            filter: drop-shadow(0 0 4px var(--shadow-color-active));
+        }
+        .summary-label-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 1px;
+            height: 1px;
+            overflow: visible;
+            z-index: 7;
+            pointer-events: none;
+        }
+        .summary-editor {
+            position: absolute;
+            width: 240px;
+            min-height: 86px;
+            box-sizing: border-box;
+            transform: translateY(-50%);
+            pointer-events: auto;
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            padding: 9px 8px 9px 10px;
+            background: color-mix(in srgb, var(--card-bg) 94%, var(--primary));
+            border: 1px solid var(--toolbar-border);
+            border-radius: 10px;
+            box-shadow: 0 4px 16px var(--shadow-color);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .summary-editor.left-side { transform: translate(-100%, -50%); }
+        .summary-editor:hover,
+        .summary-editor.active {
+            border-color: var(--primary);
+            box-shadow: 0 5px 20px var(--shadow-color-hover), 0 0 0 2px var(--shadow-color-active);
+        }
+        .summary-editor textarea {
+            flex: 1;
+            min-width: 0;
+            min-height: 66px;
+            padding: 0;
+            resize: vertical;
+            border: 0;
+            outline: 0;
+            background: transparent;
+            color: var(--text-color);
+            font: inherit;
+            font-size: 14px;
+            line-height: 1.55;
+        }
+        .summary-editor textarea::placeholder { color: var(--text-color-secondary); }
+        .summary-delete {
+            width: 26px;
+            height: 26px;
+            flex: 0 0 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-color-secondary);
+            cursor: pointer;
+        }
+        .summary-delete:hover { color: #ff4d4f; background: var(--btn-hover); }
+        .summary-selection-action {
+            position: fixed;
+            z-index: 850;
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 11px;
+            border: 1px solid color-mix(in srgb, var(--primary) 55%, var(--toolbar-border));
+            border-radius: 999px;
+            background: var(--toolbar-bg);
+            color: var(--primary);
+            box-shadow: 0 5px 18px var(--shadow-color-hover);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .summary-selection-action:hover { background: var(--btn-hover); }
         .cursor-grab { cursor: grab; }
         .cursor-grabbing { cursor: grabbing; }
         .cursor-grabbing, .cursor-grabbing * { 
@@ -1492,6 +1595,7 @@
         <button class="btn" id="btn-add-child" disabled title="新建子卡片"><i class="ri-git-branch-line"></i></button>
         <button class="btn" id="btn-add-sibling" disabled title="新建兄弟卡片"><i class="ri-node-tree"></i></button>
         <button class="btn" id="btn-add-relation" disabled title="关联两张已选卡片"><i class="ri-links-line"></i></button>
+        <button class="btn" id="btn-add-summary" disabled title="总结同侧已选卡片"><i class="ri-braces-line"></i></button>
         <button class="btn" id="btn-delete" style="color:#ff4d4f" disabled title="删除卡片"><i class="ri-delete-bin-line"></i></button>
         <div class="divider"></div>
         <button class="btn" id="btn-color" disabled title="设置卡片颜色">
@@ -1609,8 +1713,13 @@
     <div id="app">
         <div class="canvas-layer" id="canvas-layer">
             <svg class="relation-layer" id="relation-layer" aria-label="卡片关联线"></svg>
+            <svg class="summary-brace-layer" id="summary-brace-layer" aria-label="多卡片总结大括号"></svg>
             <div class="root-locator" id="tree-root"></div>
+            <div class="summary-label-layer" id="summary-label-layer"></div>
         </div>
+        <button class="summary-selection-action" id="summarySelectionAction" type="button">
+            <i class="ri-braces-line"></i><span>添加总结</span>
+        </button>
         <!-- 框选功能”（Marquee Selection / Box Selection）时的那个蓝色半透明矩形框 -->
         <div class="selection-rect" id="selRect"></div>
         <div class="insert-line" id="insertLine"></div>

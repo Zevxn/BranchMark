@@ -54,6 +54,7 @@ function applyImportedMindMap(content) {
         if (!imported || !imported.data) throw new Error('文件中没有思维导图数据');
         state.data = imported.data;
         state.selectedRelationId = null;
+        state.selectedSummaryId = null;
         closeMindMapRelationEditor();
         state.view = imported.view || state.view;
         state.history = [];
@@ -132,7 +133,7 @@ function initializeMindMapImport() {
 
 const defaultTreeData = {
     id: 'root', topic: 'MindMap', content: '## 主题',
-    widthMode: 'auto', heightMode: 'auto', children: [], relations: [],
+    widthMode: 'auto', heightMode: 'auto', children: [], relations: [], summaries: [],
     foldedLeft: false, foldedRight: false
 };
 let dockData = JSON.parse(sessionStorage.getItem('DockData'))||[]; // 初始为空数组
@@ -143,7 +144,7 @@ let state = {
     data: saveData.data || JSON.parse(JSON.stringify(defaultTreeData)),
     view: saveData.view || {"tx":window.innerWidth/2,"ty":window.innerHeight/2,"scale":1},
     scrollMap: new Map(Object.entries(saveData.scrollMap || {})),
-    selectedIds: new Set(), selectedRelationId: null, history: [], historyIndex: -1,
+    selectedIds: new Set(), selectedRelationId: null, selectedSummaryId: null, history: [], historyIndex: -1,
     mode: 'IDLE', dockCollapsed: false, activeDockIndex: -1,
     editingNode: null, isReadOnly: false,
     startPos: {x:0,y:0}, viewStart: {x:0,y:0},
@@ -230,6 +231,7 @@ async function updateState(MindMapData,newCurrentFileID,pageTitle,otherPageOpen=
     document.title = pageTitle;
     state.data = MindMapData.data || defaultTreeData;
     state.selectedRelationId = null;
+    state.selectedSummaryId = null;
     closeMindMapRelationEditor();
     state.view = MindMapData.view || {tx:window.innerWidth/2,ty:window.innerHeight/2,scale:1};
     state.scrollMap = new Map(Object.entries(MindMapData.scrollMap || {}));
@@ -288,6 +290,7 @@ function new_MindMap(){
     sessionStorage.setItem('pageTitle', '新建思维导图');
     state.data = JSON.parse(JSON.stringify(defaultTreeData));   // 深拷贝
     state.selectedRelationId = null;
+    state.selectedSummaryId = null;
     closeMindMapRelationEditor();
     state.view = {tx:window.innerWidth/2,ty:window.innerHeight/2,scale:1};
     state.history=[];
@@ -349,6 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeMapToolbar();     // 初始化思维导图工具栏
     initializeMapSearch();      // 初始化搜索定位
     initializeMindMapRelations(); // 初始化卡片关联线
+    initializeMindMapSummaries(); // 初始化多卡片总结
     initializeEditorContextMenu(); // 初始化md编辑器右键菜单
 
     $('#dock-body').addEventListener('wheel', (e) => { 
@@ -528,6 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Delete') { 
             e.preventDefault();
             if (state.selectedRelationId) deleteSelectedMindMapRelation();
+            else if (state.selectedSummaryId) deleteSelectedMindMapSummary();
             else $('#btn-delete').click();
             return;
         }
@@ -570,10 +575,15 @@ function initializeMapToolbar() {
         } 
     };
     $('#btn-add-relation').onclick = addRelationBetweenSelectedCards;
+    $('#btn-add-summary').onclick = addSummaryForSelectedCards;
     $('#btn-delete').onclick=()=>{ 
         syncCurrentInput(); 
         if(state.selectedRelationId) {
             deleteSelectedMindMapRelation();
+            return;
+        }
+        if(state.selectedSummaryId) {
+            deleteSelectedMindMapSummary();
             return;
         }
         const parents=new Set(); 
@@ -586,6 +596,7 @@ function initializeMapToolbar() {
             }
         }); 
         removeMindMapRelationsForNodes(deletedNodeIds);
+        removeMindMapSummariesForNodes(deletedNodeIds);
         state.selectedIds.clear(); recordHistory(); parents.forEach(pid=>updateChildrenDOM(pid)); 
     };
 
@@ -695,6 +706,7 @@ function initializeMapToolbar() {
                  if(j.data){
                     state.data=j.data;
                     state.selectedRelationId = null;
+                    state.selectedSummaryId = null;
                     closeMindMapRelationEditor();
                     state.view=j.view||state.view;
                     state.history=[];
@@ -1350,11 +1362,14 @@ function initializeMapMouseEvents() {
            e.target.closest('#editorContextMenu') ||
            e.target.closest('.map-search-panel') ||
            e.target.closest('.relation-hit') ||
+           e.target.closest('.summary-editor') ||
+           e.target.closest('.summary-selection-action') ||
            e.target.closest('.fold-btn') ||    // 新增
            e.target.closest('.header-tools')   // 新增
         ) return;
         if (e.target.closest('.bookmark-manager-container')) return;
         clearSelectedMindMapRelation();
+        clearSelectedMindMapSummary();
         state.startPos = {x:e.clientX, y:e.clientY}; state.viewStart = {x:state.view.tx, y:state.view.ty};
 
         if(e.target.classList.contains('resize-handle')) {
@@ -1579,7 +1594,7 @@ function initializeMapMouseEvents() {
                 // ▲▲▲ 新增结束 ▲▲▲
                 // =========================================================
             }
-            
+            scheduleRenderMindMapSummaries();
 
             // stabilizeRoot();
         }
@@ -2113,6 +2128,7 @@ function addRelationBetweenSelectedCards() {
     };
     ensureMindMapRelations().push(relation);
     state.selectedRelationId = relation.id;
+    state.selectedSummaryId = null;
     state.selectedIds.clear();
     recordHistory();
     updateSelection();
@@ -2127,6 +2143,7 @@ function deleteSelectedMindMapRelation() {
     const previousLength = state.data.relations.length;
     state.data.relations = state.data.relations.filter(relation => relation.id !== relationId);
     state.selectedRelationId = null;
+    state.selectedSummaryId = null;
     closeMindMapRelationEditor();
     if (state.data.relations.length !== previousLength) {
         recordHistory();
@@ -2149,6 +2166,7 @@ function selectMindMapRelation(relationId, clientPoint) {
     if (!getMindMapRelations().some(relation => relation.id === relationId)) return;
     if (state.selectedRelationId && state.selectedRelationId !== relationId) commitMindMapRelationEditor();
     state.selectedRelationId = relationId;
+    state.selectedSummaryId = null;
     state.selectedIds.clear();
     updateSelection();
     scheduleRenderMindMapRelations();
@@ -3154,6 +3172,314 @@ function appendMindMapRelationsToCanvas(canvasNodes, canvasEdges) {
 // #endregion
 
 // =============================================================================
+// #region 多卡片总结
+// =============================================================================
+const MINDMAP_SUMMARY_SVG_NS = 'http://www.w3.org/2000/svg';
+const MINDMAP_SUMMARY_MIN_NODES = 2;
+const MINDMAP_SUMMARY_TEXT_LIMIT = 2000;
+let summaryRenderFrame = null;
+
+function getMindMapSummaries() {
+    return Array.isArray(state.data?.summaries) ? state.data.summaries : [];
+}
+
+function ensureMindMapSummaries() {
+    if (!Array.isArray(state.data.summaries)) state.data.summaries = [];
+    return state.data.summaries;
+}
+
+function getMindMapSummaryById(summaryId) {
+    return getMindMapSummaries().find(summary => summary.id === summaryId) || null;
+}
+
+function getMindMapNodeBranchSide(nodeId) {
+    if (!nodeId || nodeId === state.data.id || !findNode(state.data, nodeId)) return null;
+    return isDescendantOfLeft(nodeId) ? 'left' : 'right';
+}
+
+function getMindMapSummarySelection(nodeIds = state.selectedIds) {
+    const ids = Array.from(new Set(nodeIds || []));
+    if (ids.length < MINDMAP_SUMMARY_MIN_NODES) return null;
+    const sides = new Set();
+    for (const nodeId of ids) {
+        const side = getMindMapNodeBranchSide(nodeId);
+        if (!side) return null;
+        sides.add(side);
+    }
+    if (sides.size !== 1) return null;
+    return { nodeIds: ids, side: Array.from(sides)[0] };
+}
+
+function getMindMapSummaryBracePath(bounds, side) {
+    const direction = side === 'left' ? -1 : 1;
+    const x = side === 'left' ? bounds.left - 18 : bounds.right + 18;
+    const top = bounds.top - 8;
+    const bottom = bounds.bottom + 8;
+    const middle = (top + bottom) / 2;
+    const height = Math.max(80, bottom - top);
+    const shoulder = Math.min(22, height * 0.18);
+    const depth = Math.min(18, Math.max(12, height * 0.08));
+    const outerX = x + direction * depth;
+    const tipX = x + direction * depth * 1.55;
+    const round = value => Math.round(value * 10) / 10;
+
+    return [
+        `M ${round(x)} ${round(top)}`,
+        `C ${round(outerX)} ${round(top)}, ${round(outerX)} ${round(top + 4)}, ${round(outerX)} ${round(top + shoulder)}`,
+        `L ${round(outerX)} ${round(middle - shoulder)}`,
+        `C ${round(outerX)} ${round(middle - 5)}, ${round(tipX)} ${round(middle - 4)}, ${round(tipX)} ${round(middle)}`,
+        `C ${round(tipX)} ${round(middle + 4)}, ${round(outerX)} ${round(middle + 5)}, ${round(outerX)} ${round(middle + shoulder)}`,
+        `L ${round(outerX)} ${round(bottom - shoulder)}`,
+        `C ${round(outerX)} ${round(bottom - 4)}, ${round(outerX)} ${round(bottom)}, ${round(x)} ${round(bottom)}`
+    ].join(' ');
+}
+
+function getMindMapSummaryGeometry(summary) {
+    const selection = getMindMapSummarySelection(summary?.nodeIds || []);
+    if (!selection) return null;
+    const cardRects = selection.nodeIds
+        .map(nodeId => document.getElementById(`card-${nodeId}`))
+        .filter(card => card && card.getClientRects().length > 0)
+        .map(card => getMindMapCanvasRect(card));
+    if (cardRects.length < MINDMAP_SUMMARY_MIN_NODES) return null;
+
+    const bounds = {
+        left: Math.min(...cardRects.map(rect => rect.left)),
+        top: Math.min(...cardRects.map(rect => rect.top)),
+        right: Math.max(...cardRects.map(rect => rect.right)),
+        bottom: Math.max(...cardRects.map(rect => rect.bottom))
+    };
+    const direction = selection.side === 'left' ? -1 : 1;
+    const braceX = selection.side === 'left' ? bounds.left - 18 : bounds.right + 18;
+    const height = Math.max(80, bounds.bottom - bounds.top + 16);
+    const depth = Math.min(18, Math.max(12, height * 0.08));
+    return {
+        bounds,
+        side: selection.side,
+        path: getMindMapSummaryBracePath(bounds, selection.side),
+        labelX: braceX + direction * (depth * 1.55 + 22),
+        labelY: (bounds.top + bounds.bottom) / 2
+    };
+}
+
+function selectMindMapSummary(summaryId) {
+    if (!getMindMapSummaryById(summaryId)) return;
+    clearSelectedMindMapRelation();
+    state.selectedSummaryId = summaryId;
+    state.selectedIds.clear();
+    updateSelection();
+    scheduleRenderMindMapSummaries();
+}
+
+function clearSelectedMindMapSummary() {
+    if (!state.selectedSummaryId) return;
+    state.selectedSummaryId = null;
+    scheduleRenderMindMapSummaries();
+    updateToolbar();
+}
+
+function deleteSelectedMindMapSummary() {
+    const summaryId = state.selectedSummaryId;
+    if (!summaryId || !Array.isArray(state.data.summaries)) return;
+    const previousLength = state.data.summaries.length;
+    state.data.summaries = state.data.summaries.filter(summary => summary.id !== summaryId);
+    state.selectedSummaryId = null;
+    if (state.data.summaries.length !== previousLength) {
+        recordHistory();
+        if (typeof showTopToast === 'function') showTopToast('🗑️ 已删除卡片总结');
+    }
+    scheduleRenderMindMapSummaries();
+    updateToolbar();
+}
+
+function removeMindMapSummariesForNodes(nodeIds) {
+    if (!nodeIds || nodeIds.size === 0 || !Array.isArray(state.data.summaries)) return false;
+    let changed = false;
+    const retained = [];
+    state.data.summaries.forEach(summary => {
+        const previousIds = Array.isArray(summary.nodeIds) ? summary.nodeIds : [];
+        const remainingIds = Array.from(new Set(previousIds.filter(nodeId => !nodeIds.has(nodeId))));
+        if (remainingIds.length !== previousIds.length) changed = true;
+        if (remainingIds.length >= MINDMAP_SUMMARY_MIN_NODES) {
+            summary.nodeIds = remainingIds;
+            retained.push(summary);
+        } else {
+            changed = true;
+            if (state.selectedSummaryId === summary.id) state.selectedSummaryId = null;
+        }
+    });
+    if (changed) state.data.summaries = retained;
+    return changed;
+}
+
+function hasDuplicateMindMapSummary(nodeIds) {
+    const signature = Array.from(nodeIds).sort().join('|');
+    return getMindMapSummaries().some(summary =>
+        Array.from(new Set(summary.nodeIds || [])).sort().join('|') === signature
+    );
+}
+
+function addSummaryForSelectedCards() {
+    const selection = getMindMapSummarySelection();
+    if (!selection) {
+        if (typeof showTopToast === 'function') showTopToast('⚠️ 请选择同一侧的至少两张卡片');
+        return;
+    }
+    if (hasDuplicateMindMapSummary(selection.nodeIds)) {
+        if (typeof showTopToast === 'function') showTopToast('⚠️ 这些卡片已经有一个总结');
+        return;
+    }
+
+    const summary = {
+        id: `summary_${generateNodeId()}`,
+        nodeIds: selection.nodeIds,
+        text: '',
+        side: selection.side,
+        color: ''
+    };
+    ensureMindMapSummaries().push(summary);
+    state.selectedRelationId = null;
+    closeMindMapRelationEditor();
+    state.selectedSummaryId = summary.id;
+    state.selectedIds.clear();
+    recordHistory();
+    updateSelection();
+    scheduleRenderMindMapSummaries();
+    requestAnimationFrame(() => {
+        const input = document.querySelector(`.summary-editor[data-summary-id="${summary.id}"] textarea`);
+        if (input) input.focus();
+    });
+}
+
+function createMindMapSummaryEditor(summaryId) {
+    const editor = document.createElement('div');
+    editor.className = 'summary-editor';
+    editor.dataset.summaryId = summaryId;
+    const textarea = document.createElement('textarea');
+    textarea.maxLength = MINDMAP_SUMMARY_TEXT_LIMIT;
+    textarea.placeholder = '输入总结…';
+    textarea.setAttribute('aria-label', '卡片总结');
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'summary-delete';
+    deleteButton.title = '删除总结';
+    deleteButton.setAttribute('aria-label', '删除总结');
+    deleteButton.innerHTML = '<i class="ri-close-line"></i>';
+    editor.append(textarea, deleteButton);
+
+    editor.addEventListener('mousedown', event => event.stopPropagation());
+    editor.addEventListener('click', () => selectMindMapSummary(editor.dataset.summaryId));
+    textarea.addEventListener('focus', () => selectMindMapSummary(editor.dataset.summaryId));
+    textarea.addEventListener('input', () => {
+        const summary = getMindMapSummaryById(editor.dataset.summaryId);
+        if (summary) summary.text = textarea.value.slice(0, MINDMAP_SUMMARY_TEXT_LIMIT);
+    });
+    textarea.addEventListener('change', recordHistory);
+    textarea.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if (event.key === 'Escape' || ((event.ctrlKey || event.metaKey) && event.key === 'Enter')) {
+            event.preventDefault();
+            textarea.blur();
+        }
+    });
+    deleteButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        state.selectedSummaryId = editor.dataset.summaryId;
+        deleteSelectedMindMapSummary();
+    });
+    return editor;
+}
+
+function updateMindMapSummarySelectionAction() {
+    const action = $('#summarySelectionAction');
+    if (!action) return;
+    const selection = getMindMapSummarySelection();
+    if (!selection) {
+        action.style.display = 'none';
+        return;
+    }
+    const rects = selection.nodeIds
+        .map(nodeId => document.getElementById(`card-${nodeId}`)?.getBoundingClientRect())
+        .filter(Boolean);
+    if (rects.length < MINDMAP_SUMMARY_MIN_NODES) {
+        action.style.display = 'none';
+        return;
+    }
+    const left = Math.min(...rects.map(rect => rect.left));
+    const right = Math.max(...rects.map(rect => rect.right));
+    const top = Math.min(...rects.map(rect => rect.top));
+    action.style.display = 'flex';
+    const actionLeft = Math.max(8, Math.min(window.innerWidth - action.offsetWidth - 8, (left + right - action.offsetWidth) / 2));
+    const actionTop = Math.max(8, Math.min(window.innerHeight - action.offsetHeight - 8, top - action.offsetHeight - 10));
+    action.style.left = `${Math.round(actionLeft)}px`;
+    action.style.top = `${Math.round(actionTop)}px`;
+}
+
+function renderMindMapSummaries() {
+    summaryRenderFrame = null;
+    const braceLayer = $('#summary-brace-layer');
+    const labelLayer = $('#summary-label-layer');
+    if (!braceLayer || !labelLayer) return;
+    braceLayer.replaceChildren();
+
+    const summaries = getMindMapSummaries();
+    if (state.selectedSummaryId && !summaries.some(summary => summary.id === state.selectedSummaryId)) {
+        state.selectedSummaryId = null;
+    }
+    const visibleSummaryIds = new Set();
+    summaries.forEach(summary => {
+        const geometry = getMindMapSummaryGeometry(summary);
+        if (!geometry) return;
+        visibleSummaryIds.add(summary.id);
+
+        const path = document.createElementNS(MINDMAP_SUMMARY_SVG_NS, 'path');
+        path.classList.add('summary-brace');
+        path.classList.toggle('active', summary.id === state.selectedSummaryId);
+        path.dataset.summaryId = summary.id;
+        path.setAttribute('d', geometry.path);
+        if (/^#[0-9a-f]{6}$/i.test(summary.color || '')) {
+            path.style.setProperty('--summary-color', summary.color);
+        }
+        braceLayer.appendChild(path);
+
+        let editor = labelLayer.querySelector(`.summary-editor[data-summary-id="${summary.id}"]`);
+        if (!editor) {
+            editor = createMindMapSummaryEditor(summary.id);
+            labelLayer.appendChild(editor);
+        }
+        editor.classList.toggle('left-side', geometry.side === 'left');
+        editor.classList.toggle('active', summary.id === state.selectedSummaryId);
+        editor.style.left = `${geometry.labelX}px`;
+        editor.style.top = `${geometry.labelY}px`;
+        const textarea = editor.querySelector('textarea');
+        const summaryText = String(summary.text || '').slice(0, MINDMAP_SUMMARY_TEXT_LIMIT);
+        if (document.activeElement !== textarea && textarea.value !== summaryText) textarea.value = summaryText;
+    });
+
+    labelLayer.querySelectorAll('.summary-editor').forEach(editor => {
+        if (!visibleSummaryIds.has(editor.dataset.summaryId)) editor.remove();
+    });
+    updateMindMapSummarySelectionAction();
+    updateToolbar();
+}
+
+function scheduleRenderMindMapSummaries() {
+    if (summaryRenderFrame !== null) return;
+    summaryRenderFrame = requestAnimationFrame(renderMindMapSummaries);
+}
+
+function initializeMindMapSummaries() {
+    const action = $('#summarySelectionAction');
+    if (!$('#summary-brace-layer') || !$('#summary-label-layer') || !action) return;
+    action.addEventListener('mousedown', event => event.stopPropagation());
+    action.addEventListener('click', addSummaryForSelectedCards);
+    window.addEventListener('resize', scheduleRenderMindMapSummaries);
+    scheduleRenderMindMapSummaries();
+}
+// #endregion
+
+// =============================================================================
 // #region 搜索定位
 // =============================================================================
 function normalizeMapSearchText(value) {
@@ -3395,6 +3721,7 @@ function locateMapSearchResult(index) {
     renderTree();
 
     state.selectedRelationId = null;
+    state.selectedSummaryId = null;
     closeMindMapRelationEditor();
     state.selectedIds.clear();
     state.selectedIds.add(result.id);
@@ -3627,6 +3954,8 @@ function onMouseUp(e) {
         state.resize.node=null;
         recordHistory();
         stabilizeRoot(); // <--- 【核心修改】在这里加上它！
+        scheduleRenderMindMapRelations();
+        scheduleRenderMindMapSummaries();
     }
     else if(state.mode==='PANNING' && Math.hypot(e.clientX-state.startPos.x, e.clientY-state.startPos.y)<5) { state.selectedIds.clear(); updateSelection(); }
 
@@ -3719,6 +4048,7 @@ function restoreHistory() {
     state.data = prevData;
     state.selectedIds.clear(); 
     state.selectedRelationId = null;
+    state.selectedSummaryId = null;
     closeMindMapRelationEditor();
     
     if (isStructureSame) {
@@ -3949,6 +4279,7 @@ function renderTree() {
     restoreGlobalScrolls();
     updateTransform(); 
     scheduleRenderMindMapRelations();
+    scheduleRenderMindMapSummaries();
     if (window.rootObserver) {
         window.rootObserver.disconnect();
     }
@@ -3960,6 +4291,7 @@ function renderTree() {
         requestAnimationFrame(() => {
             stabilizeRoot();
             scheduleRenderMindMapRelations();
+            scheduleRenderMindMapSummaries();
         });
     });
 
@@ -4043,6 +4375,7 @@ function updateChildrenDOM(nodeId) {
     stabilizeRoot();
     restoreGlobalScrolls();
     scheduleRenderMindMapRelations();
+    scheduleRenderMindMapSummaries();
 };
 
 function updateNodeDOM(nodeId) {
@@ -4152,6 +4485,7 @@ function updateNodeDOM(nodeId) {
     stabilizeRoot();
     restoreGlobalScrolls();
     scheduleRenderMindMapRelations();
+    scheduleRenderMindMapSummaries();
 }
 // 修复：暴力清除高亮后重新添加，防止高亮卡死
 function updateSelection() {
@@ -4160,6 +4494,7 @@ function updateSelection() {
         const el = document.querySelector(`.node-card[data-node-id="${id}"]`);
         if(el) el.classList.add('selected');
     });
+    updateMindMapSummarySelectionAction();
     updateToolbar();
 };
 
@@ -4184,16 +4519,19 @@ function renderDock() {
 function updateTransform() {
     $('#canvas-layer').style.transform = `translate(${state.view.tx}px, ${state.view.ty}px) scale(${state.view.scale})`;
     $('#app').className = state.mode==='PANNING'?'cursor-grabbing':(state.mode==='SELECTING'?'cursor-crosshair':'cursor-grab');
+    updateMindMapSummarySelectionAction();
 };
 
 function updateToolbar() {
     const hasSel = state.selectedIds.size > 0;
     const hasRelation = Boolean(state.selectedRelationId);
+    const hasSummary = Boolean(state.selectedSummaryId);
     $('#btn-add-child').disabled = !hasSel;
     $('#btn-add-sibling').disabled = !hasSel;
     $('#btn-add-relation').disabled = state.selectedIds.size !== 2;
-    $('#btn-delete').disabled = !hasSel && !hasRelation;
-    $('#btn-delete').title = hasRelation ? '删除关联' : '删除卡片';
+    $('#btn-add-summary').disabled = !getMindMapSummarySelection();
+    $('#btn-delete').disabled = !hasSel && !hasRelation && !hasSummary;
+    $('#btn-delete').title = hasRelation ? '删除关联' : (hasSummary ? '删除总结' : '删除卡片');
     $('#btn-undo').disabled = state.historyIndex <= 0; $('#btn-redo').disabled = state.historyIndex >= state.history.length - 1;
     $('#btn-color').disabled = !hasSel;
     $('#btn-color').disabled = !hasSel || state.rainbowMode; 
