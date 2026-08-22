@@ -17,6 +17,12 @@ assert.match(html, /id=["']summarySelectionAction["'][\s\S]*?添加总结/,
     '框选有效卡片后应提供添加总结的浮动入口');
 assert.match(html, /\.summary-editor\s*\{[\s\S]*?pointer-events:\s*auto/,
     '总结编辑器应能在画布覆盖层中接收输入事件');
+assert.match(html, /\.summary-editor\.simple\s*\{[\s\S]*?background:/,
+    '总结框应提供与卡片一致的便利贴视觉模式');
+assert.match(html, /\.summary-editor\.simple \.summary-card-body\s*\{\s*display:\s*none/,
+    '便利贴模式应隐藏正文并仅展示总结标题');
+assert.match(html, /\.summary-tools\s*\{[\s\S]*?opacity:\s*0/,
+    '总结框工具应在悬停或选中时显示');
 assert.match(html, /\.summary-brace\s*\{[\s\S]*?vector-effect:\s*non-scaling-stroke/,
     '大括号在画布缩放时应保持清晰稳定的描边');
 
@@ -36,8 +42,24 @@ assert.match(mindMap, /createElementNS\(MINDMAP_SUMMARY_SVG_NS, 'path'\)/,
     '总结范围应使用 SVG 路径绘制');
 assert.match(mindMap, /createMindMapSummaryEditor\(summary\.id\)/,
     '每个可见总结应复用对应的 HTML 编辑器');
+assert.match(mindMap, /isSimple:\s*false/,
+    '新建总结应默认使用卡片模式');
+assert.match(mindMap, /topic:\s*'卡片总结'/,
+    '新建总结应保存可编辑的卡片标题');
+assert.match(mindMap, /toggleMindMapEntitySimpleMode\(summary\)[\s\S]*?recordHistory\(\)/,
+    '总结应复用卡片模式切换规则，并记录撤销历史');
+assert.match(mindMap, /function toggleMindMapEntitySimpleMode[\s\S]*?entity\.widthMode = 'manual'/,
+    '普通卡片与总结卡片应共用便利贴尺寸初始化逻辑');
+assert.match(mindMap, /classList\.toggle\('simple',\s*Boolean\(summary\.isSimple\)\)/,
+    '渲染总结时应恢复已保存的展示模式');
 assert.match(mindMap, /textarea\.addEventListener\('input'[\s\S]*?summary\.text\s*=/,
     '编辑总结时应实时同步独立总结对象');
+assert.match(mindMap, /topic\.addEventListener\('input'[\s\S]*?summary\.topic\s*=/,
+    '总结标题应独立保存，并供便利贴模式展示');
+assert.match(mindMap, /beginMindMapResize\(event, summary, 'summary', editor\)/,
+    '总结卡片应复用卡片尺寸调整状态机');
+assert.match(mindMap, /applyColorToMindMapSelection[\s\S]*?summary\.color\s*=\s*color/,
+    '通用颜色入口应同时支持普通卡片和总结卡片');
 assert.match(mindMap, /scheduleRenderMindMapRelations\(\);\s*scheduleRenderMindMapSummaries\(\);/,
     '卡片布局更新时应同时刷新关系线和总结标注');
 

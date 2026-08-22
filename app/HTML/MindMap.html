@@ -628,32 +628,120 @@
         .summary-editor {
             position: absolute;
             width: 240px;
-            min-height: 86px;
+            min-height: 112px;
             box-sizing: border-box;
             transform: translateY(-50%);
             pointer-events: auto;
             display: flex;
-            align-items: flex-start;
-            gap: 6px;
-            padding: 9px 8px 9px 10px;
-            background: color-mix(in srgb, var(--card-bg) 94%, var(--primary));
-            border: 1px solid var(--toolbar-border);
-            border-radius: 10px;
-            box-shadow: 0 4px 16px var(--shadow-color);
-            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            flex-direction: column;
+            overflow: visible;
+            background: var(--card-bg);
+            border: 2px solid var(--card-border);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px var(--shadow-color);
+            --summary-accent: var(--primary);
+            transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
         }
         .summary-editor.left-side { transform: translate(-100%, -50%); }
-        .summary-editor:hover,
+        .summary-editor:hover { box-shadow: 0 8px 20px var(--shadow-color-hover); }
         .summary-editor.active {
-            border-color: var(--primary);
-            box-shadow: 0 5px 20px var(--shadow-color-hover), 0 0 0 2px var(--shadow-color-active);
+            border-color: var(--primary) !important;
+            box-shadow: 0 0 0 1px #fff, 0 0 0 4px var(--shadow-color-active) !important;
+        }
+        .summary-card-header {
+            position: relative;
+            min-height: 38px;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+            padding: 8px 10px;
+            color: var(--text-color);
+            background: linear-gradient(to bottom, var(--header-bg-top), var(--header-bg-bottom));
+            border-bottom: 1px solid var(--header-border-bottom);
+            border-radius: 5px 5px 0 0;
+        }
+        .summary-card-title {
+            display: inline-flex;
+            min-width: 0;
+            flex: 1;
+            align-items: center;
+            gap: 6px;
+            overflow: hidden;
+            font-size: 14px;
+            font-weight: 600;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .summary-card-title i { color: var(--summary-accent); font-size: 16px; }
+        .summary-topic {
+            min-width: 0;
+            overflow: hidden;
+            outline: 0;
+            cursor: text;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .summary-tools {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding: 0 7px 0 42px;
+            opacity: 0;
+            pointer-events: none;
+            background: inherit;
+            -webkit-mask-image: linear-gradient(to right, transparent, black 38px);
+            mask-image: linear-gradient(to right, transparent, black 38px);
+            transition: opacity 0.2s ease;
+        }
+        .summary-editor:hover .summary-tools,
+        .summary-editor.active .summary-tools,
+        .summary-editor:focus-within .summary-tools {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .summary-tool {
+            width: 27px;
+            height: 27px;
+            flex: 0 0 27px;
+            display: inline-grid;
+            place-items: center;
+            padding: 0;
+            color: var(--text-color-secondary);
+            background: transparent;
+            border: 0;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: color 0.2s ease, background-color 0.2s ease, transform 0.15s ease;
+        }
+        .summary-tool:hover { color: var(--text-color); background: var(--btn-hover); }
+        .summary-tool:active { transform: translateY(1px) scale(0.96); }
+        .summary-tool:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+        .summary-delete:hover { color: #d9363e; background: color-mix(in srgb, #d9363e 10%, transparent); }
+        .summary-card-body {
+            flex: 0 0 auto;
+            min-height: 0;
+            display: flex;
+            box-sizing: border-box;
+            padding: 8px 10px 10px;
+            overflow: hidden;
+            background: var(--card-bg);
+            border-radius: 0 0 6px 6px;
         }
         .summary-editor textarea {
-            flex: 1;
-            min-width: 0;
-            min-height: 66px;
+            width: 100%;
+            min-width: 100%;
+            min-height: 70px;
+            height: 100%;
+            box-sizing: border-box;
             padding: 0;
-            resize: vertical;
+            resize: none;
             border: 0;
             outline: 0;
             background: transparent;
@@ -663,21 +751,85 @@
             line-height: 1.55;
         }
         .summary-editor textarea::placeholder { color: var(--text-color-secondary); }
-        .summary-delete {
-            width: 26px;
-            height: 26px;
-            flex: 0 0 26px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            border: 0;
-            border-radius: 6px;
-            background: transparent;
-            color: var(--text-color-secondary);
-            cursor: pointer;
+        .summary-editor.simple {
+            min-width: 150px;
+            min-height: 120px;
+            max-height: 400px;
+            background: color-mix(in srgb, var(--summary-accent) 13%, var(--card-bg));
+            border-color: color-mix(in srgb, var(--summary-accent) 64%, var(--card-border));
         }
-        .summary-delete:hover { color: #ff4d4f; background: var(--btn-hover); }
+        .summary-editor.simple .summary-card-header {
+            position: relative;
+            width: 100%;
+            min-height: 100%;
+            flex: 1;
+            align-items: flex-start;
+            padding: 12px;
+            overflow: auto;
+            background: transparent;
+            border: 0;
+            border-radius: 5px;
+        }
+        .summary-editor.simple .summary-card-title {
+            display: flex;
+            width: 100%;
+            align-items: flex-start;
+        }
+        .summary-editor.simple .summary-card-title > i { display: none; }
+        .summary-editor.simple .summary-topic {
+            display: block;
+            width: 100%;
+            min-height: 1.6em;
+            padding-right: 52px;
+            overflow: visible;
+            line-height: 1.6;
+            text-overflow: clip;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .summary-editor.simple .summary-tools {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            bottom: auto;
+            padding: 2px;
+            gap: 2px;
+            background: color-mix(in srgb, var(--card-bg) 68%, transparent);
+            border-radius: 5px;
+            -webkit-mask-image: none;
+            mask-image: none;
+            backdrop-filter: blur(4px);
+        }
+        .summary-editor.simple .summary-card-body { display: none; }
+        .summary-editor.has-color {
+            background: color-mix(in srgb, var(--summary-accent), var(--card-bg) var(--bg-mix-ratio));
+            border-color: var(--summary-accent);
+        }
+        .summary-editor.has-color:not(.simple) .summary-card-header {
+            background: var(--summary-accent);
+            border-bottom-color: rgba(0, 0, 0, 0.1);
+        }
+        .summary-editor.has-color:not(.simple) .summary-card-title i { color: currentColor; }
+        .summary-editor.has-color .summary-card-body { background: transparent; }
+        .summary-editor.simple.has-color {
+            background: color-mix(in srgb, var(--summary-accent), var(--card-bg) 15%);
+        }
+        .summary-editor:hover .resize-handle,
+        .summary-editor.active .resize-handle { opacity: 1; }
+        .summary-editor.left-side .resize-r,
+        .summary-editor.left-side .resize-br { display: none; }
+        .summary-editor.left-side .resize-l,
+        .summary-editor.left-side .resize-bl { display: block; }
+        :root[data-theme="dark"] .summary-editor.active {
+            box-shadow: 0 0 0 1px #333, 0 0 0 4px var(--primary) !important;
+        }
+        :root[data-theme="dark"] .summary-editor.simple.has-color {
+            background: color-mix(in srgb, var(--summary-accent), var(--card-bg) 72%);
+        }
+        :root[data-theme="dark"] .summary-editor.has-color:not(.simple) .summary-card-header {
+            color: var(--text-color);
+            box-shadow: inset 0 0 0 1000px rgba(0, 0, 0, 0.65);
+        }
         .summary-selection-action {
             position: fixed;
             z-index: 850;
@@ -1190,7 +1342,7 @@
         }
 
         /* 2. 左下角手柄 (Bl) 必须比底部手柄 (B) 层级高 */
-        .node-card.simple .resize-bl { 
+        .node-card.simple.left-side .resize-bl {
             bottom: -6px; 
             left: -6px; 
             width: 16px; 

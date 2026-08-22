@@ -624,17 +624,7 @@ function initializeMapToolbar() {
             saveGlobalScrolls();
             const color = el.dataset.color;
             
-            // 遍历选中节点应用颜色
-            let hasChanged = false;
-            state.selectedIds.forEach(id => { 
-                const n = findNode(state.data, id); 
-                // 只有颜色真的变了才刷新，优化性能
-                if(n) { 
-                    n.color = color; 
-                    updateNodeDOM(n.id); 
-                    hasChanged = true;
-                } 
-            });
+            const hasChanged = applyColorToMindMapSelection(color);
 
             if(hasChanged) recordHistory();
             
@@ -674,7 +664,7 @@ function initializeMapToolbar() {
         }
 
         // 禁用/启用手动颜色按钮，避免冲突
-        $('#btn-color').disabled = state.rainbowMode || state.selectedIds.size === 0;
+        updateToolbar();
         updateTreeStyle(); 
         // renderTree(); // 重新渲染，应用颜色
     };
@@ -1188,22 +1178,7 @@ function initializeMapClickEvents() {
         if(t.dataset.action === 'toggle-simple') {
             syncCurrentInput();
             const n = findNode(state.data, t.closest('.node-card').dataset.nodeId);
-            
-            n.isSimple = !n.isSimple;
-            
-            // --- 关键修复：防止高度爆炸 ---
-            if (n.isSimple) {
-                // 如果切为便利贴，强制改为手动高度模式，并给一个初始值(例如 220px)
-                // 这样长文本就会被限制住，出现滚动条，而不是撑满屏幕
-                n.heightMode = 'auto';
-                n.widthMode = 'manual'; // 建议同时也锁宽度，体验更好
-                if (!n.width) n.width = 400; // 默认宽度
-                if (!n.bodyHeight) n.bodyHeight = 220; // 默认高度
-            } else {
-                // 切回标准模式，恢复自动
-                n.heightMode = 'auto';
-                n.widthMode = 'auto';
-            }
+            toggleMindMapEntitySimpleMode(n);
             
             recordHistory(); 
             updateNodeDOM(n.id); 
@@ -1375,26 +1350,7 @@ function initializeMapMouseEvents() {
         if(e.target.classList.contains('resize-handle')) {
             const c = e.target.closest('.node-card');
             const n = findNode(state.data, c.dataset.nodeId);
-            const body = c.querySelector('.card-body');
-            
-            state.mode = 'RESIZING';
-            state.resize = { 
-                node: n, 
-                dir: e.target.dataset.resize, 
-                handleEl: e.target,
-                startW: c.offsetWidth, 
-                
-                // ▼▼▼ 核心修复：如果没有 body，就用卡片自身的高度作为起点！▼▼▼
-                startH: body ? body.offsetHeight : c.offsetHeight, 
-                // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-                
-                mx: e.clientX, 
-                my: e.clientY,
-                startViewTy: state.view.ty
-            };
-            
-            c.classList.add('no-trans');
-            e.stopPropagation(); 
+            beginMindMapResize(e, n, 'node', c);
             return;
         }
 
@@ -1491,6 +1447,7 @@ function initializeMapMouseEvents() {
         }
         else if(state.mode==='RESIZING') {
             const n = state.resize.node; // 当前正在操作的主节点
+            const resizeKind = state.resize.kind || 'node';
             const s = state.view.scale;
             
             // 1. 计算新的尺寸值
@@ -1499,7 +1456,7 @@ function initializeMapMouseEvents() {
 
             // --- A. 计算宽度 ---
             if(state.resize.dir.includes('w')) { 
-                const card = document.getElementById(`card-${n.id}`);
+                const card = state.resize.element || getMindMapResizableElement(n, resizeKind);
                 const isLeftCard = card && card.classList.contains('left-side');
                 let delta = e.clientX - state.resize.mx;
                 if(isLeftCard) delta = -delta; 
@@ -1518,52 +1475,16 @@ function initializeMapMouseEvents() {
                 newHeight = Math.max(50, Math.min(maxHeightLimit, newHeight));
             }
 
-            // 2. 定义应用尺寸的函数 (复用逻辑)
-            const applySizeToNode = (targetNode, w, h) => {
-                const targetCard = document.getElementById(`card-${targetNode.id}`);
-                if (!targetCard) return;
-
-                // 应用宽度
-                if (w !== null) {
-                    targetNode.width = w;
-                    targetNode.widthMode = 'manual';
-                    targetCard.style.width = w + 'px';
-                }
-
-                // 应用高度
-                if (h !== null) {
-                    // 检查类型是否匹配 (仅同类型卡片同步高度)
-                    // 标准卡片 vs 便利贴，由于结构不同，高度含义不同，互相同步会造成视觉错乱
-                    // 因此：标准卡片只同步标准卡片，便利贴只同步便利贴
-                    if (targetNode.isSimple === n.isSimple) {
-                        targetNode.bodyHeight = h;
-                        targetNode.heightMode = 'manual';
-                        
-                        if (!targetNode.isSimple) {
-                            // 标准模式：改 Body 高度
-                            const b = targetCard.querySelector('.card-body'); 
-                            if (b) {
-                                b.style.height = h + 'px';
-                                targetCard.style.height = 'auto'; // 确保卡片本身自适应
-                            }
-                        } else {
-                            // 便利贴模式：改 Card 高度
-                            targetCard.style.height = h + 'px';
-                        }
-                    }
-                }
-            };
-
             // 3. 应用到当前操作的节点
-            applySizeToNode(n, newWidth, newHeight);
+            applyMindMapEntitySize(n, resizeKind, newWidth, newHeight, n.isSimple);
 
             // 4. 同步应用到其他选中的节点
-            if (state.selectedIds.size > 1) {
+            if (resizeKind === 'node' && state.selectedIds.size > 1) {
                 state.selectedIds.forEach(id => {
                     if (id === n.id) return; // 跳过自己
                     const targetNode = findNode(state.data, id);
                     if (targetNode) {
-                        applySizeToNode(targetNode, newWidth, newHeight);
+                        applyMindMapEntitySize(targetNode, 'node', newWidth, newHeight, n.isSimple);
                     }
                 });
                 // =========================================================
@@ -3333,9 +3254,13 @@ function addSummaryForSelectedCards() {
     const summary = {
         id: `summary_${generateNodeId()}`,
         nodeIds: selection.nodeIds,
+        topic: '卡片总结',
         text: '',
         side: selection.side,
-        color: ''
+        color: '',
+        isSimple: false,
+        widthMode: 'auto',
+        heightMode: 'auto'
     };
     ensureMindMapSummaries().push(summary);
     state.selectedRelationId = null;
@@ -3355,20 +3280,65 @@ function createMindMapSummaryEditor(summaryId) {
     const editor = document.createElement('div');
     editor.className = 'summary-editor';
     editor.dataset.summaryId = summaryId;
+
+    const header = document.createElement('div');
+    header.className = 'summary-card-header';
+    const title = document.createElement('span');
+    title.className = 'summary-card-title';
+    const titleIcon = document.createElement('i');
+    titleIcon.className = 'ri-braces-line';
+    const topic = document.createElement('span');
+    topic.className = 'summary-topic';
+    topic.contentEditable = 'true';
+    topic.setAttribute('role', 'textbox');
+    topic.setAttribute('aria-label', '总结标题');
+    title.append(titleIcon, topic);
+    const tools = document.createElement('div');
+    tools.className = 'summary-tools';
+    const toggleButton = document.createElement('button');
+    toggleButton.type = 'button';
+    toggleButton.className = 'summary-tool summary-mode-toggle';
+    toggleButton.dataset.summaryAction = 'toggle-simple';
     const textarea = document.createElement('textarea');
     textarea.maxLength = MINDMAP_SUMMARY_TEXT_LIMIT;
     textarea.placeholder = '输入总结…';
     textarea.setAttribute('aria-label', '卡片总结');
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
-    deleteButton.className = 'summary-delete';
+    deleteButton.className = 'summary-tool summary-delete';
     deleteButton.title = '删除总结';
     deleteButton.setAttribute('aria-label', '删除总结');
-    deleteButton.innerHTML = '<i class="ri-close-line"></i>';
-    editor.append(textarea, deleteButton);
+    deleteButton.innerHTML = '<i class="ri-delete-bin-line"></i>';
+    const body = document.createElement('div');
+    body.className = 'summary-card-body';
+    tools.append(toggleButton, deleteButton);
+    header.append(title, tools);
+    body.appendChild(textarea);
+    editor.append(header, body);
+    editor.insertAdjacentHTML('beforeend', getMindMapResizeHandlesHTML());
 
-    editor.addEventListener('mousedown', event => event.stopPropagation());
+    editor.addEventListener('mousedown', event => {
+        const handle = event.target.closest('.resize-handle');
+        if (handle) {
+            const summary = getMindMapSummaryById(editor.dataset.summaryId);
+            if (summary) beginMindMapResize(event, summary, 'summary', editor);
+        }
+        event.stopPropagation();
+    });
     editor.addEventListener('click', () => selectMindMapSummary(editor.dataset.summaryId));
+    topic.addEventListener('focus', () => selectMindMapSummary(editor.dataset.summaryId));
+    topic.addEventListener('input', () => {
+        const summary = getMindMapSummaryById(editor.dataset.summaryId);
+        if (summary) summary.topic = topic.innerText.slice(0, 200);
+    });
+    topic.addEventListener('blur', recordHistory);
+    topic.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if (event.key === 'Escape' || ((event.ctrlKey || event.metaKey) && event.key === 'Enter')) {
+            event.preventDefault();
+            topic.blur();
+        }
+    });
     textarea.addEventListener('focus', () => selectMindMapSummary(editor.dataset.summaryId));
     textarea.addEventListener('input', () => {
         const summary = getMindMapSummaryById(editor.dataset.summaryId);
@@ -3381,6 +3351,17 @@ function createMindMapSummaryEditor(summaryId) {
             event.preventDefault();
             textarea.blur();
         }
+    });
+    toggleButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const summary = getMindMapSummaryById(editor.dataset.summaryId);
+        if (!summary) return;
+        toggleMindMapEntitySimpleMode(summary);
+        state.selectedSummaryId = summary.id;
+        recordHistory();
+        scheduleRenderMindMapSummaries();
+        requestAnimationFrame(() => (summary.isSimple ? topic : textarea).focus());
     });
     deleteButton.addEventListener('click', event => {
         event.preventDefault();
@@ -3450,9 +3431,35 @@ function renderMindMapSummaries() {
         }
         editor.classList.toggle('left-side', geometry.side === 'left');
         editor.classList.toggle('active', summary.id === state.selectedSummaryId);
+        editor.classList.toggle('simple', Boolean(summary.isSimple));
         editor.style.left = `${geometry.labelX}px`;
         editor.style.top = `${geometry.labelY}px`;
+        if (/^#[0-9a-f]{6}$/i.test(summary.color || '')) {
+            editor.style.setProperty('--summary-accent', summary.color);
+            editor.classList.add('has-color');
+        } else {
+            editor.style.removeProperty('--summary-accent');
+            editor.classList.remove('has-color');
+        }
+        editor.style.width = summary.widthMode === 'manual' && summary.width ? `${summary.width}px` : '';
+        editor.style.height = summary.isSimple && summary.heightMode === 'manual' && summary.bodyHeight
+            ? `${summary.bodyHeight}px`
+            : '';
         const textarea = editor.querySelector('textarea');
+        const topic = editor.querySelector('.summary-topic');
+        const body = editor.querySelector('.summary-card-body');
+        const toggleButton = editor.querySelector('[data-summary-action="toggle-simple"]');
+        const isSimple = Boolean(summary.isSimple);
+        const toggleTitle = isSimple ? '切换回卡片模式' : '切换为便利贴模式';
+        toggleButton.title = toggleTitle;
+        toggleButton.setAttribute('aria-label', toggleTitle);
+        toggleButton.setAttribute('aria-pressed', String(isSimple));
+        toggleButton.innerHTML = `<i class="${isSimple ? 'ri-layout-top-2-line' : 'ri-sticky-note-line'}"></i>`;
+        body.style.height = !isSimple && summary.heightMode === 'manual' && summary.bodyHeight
+            ? `${summary.bodyHeight}px`
+            : '';
+        const summaryTopic = String(summary.topic || '卡片总结').slice(0, 200);
+        if (document.activeElement !== topic && topic.innerText !== summaryTopic) topic.textContent = summaryTopic;
         const summaryText = String(summary.text || '').slice(0, MINDMAP_SUMMARY_TEXT_LIMIT);
         if (document.activeElement !== textarea && textarea.value !== summaryText) textarea.value = summaryText;
     });
@@ -3781,19 +3788,29 @@ function initializeMapSearch() {
 }
 // #endregion
 
+function applyColorToMindMapSelection(color) {
+    let changed = false;
+    state.selectedIds.forEach(id => {
+        const node = findNode(state.data, id);
+        if (node && node.color !== color) {
+            node.color = color;
+            updateNodeDOM(node.id);
+            changed = true;
+        }
+    });
+    const summary = getMindMapSummaryById(state.selectedSummaryId);
+    if (summary && summary.color !== color) {
+        summary.color = color;
+        scheduleRenderMindMapSummaries();
+        changed = true;
+    }
+    return changed;
+}
+
 // 通用的应用颜色函数
 function applyCustomColorToSelection (color, isFinalStep) {
     saveGlobalScrolls();
-    
-    // 1. 更新数据和视图 (预览阶段 & 提交阶段都会执行)
-    state.selectedIds.forEach(id => {
-        const n = findNode(state.data, id);
-        // 只有当颜色真的不同时才更新DOM，避免拖动时的性能浪费
-        if (n && n.color !== color) {
-            n.color = color;
-            updateNodeDOM(n.id);
-        }
-    });
+    applyColorToMindMapSelection(color);
 
     // 2. 关键修复：只要是最终步骤 (change事件)，强制检查并记录历史
     // 我们不再依赖上面的 if (n.color !== color) 判断，
@@ -3802,6 +3819,7 @@ function applyCustomColorToSelection (color, isFinalStep) {
     if (isFinalStep) {
         recordHistory();
     }
+    restoreGlobalScrolls();
 };
 
 
@@ -3949,7 +3967,7 @@ function onMouseUp(e) {
         $('#selRect').style.display='none';
     }
     else if(state.mode==='RESIZING') {
-        const card = document.getElementById(`card-${state.resize.node.id}`);
+        const card = state.resize.element || getMindMapResizableElement(state.resize.node, state.resize.kind || 'node');
         if(card) card.classList.remove('no-trans');
         state.resize.node=null;
         recordHistory();
@@ -4082,6 +4100,75 @@ function isTemporarilyCollapsed(node) {
     );
 }
 
+function getMindMapResizeHandlesHTML() {
+    return '<div class="resize-handle resize-l" data-resize="w"></div>'
+        + '<div class="resize-handle resize-r" data-resize="w"></div>'
+        + '<div class="resize-handle resize-b" data-resize="h"></div>'
+        + '<div class="resize-handle resize-bl" data-resize="wh"></div>'
+        + '<div class="resize-handle resize-br" data-resize="wh"></div>';
+}
+
+function toggleMindMapEntitySimpleMode(entity) {
+    entity.isSimple = !entity.isSimple;
+    entity.heightMode = 'auto';
+    if (entity.isSimple) {
+        entity.widthMode = 'manual';
+        if (!entity.width) entity.width = 400;
+        if (!entity.bodyHeight) entity.bodyHeight = 220;
+    } else {
+        entity.widthMode = 'auto';
+    }
+}
+
+function getMindMapResizableElement(target, kind = 'node') {
+    if (!target) return null;
+    return kind === 'summary'
+        ? document.querySelector(`.summary-editor[data-summary-id="${target.id}"]`)
+        : document.getElementById(`card-${target.id}`);
+}
+
+function beginMindMapResize(event, target, kind, element) {
+    if (!target || !element) return;
+    const bodySelector = kind === 'summary' ? '.summary-card-body' : '.card-body';
+    const body = target.isSimple ? null : element.querySelector(bodySelector);
+    state.mode = 'RESIZING';
+    state.resize = {
+        node: target,
+        kind,
+        element,
+        dir: event.target.dataset.resize,
+        handleEl: event.target,
+        startW: element.offsetWidth,
+        startH: body ? body.offsetHeight : element.offsetHeight,
+        mx: event.clientX,
+        my: event.clientY,
+        startViewTy: state.view.ty
+    };
+    element.classList.add('no-trans');
+    event.preventDefault();
+    event.stopPropagation();
+}
+
+function applyMindMapEntitySize(target, kind, width, height, sourceIsSimple) {
+    const element = getMindMapResizableElement(target, kind);
+    if (!element) return;
+    if (width !== null) {
+        target.width = width;
+        target.widthMode = 'manual';
+        element.style.width = `${width}px`;
+    }
+    if (height === null || Boolean(target.isSimple) !== Boolean(sourceIsSimple)) return;
+    target.bodyHeight = height;
+    target.heightMode = 'manual';
+    if (target.isSimple) {
+        element.style.height = `${height}px`;
+        return;
+    }
+    const body = element.querySelector(kind === 'summary' ? '.summary-card-body' : '.card-body');
+    if (body) body.style.height = `${height}px`;
+    element.style.height = 'auto';
+}
+
 function createNodeHTML(node, isLeft, inheritedColor = null) {
     const isSelected = state.selectedIds.has(node.id);
     const isRoot = node.id === state.data.id;
@@ -4179,11 +4266,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
     }
 
     // 修复：确保左侧节点也有正确的 Resize 手柄 (左边 resize-l, 左下角 resize-bl)
-    const resizeHandles = (!isContentCollapsed || isSimple) ? (
-        isLeft ? 
-        `<div class="resize-handle resize-l" data-resize="w"></div><div class="resize-handle resize-b" data-resize="h"></div><div class="resize-handle resize-bl" data-resize="wh"></div>` :
-        `<div class="resize-handle resize-r" data-resize="w"></div><div class="resize-handle resize-b" data-resize="h"></div><div class="resize-handle resize-br" data-resize="wh"></div>`
-    ) : '';
+    const resizeHandles = (!isContentCollapsed || isSimple) ? getMindMapResizeHandlesHTML() : '';
 
     const foldBtn = (!isRoot && hasChildren) ? 
         `<div class="fold-btn ${areChildrenVisible?'has-children':''} ${isLeft?'left-side':''}" data-action="fold"><i class="${areChildrenVisible?'ri-subtract-line':'ri-add-line'}"></i></div>` : '';
@@ -4533,8 +4616,8 @@ function updateToolbar() {
     $('#btn-delete').disabled = !hasSel && !hasRelation && !hasSummary;
     $('#btn-delete').title = hasRelation ? '删除关联' : (hasSummary ? '删除总结' : '删除卡片');
     $('#btn-undo').disabled = state.historyIndex <= 0; $('#btn-redo').disabled = state.historyIndex >= state.history.length - 1;
-    $('#btn-color').disabled = !hasSel;
-    $('#btn-color').disabled = !hasSel || state.rainbowMode; 
+    $('#btn-color').disabled = (!hasSel && !hasSummary) || (hasSel && state.rainbowMode);
+    $('#btn-color').title = hasSummary ? '设置总结颜色' : '设置卡片颜色';
 
     const compactButton = $('#btn-compact-view');
     if (compactButton) {
