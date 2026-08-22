@@ -54,6 +54,8 @@ assert.match(mindMap, /relationRouteCache\s*=\s*\{\s*key:\s*cacheKey,\s*routes\s
     '卡片几何未变化时应复用路由，避免编辑标签时重复寻路');
 assert.match(mindMap, /reservedSidePenalty\s*=\s*\(sourceReservedSides\.has\(sourceSide\)/,
     '关系端点应避开已被树结构占用的卡片侧边');
+assert.match(mindMap, /function getMindMapRelationPreferredAlong\(/,
+    '关联线应根据父子连线占用情况调整卡片边缘端点');
 assert.match(mindMap, /document\.querySelectorAll\('\.fold-btn'\)[\s\S]*?MINDMAP_RELATION_FOLD_BUTTON_PADDING/,
     '可见折叠按钮应作为带安全间距的路由障碍');
 assert.match(mindMap, /function getMindMapRelationFoldCorridors\(cardRects\)/,
@@ -308,6 +310,95 @@ assert.equal(centeredMixedCandidate.sourcePort.port.y, 50,
     '无法共线的混合方向连接应优先使用源卡片边中心');
 assert.equal(centeredMixedCandidate.targetPort.port.x, 250,
     '无法共线的混合方向连接应优先使用目标卡片边中心');
+
+routingContext.relationCardRect = {
+    id: 'relation-card', left: 0, right: 160, top: 100, bottom: 300, width: 160, height: 200
+};
+routingContext.upperRelatedRect = {
+    id: 'upper-related', left: 300, right: 460, top: -20, bottom: 80, width: 160, height: 100
+};
+routingContext.lowerRelatedRect = {
+    id: 'lower-related', left: 300, right: 460, top: 320, bottom: 420, width: 160, height: 100
+};
+
+assert.equal(vm.runInContext(`
+    getMindMapRelationPreferredAlong(
+        relationCardRect,
+        'right',
+        upperRelatedRect,
+        { branchSide: 'right', hasVisibleChildren: false, visibleChildSides: [] }
+    )
+`, routingContext), 200,
+    '右支卡片没有可见子节点时，右侧关联线仍应使用边缘中点');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPreferredAlong(
+        relationCardRect,
+        'right',
+        upperRelatedRect,
+        { branchSide: 'right', hasVisibleChildren: true, visibleChildSides: [] }
+    )
+`, routingContext), 150,
+    '右支卡片的右侧子连线被占用且对方在上时，端点应上移至四分之一高度');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPreferredAlong(
+        relationCardRect,
+        'left',
+        lowerRelatedRect,
+        { branchSide: 'right', hasVisibleChildren: false, visibleChildSides: [] }
+    )
+`, routingContext), 250,
+    '右支卡片的左侧父连线始终被占用，对方在下时端点应下移至四分之三高度');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPreferredAlong(
+        relationCardRect,
+        'left',
+        upperRelatedRect,
+        { branchSide: 'left', hasVisibleChildren: false, visibleChildSides: [] }
+    )
+`, routingContext), 200,
+    '左支卡片没有可见子节点时，左侧关联线应使用边缘中点');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPreferredAlong(
+        relationCardRect,
+        'right',
+        upperRelatedRect,
+        { branchSide: 'left', hasVisibleChildren: false, visibleChildSides: [] }
+    )
+`, routingContext), 150,
+    '左支卡片的右侧父连线应与右支规则水平镜像');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPreferredAlong(
+        relationCardRect,
+        'left',
+        upperRelatedRect,
+        { branchSide: 'left', hasVisibleChildren: true, visibleChildSides: [] }
+    )
+`, routingContext), 150,
+    '左支卡片有可见子节点时，左侧子连线端点应按镜像规则避让');
+
+routingContext.compactRelationCardRect = {
+    left: 0, right: 120, top: 0, bottom: 46, width: 120, height: 46
+};
+const compactQuarterPort = vm.runInContext(`
+    getMindMapRelationPort(compactRelationCardRect, 'right', 0, 18, 11.5)
+`, routingContext);
+assert.equal(compactQuarterPort.port.y, 11.5,
+    '矮卡片的四分位端点也应保持精确，不能被固定边距推回中间');
+
+const independentPorts = vm.runInContext(`
+    getMindMapRelationSideCandidates(
+        relationCardRect,
+        upperRelatedRect,
+        new Set(),
+        new Set(),
+        { branchSide: 'right', hasVisibleChildren: true, visibleChildSides: [] },
+        { branchSide: 'right', hasVisibleChildren: false, visibleChildSides: [] }
+    ).find(candidate => candidate.sourceSide === 'right' && candidate.targetSide === 'left')
+`, routingContext);
+assert.equal(independentPorts.sourcePort.port.y, 150,
+    '关联线起点应根据目标位置独立选取上四分位');
+assert.equal(independentPorts.targetPort.port.y, 55,
+    '关联线终点应根据源卡片位置独立选取下四分位');
 const sourceClearance = Math.abs(
     centeredMixedCandidate.sourcePort.routePoint.x - centeredMixedCandidate.sourcePort.port.x
 ) + Math.abs(

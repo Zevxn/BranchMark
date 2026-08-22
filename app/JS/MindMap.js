@@ -2140,7 +2140,13 @@ function selectMindMapRelation(relationId, clientPoint) {
     openMindMapRelationEditor(relationId, clientPoint);
 }
 
-function getMindMapRelationPath(sourceRect, targetRect, view = state.view) {
+function getMindMapRelationPath(
+    sourceRect,
+    targetRect,
+    view = state.view,
+    sourcePortContext = null,
+    targetPortContext = null
+) {
     const sourceCenter = {
         x: sourceRect.left + sourceRect.width / 2,
         y: sourceRect.top + sourceRect.height / 2
@@ -2161,8 +2167,26 @@ function getMindMapRelationPath(sourceRect, targetRect, view = state.view) {
     let sourcePoint;
     let targetPoint;
     if (horizontal) {
-        sourcePoint = { x: dx >= 0 ? sourceRect.right : sourceRect.left, y: sourceCenter.y };
-        targetPoint = { x: dx >= 0 ? targetRect.left : targetRect.right, y: targetCenter.y };
+        const sourceSide = dx >= 0 ? 'right' : 'left';
+        const targetSide = dx >= 0 ? 'left' : 'right';
+        sourcePoint = {
+            x: sourceSide === 'right' ? sourceRect.right : sourceRect.left,
+            y: getMindMapRelationPreferredAlong(
+                sourceRect,
+                sourceSide,
+                targetRect,
+                sourcePortContext
+            )
+        };
+        targetPoint = {
+            x: targetSide === 'left' ? targetRect.left : targetRect.right,
+            y: getMindMapRelationPreferredAlong(
+                targetRect,
+                targetSide,
+                sourceRect,
+                targetPortContext
+            )
+        };
     } else {
         sourcePoint = { x: sourceCenter.x, y: dy >= 0 ? sourceRect.bottom : sourceRect.top };
         targetPoint = { x: targetCenter.x, y: dy >= 0 ? targetRect.top : targetRect.bottom };
@@ -2236,7 +2260,8 @@ function getMindMapRelationPort(
     preferredAlong = null
 ) {
     const horizontalSide = side === 'left' || side === 'right';
-    const inset = 12;
+    const edgeLength = horizontalSide ? rect.height : rect.width;
+    const inset = Math.min(12, edgeLength / 4);
     const centerAlong = horizontalSide ? rect.top + rect.height / 2 : rect.left + rect.width / 2;
     const desiredAlong = Number.isFinite(preferredAlong) ? preferredAlong : centerAlong;
     const along = horizontalSide
@@ -2267,11 +2292,59 @@ function getMindMapRelationReservedSides(nodeId) {
     return reservedSides;
 }
 
+function getMindMapRelationPortContext(nodeId) {
+    const node = findNode(state.data, nodeId);
+    if (!node) return null;
+    if (nodeId === state.data.id) {
+        const visibleChildSides = [];
+        const children = node.children || [];
+        const leftVisible = !node.foldedLeft || isMapRootDirectionTemporarilyExpanded('left');
+        const rightVisible = !node.foldedRight || isMapRootDirectionTemporarilyExpanded('right');
+        if (leftVisible && children.some(child => child.dir === 'left')) visibleChildSides.push('left');
+        if (rightVisible && children.some(child => child.dir !== 'left')) visibleChildSides.push('right');
+        return { branchSide: 'root', hasVisibleChildren: visibleChildSides.length > 0, visibleChildSides };
+    }
+
+    return {
+        branchSide: getMindMapNodeBranchSide(nodeId),
+        hasVisibleChildren: Boolean(
+            node.children?.length
+            && (!node.folded || isMapNodeTemporarilyExpanded(node.id))
+        )
+    };
+}
+
+function isMindMapRelationSideOccupied(side, portContext) {
+    if (!portContext || (side !== 'left' && side !== 'right')) return false;
+    if (portContext.branchSide === 'root') {
+        return portContext.visibleChildSides?.includes(side) || false;
+    }
+
+    const childSide = portContext.branchSide === 'left' ? 'left' : 'right';
+    const parentSide = childSide === 'left' ? 'right' : 'left';
+    return side === parentSide || (side === childSide && portContext.hasVisibleChildren);
+}
+
+function getMindMapRelationPreferredAlong(rect, side, otherRect, portContext = null) {
+    const horizontalSide = side === 'left' || side === 'right';
+    const centerAlong = horizontalSide ? rect.top + rect.height / 2 : rect.left + rect.width / 2;
+    if (!horizontalSide || !otherRect || !isMindMapRelationSideOccupied(side, portContext)) {
+        return centerAlong;
+    }
+
+    const otherCenterY = otherRect.top + otherRect.height / 2;
+    if (otherCenterY < centerAlong) return rect.top + rect.height / 4;
+    if (otherCenterY > centerAlong) return rect.top + rect.height * 3 / 4;
+    return centerAlong;
+}
+
 function getMindMapRelationSideCandidates(
     sourceRect,
     targetRect,
     sourceReservedSides = new Set(),
-    targetReservedSides = new Set()
+    targetReservedSides = new Set(),
+    sourcePortContext = null,
+    targetPortContext = null
 ) {
     const sides = ['left', 'right', 'top', 'bottom'];
     const sourceCenter = { x: sourceRect.left + sourceRect.width / 2, y: sourceRect.top + sourceRect.height / 2 };
@@ -2283,10 +2356,18 @@ function getMindMapRelationSideCandidates(
 
     sides.forEach(sourceSide => {
         sides.forEach(targetSide => {
-            const sourceUsesVerticalEdge = sourceSide === 'left' || sourceSide === 'right';
-            const targetUsesVerticalEdge = targetSide === 'left' || targetSide === 'right';
-            const sourcePreferredAlong = sourceUsesVerticalEdge ? sourceCenter.y : sourceCenter.x;
-            const targetPreferredAlong = targetUsesVerticalEdge ? targetCenter.y : targetCenter.x;
+            const sourcePreferredAlong = getMindMapRelationPreferredAlong(
+                sourceRect,
+                sourceSide,
+                targetRect,
+                sourcePortContext
+            );
+            const targetPreferredAlong = getMindMapRelationPreferredAlong(
+                targetRect,
+                targetSide,
+                sourceRect,
+                targetPortContext
+            );
             const sourcePort = getMindMapRelationPort(
                 sourceRect,
                 sourceSide,
@@ -2733,7 +2814,9 @@ function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegment
         sourceRect,
         targetRect,
         getMindMapRelationReservedSides(sourceRect.id),
-        getMindMapRelationReservedSides(targetRect.id)
+        getMindMapRelationReservedSides(targetRect.id),
+        getMindMapRelationPortContext(sourceRect.id),
+        getMindMapRelationPortContext(targetRect.id)
     );
     const centerDistance = Math.hypot(
         (targetRect.left + targetRect.width / 2) - (sourceRect.left + sourceRect.width / 2),
@@ -2970,7 +3053,10 @@ function renderMindMapRelations() {
         const toCard = direction === 'reverse' ? sourceCard : targetCard;
         const pathData = route?.path || getMindMapRelationPath(
             fromCard.getBoundingClientRect(),
-            toCard.getBoundingClientRect()
+            toCard.getBoundingClientRect(),
+            state.view,
+            getMindMapRelationPortContext(fromCard.dataset.nodeId),
+            getMindMapRelationPortContext(toCard.dataset.nodeId)
         );
         const group = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'g');
         group.classList.add('relation-group');
