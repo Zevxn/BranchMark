@@ -19,10 +19,14 @@ assert.match(html, /\.summary-editor\s*\{[\s\S]*?pointer-events:\s*auto/,
     '总结编辑器应能在画布覆盖层中接收输入事件');
 assert.match(html, /\.summary-editor\.simple\s*\{[\s\S]*?background:/,
     '总结框应提供与卡片一致的便利贴视觉模式');
+assert.match(html, /\.summary-editor\s*\{[\s\S]*?min-height:\s*0/,
+    '总结卡片容器不应额外锁定高于普通卡片的最小高度');
+assert.match(html, /\.node-card\.simple,\s*\.summary-editor\.simple\s*\{\s*min-height:\s*60px/,
+    '普通便利贴与总结便利贴应复用一致的最小高度');
 assert.match(html, /\.summary-editor\.simple \.summary-card-body\s*\{\s*display:\s*none/,
     '便利贴模式应隐藏正文并仅展示总结标题');
-assert.match(html, /\.summary-tools\s*\{[\s\S]*?opacity:\s*0/,
-    '总结框工具应在悬停或选中时显示');
+assert.match(html, /\.card-floating-tools\s*\{[\s\S]*?opacity:\s*0/,
+    '总结框与普通卡片应复用默认隐藏的悬浮工具栏');
 assert.match(html, /\.summary-brace\s*\{[\s\S]*?vector-effect:\s*non-scaling-stroke/,
     '大括号在画布缩放时应保持清晰稳定的描边');
 
@@ -58,6 +62,14 @@ assert.match(mindMap, /topic\.addEventListener\('input'[\s\S]*?summary\.topic\s*
     '总结标题应独立保存，并供便利贴模式展示');
 assert.match(mindMap, /beginMindMapResize\(event, summary, 'summary', editor\)/,
     '总结卡片应复用卡片尺寸调整状态机');
+assert.match(mindMap, /editor\.addEventListener\('dblclick'[\s\S]*?autoFitMindMapEntity\(summary, 'summary', handle\.dataset\.resize\)/,
+    '总结尺寸层应就近接收双击，并复用公共自适应逻辑');
+assert.match(mindMap, /tools\.className = 'summary-tools card-floating-tools'/,
+    '总结卡片应复用卡片顶部居中的悬浮工具栏');
+assert.match(mindMap, /editor\.append\(header, body, tools\)/,
+    '总结工具栏应作为卡片直接子元素，避免被标题区域裁切');
+assert.match(mindMap, /getMindMapSummaryById\(summaryEditor\.dataset\.summaryId\)[\s\S]*?kind: 'summary'/,
+    '双击尺寸手柄时应能解析总结卡片为公共尺寸目标');
 assert.match(mindMap, /applyColorToMindMapSelection[\s\S]*?summary\.color\s*=\s*color/,
     '通用颜色入口应同时支持普通卡片和总结卡片');
 assert.match(mindMap, /scheduleRenderMindMapRelations\(\);\s*scheduleRenderMindMapSummaries\(\);/,

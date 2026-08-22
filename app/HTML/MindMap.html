@@ -156,19 +156,10 @@
             .card-header[style*="background"] .node-topic { 
                 color: var(--text-color) !important; 
             }
-            .card-header[style*="background"] .tool-icon,
             .card-header[style*="background"] .content-indicator {
                 filter: none !important; 
                 mix-blend-mode: normal !important;
                 color: rgba(255,255,255,0.7) !important;
-            }
-            .card-header[style*="background"] .tool-icon:hover {
-                color: #fff !important;
-                background: rgba(255,255,255,0.1);
-            }
-
-            .node-card:not(.simple) .card-header[style*="background"] .header-tools {
-                box-shadow: inset 0 0 0 1000px rgba(0,0,0,0.65) !important;
             }
             /* 确保工具栏图标在深色背景下不会因为反色滤镜变得奇怪 */
             /* .node-card .tool-icon {
@@ -628,7 +619,7 @@
         .summary-editor {
             position: absolute;
             width: 240px;
-            min-height: 112px;
+            min-height: 0;
             box-sizing: border-box;
             transform: translateY(-50%);
             pointer-events: auto;
@@ -682,29 +673,7 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .summary-tools {
-            position: absolute;
-            top: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 2;
-            display: flex;
-            align-items: center;
-            gap: 2px;
-            padding: 0 7px 0 42px;
-            opacity: 0;
-            pointer-events: none;
-            background: inherit;
-            -webkit-mask-image: linear-gradient(to right, transparent, black 38px);
-            mask-image: linear-gradient(to right, transparent, black 38px);
-            transition: opacity 0.2s ease;
-        }
-        .summary-editor:hover .summary-tools,
-        .summary-editor.active .summary-tools,
-        .summary-editor:focus-within .summary-tools {
-            opacity: 1;
-            pointer-events: auto;
-        }
+        .summary-tools { gap: 2px; }
         .summary-tool {
             width: 27px;
             height: 27px;
@@ -753,7 +722,6 @@
         .summary-editor textarea::placeholder { color: var(--text-color-secondary); }
         .summary-editor.simple {
             min-width: 150px;
-            min-height: 120px;
             max-height: 400px;
             background: color-mix(in srgb, var(--summary-accent) 13%, var(--card-bg));
             border-color: color-mix(in srgb, var(--summary-accent) 64%, var(--card-border));
@@ -780,25 +748,11 @@
             display: block;
             width: 100%;
             min-height: 1.6em;
-            padding-right: 52px;
             overflow: visible;
             line-height: 1.6;
             text-overflow: clip;
             white-space: pre-wrap;
             word-break: break-word;
-        }
-        .summary-editor.simple .summary-tools {
-            position: absolute;
-            top: 5px;
-            right: 5px;
-            bottom: auto;
-            padding: 2px;
-            gap: 2px;
-            background: color-mix(in srgb, var(--card-bg) 68%, transparent);
-            border-radius: 5px;
-            -webkit-mask-image: none;
-            mask-image: none;
-            backdrop-filter: blur(4px);
         }
         .summary-editor.simple .summary-card-body { display: none; }
         .summary-editor.has-color {
@@ -1086,11 +1040,11 @@
         .resize-handle { position: absolute; opacity: 0; z-index: 50; transition: 0.1s; }
         .node-card:hover .resize-handle { opacity: 1; }
         .resize-r { right:-5px; top:0; bottom:0; width:10px; cursor:col-resize; }
-        .resize-br { bottom:-5px; right:-5px; width:15px; height:15px; cursor:nwse-resize; }
+        .resize-br { bottom:-5px; right:-5px; width:15px; height:15px; z-index:51; cursor:nwse-resize; }
         .node-card.left-side .resize-r { display: none; }
         .node-card.left-side .resize-br { display: none; }
         .resize-l { left:-5px; top:0; bottom:0; width:10px; cursor:col-resize; display: none; }
-        .resize-bl { bottom:-5px; left:-5px; width:15px; height:15px; cursor:nesw-resize; display: none; }
+        .resize-bl { bottom:-5px; left:-5px; width:15px; height:15px; z-index:51; cursor:nesw-resize; display: none; }
         .resize-bl::after { content:''; position:absolute; bottom:4px; left:4px; width:6px; height:6px; border-left:2px solid var(--primary); border-bottom:2px solid var(--primary); }
         .node-card.left-side .resize-l { display: block; }
         .node-card.left-side .resize-bl { display: block; }
@@ -1188,48 +1142,49 @@
             cursor: auto;       /* 鼠标恢复为文本指针 */}
         .preview-content { flex: 1; padding: 30px; overflow-y: auto; color: var(--text-color); }
 
-        .node-card:not(.simple) .card-header {
-            position: relative;
-            overflow: hidden; /* 必须，防止遮罩层边缘溢出 */
-        }
-
-        /* 2. 工具栏核心：悬停时显示一个带渐变的“挡板” */
-        .node-card:not(.simple) .header-tools {
+        /* 卡片与总结共用：按钮悬浮在卡片正上方，悬停或键盘聚焦时显示。 */
+        .card-floating-tools {
             position: absolute;
-            right: 0;
-            top: 0;
-            bottom: 0;
-            z-index: 20;
-            
+            left: 50%;
+            top: -6px;
+            z-index: 120;
             display: flex;
             align-items: center;
-            padding-right: 8px;
-            padding-left: 50px; /* 挡板的宽度，留出左侧渐变的空间 */
-            
+            gap: 4px;
+            padding: 4px 5px;
+            transform: translate(-50%, -100%);
             opacity: 0;
+            visibility: hidden;
             pointer-events: none;
-            transition: opacity 0.2s ease;
-            
-            /* 关键：强制继承 Header 的背景，以此遮挡文字 */
-            background: inherit !important;
-            
-            /* 关键：使用 mask 实现从左到右的“淡入”遮罩 */
-            /* 左侧 0-50px 是透明到黑色的渐变，右侧全黑（代表不透明） */
-            -webkit-mask-image: linear-gradient(to right, transparent, black 50px);
-            mask-image: linear-gradient(to right, transparent, black 50px);
+            white-space: nowrap;
+            background: color-mix(in srgb, var(--toolbar-bg) 92%, transparent) !important;
+            border: 1px solid var(--toolbar-border) !important;
+            border-radius: 8px;
+            box-shadow: 0 5px 14px var(--shadow-color-hover) !important;
+            backdrop-filter: blur(8px);
+            transition: opacity 0.16s ease, visibility 0.16s ease;
         }
-        .node-card:not(.simple) .header-tools .tool-icon {
-            pointer-events: none;
+        .card-floating-tools::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            bottom: -7px;
+            left: 0;
+            height: 7px;
         }
-        /* 悬停时卡片头部时出现工具栏 */
-        .node-card:not(.simple) .card-header:hover .header-tools {
+        .node-card:hover > .card-floating-tools,
+        .node-card:focus-within > .card-floating-tools,
+        .summary-editor:hover > .card-floating-tools,
+        .summary-editor:focus-within > .card-floating-tools {
             opacity: 1;
-            pointer-events: none; /* 渐变挡板不得遮挡窄卡片的拖动命中区 */
-        }
-        .node-card:not(.simple) .card-header:hover .header-tools .tool-icon {
+            visibility: visible;
             pointer-events: auto;
         }
         /* --- 便利贴模式 (Simple Mode) 滚动与布局修复 ------------ */
+        .node-card.simple,
+        .summary-editor.simple {
+            min-height: 60px;
+        }
         .node-card.simple {
             display: flex;       /* 变成 flex 布局 */
             flex-direction: column;
@@ -1238,7 +1193,6 @@
             box-sizing: border-box;
             position: relative;
             min-width: 150px;
-            min-height: 60px;
             /* 关键：给一个默认的最大高度限制，防止 auto 时撑破屏幕，
             但在 manual 模式下会被 inline-style 覆盖 */
             max-height: 400px; 
@@ -1297,26 +1251,9 @@
         .node-card.simple .tool-icon{padding: 0px;}
 
         /* ====== 卡片工具栏 ========================================================================== */
-        .header-tools { display:flex; gap:6px; align-items:center; pointer-events: auto; }
+        .header-tools { gap: 6px; }
         .tool-icon { font-size:16px; color:#888; cursor:pointer; padding:4px; border-radius:4px; transition:0.2s; mix-blend-mode: multiply; }
         .tool-icon:hover { color:var(--text-color); background:rgba(0,0,0,0.05); }
-        .node-card.simple .header-tools {
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            z-index: 50;
-            border: none !important;           /* 移除边框 */
-            box-shadow: none !important;        /* 移除阴影 */
-            border-radius: 4px;
-            padding: 1px;
-            opacity: 0;
-            transition: opacity 0.2s;
-            display: flex;
-            gap: 4px;
-            background: rgba(255, 255, 255, 0.1) !important; /* 浅色模式下微亮 */
-            backdrop-filter: blur(1px); /* 增加一点模糊感，提升高级感 */
-        }
-        .node-card.simple:hover .header-tools { opacity: 1; }
         /* 找到这一段并修改 */
         .node-card.simple .fold-btn {
             background-color: var(--card-bg);
@@ -1369,12 +1306,6 @@
         /* --- 暗色模式下便利贴 (Simple Mode) 适配 --- */
         :root[data-theme="dark"] {
             
-            /* 1. 默认无颜色便利贴：工具栏背景修复 */
-            .node-card.simple .header-tools {
-                background: rgba(0, 0, 0, 0.1) !important; /* 暗色模式下微暗 */
-                border: 1px solid var(--toolbar-border);
-                
-            }
             /* 2. 有颜色的便利贴：强制压暗背景 + 文字变白 */
             .node-card.simple[style*="background"] {
                 /* 使用内阴影将原本明亮的粉彩背景压暗 */

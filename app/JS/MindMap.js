@@ -544,6 +544,20 @@ document.addEventListener('DOMContentLoaded', () => {
 // #region 工具栏事件
 // =============================================================================
 
+function focusMindMapNodeTopic(nodeId) {
+    requestAnimationFrame(() => {
+        const topic = document.getElementById(`card-${nodeId}`)?.querySelector('.node-topic');
+        if (!topic) return;
+        topic.focus();
+        const selection = window.getSelection();
+        if (!selection) return;
+        const range = document.createRange();
+        range.selectNodeContents(topic);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    });
+}
+
 function initializeMapToolbar() {
     $('#btn-undo').onclick=undo; 
     $('#btn-redo').onclick=redo;
@@ -556,7 +570,8 @@ function initializeMapToolbar() {
             if(n.id === state.data.id) newNode.dir = 'right';
             n.children.push(newNode); 
             state.selectedIds.clear(); state.selectedIds.add(newNode.id); 
-            recordHistory(); updateChildrenDOM(n.id); 
+            recordHistory(); updateChildrenDOM(n.id);
+            focusMindMapNodeTopic(newNode.id);
         } 
     };
     $('#btn-add-sibling').onclick=()=>{ 
@@ -571,7 +586,8 @@ function initializeMapToolbar() {
             newNode.dir = sibling.dir;
             p.children.push(newNode); 
             state.selectedIds.clear(); state.selectedIds.add(newNode.id); 
-            recordHistory(); updateChildrenDOM(p.id); 
+            recordHistory(); updateChildrenDOM(p.id);
+            focusMindMapNodeTopic(newNode.id);
         } 
     };
     $('#btn-add-relation').onclick = addRelationBetweenSelectedCards;
@@ -1193,7 +1209,8 @@ function initializeMapClickEvents() {
         if(t.dataset.action==='auto-height') {
             syncCurrentInput();
             const n = findNode(state.data, t.closest('.node-card').dataset.nodeId);
-            n.widthMode='auto'; n.heightMode='auto'; recordHistory(); updateNodeDOM(n.id); return;
+            autoFitMindMapEntity(n, 'node', 'wh');
+            return;
         }
         if(t.closest('#dock-handle')) { state.dockCollapsed = !state.dockCollapsed; renderDock(); }
     });
@@ -1208,36 +1225,15 @@ function initializeMapClickEvents() {
             return;
         }
 
-        // --- 修复：便利贴模式下，双击底部(b)、右下角(br)、左下角(bl) 均可自适应高度 ---
-        // 检查是否点击了调整手柄
-        if (t.classList.contains('resize-b') || 
-        t.classList.contains('resize-br') || 
-        t.classList.contains('resize-bl') || 
-        t.classList.contains('resize-r') || 
-        t.classList.contains('resize-l')) {
-            const card = t.closest('.node-card');
-            if (card) {
-                const n = findNode(state.data, card.dataset.nodeId);
-                if (n) {
-                    // 1. 如果点击的是【高度】相关手柄 (底部、左下角、右下角) -> 重置高度
-                    if (t.classList.contains('resize-b') || t.classList.contains('resize-br') || t.classList.contains('resize-bl')) {
-                        n.heightMode = 'auto';
-                    }
-                     // 2. 如果点击的是【宽度】相关手柄 (侧边、左下角、右下角) -> 仅标准卡片重置宽度
-                    if (t.classList.contains('resize-r') || t.classList.contains('resize-l') || t.classList.contains('resize-br') || t.classList.contains('resize-bl')) {
-                        if (!n.isSimple) {
-                            // 标准卡片：双击侧边或角标，重置宽度为自适应
-                            n.widthMode = 'auto';
-                        }
-                    }
-                    
-                    recordHistory();
-                    updateNodeDOM(n.id);
-                    
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return;
-                }
+        // 普通卡片与总结卡片共用双击手柄自适应；便利贴不再排除宽度重置。
+        const resizeHandle = t.closest('.resize-handle');
+        if (resizeHandle) {
+            const resizeTarget = getMindMapResizeTarget(resizeHandle);
+            if (resizeTarget) {
+                autoFitMindMapEntity(resizeTarget.entity, resizeTarget.kind, resizeHandle.dataset.resize);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
             }
         }
 
@@ -3294,7 +3290,7 @@ function createMindMapSummaryEditor(summaryId) {
     topic.setAttribute('aria-label', '总结标题');
     title.append(titleIcon, topic);
     const tools = document.createElement('div');
-    tools.className = 'summary-tools';
+    tools.className = 'summary-tools card-floating-tools';
     const toggleButton = document.createElement('button');
     toggleButton.type = 'button';
     toggleButton.className = 'summary-tool summary-mode-toggle';
@@ -3312,9 +3308,9 @@ function createMindMapSummaryEditor(summaryId) {
     const body = document.createElement('div');
     body.className = 'summary-card-body';
     tools.append(toggleButton, deleteButton);
-    header.append(title, tools);
+    header.appendChild(title);
     body.appendChild(textarea);
-    editor.append(header, body);
+    editor.append(header, body, tools);
     editor.insertAdjacentHTML('beforeend', getMindMapResizeHandlesHTML());
 
     editor.addEventListener('mousedown', event => {
@@ -3323,6 +3319,14 @@ function createMindMapSummaryEditor(summaryId) {
             const summary = getMindMapSummaryById(editor.dataset.summaryId);
             if (summary) beginMindMapResize(event, summary, 'summary', editor);
         }
+        event.stopPropagation();
+    });
+    editor.addEventListener('dblclick', event => {
+        const handle = event.target.closest('.resize-handle');
+        if (!handle) return;
+        const summary = getMindMapSummaryById(editor.dataset.summaryId);
+        if (summary) autoFitMindMapEntity(summary, 'summary', handle.dataset.resize);
+        event.preventDefault();
         event.stopPropagation();
     });
     editor.addEventListener('click', () => selectMindMapSummary(editor.dataset.summaryId));
@@ -4127,6 +4131,27 @@ function getMindMapResizableElement(target, kind = 'node') {
         : document.getElementById(`card-${target.id}`);
 }
 
+function getMindMapResizeTarget(element) {
+    const summaryEditor = element?.closest('.summary-editor');
+    if (summaryEditor) {
+        const summary = getMindMapSummaryById(summaryEditor.dataset.summaryId);
+        return summary ? { entity: summary, kind: 'summary' } : null;
+    }
+    const card = element?.closest('.node-card');
+    if (!card) return null;
+    const node = findNode(state.data, card.dataset.nodeId);
+    return node ? { entity: node, kind: 'node' } : null;
+}
+
+function autoFitMindMapEntity(target, kind = 'node', direction = 'wh') {
+    if (!target) return;
+    if (direction.includes('w')) target.widthMode = 'auto';
+    if (direction.includes('h')) target.heightMode = 'auto';
+    recordHistory();
+    if (kind === 'summary') scheduleRenderMindMapSummaries();
+    else updateNodeDOM(target.id);
+}
+
 function beginMindMapResize(event, target, kind, element) {
     if (!target || !element) return;
     const bodySelector = kind === 'summary' ? '.summary-card-body' : '.card-body';
@@ -4281,12 +4306,11 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
                     ${hasContent && isContentCollapsed ? '<i class="ri-file-list-2-line content-indicator"></i>' : ''}
                     <span class="node-topic" contenteditable="true">${escapeHtml(node.topic)}</span>
                 </div>
-                
-                <div class="header-tools">
-                    ${!isRoot ? `<i class="tool-icon ${toggleIcon}" data-action="toggle-simple" title="${toggleTitle}"></i>` : ''}
-                    ${hasContent && !isContentCollapsed && !isSimple ? `<i class="ri-aspect-ratio-line tool-icon" data-action="auto-height" title="自适应尺寸"></i>` : ''}
-                    ${hasContent && !isSimple && !isCompactCollapsed ? `<i class="tool-icon ${node.contentCollapsed?'ri-arrow-down-s-line':'ri-arrow-up-s-line'}" data-action="toggle-content"></i>` : ''}
-                </div>
+            </div>
+            <div class="header-tools card-floating-tools">
+                ${!isRoot ? `<i class="tool-icon ${toggleIcon}" data-action="toggle-simple" title="${toggleTitle}"></i>` : ''}
+                ${hasContent && !isContentCollapsed && !isSimple ? `<i class="ri-aspect-ratio-line tool-icon" data-action="auto-height" title="自适应尺寸"></i>` : ''}
+                ${hasContent && !isSimple && !isCompactCollapsed ? `<i class="tool-icon ${node.contentCollapsed?'ri-arrow-down-s-line':'ri-arrow-up-s-line'}" data-action="toggle-content"></i>` : ''}
             </div>
             ${hasContent && !isContentCollapsed && !isSimple ? `<div class="card-body md-content" style="${bodyHeightStyle} ${bodyBgStyle}">${bodyContent}</div>` : ''}
             ${resizeHandles}
