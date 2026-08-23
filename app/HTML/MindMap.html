@@ -616,6 +616,10 @@
             z-index: 7;
             pointer-events: none;
         }
+        .summary-label-layer:hover,
+        .summary-label-layer:focus-within {
+            z-index: 120;
+        }
         .summary-editor {
             position: absolute;
             width: 240px;
@@ -635,6 +639,8 @@
         }
         .summary-editor.left-side { transform: translate(-100%, -50%); }
         .summary-editor:hover { box-shadow: 0 8px 20px var(--shadow-color-hover); }
+        .summary-editor:hover,
+        .summary-editor:focus-within { z-index: 1; }
         .summary-editor.active {
             border-color: var(--primary) !important;
             box-shadow: 0 0 0 1px #fff, 0 0 0 4px var(--shadow-color-active) !important;
@@ -918,7 +924,7 @@
             flex-direction: column; 
             margin-left: var(--tree-gap); 
             position: relative; 
-            z-index: 0; 
+            z-index: auto;
             
             width: max-content;             /* 只占用内容实际宽度，不贪心 */
             align-items: flex-start !important; /* 强制左对齐，禁止被兄弟撑大 */
@@ -968,7 +974,6 @@
         .node-card.is-root.selected {
             border-width: 4px !important;
         }
-        .node-card:hover { box-shadow: 0 8px 20px var(--shadow-color-hover); z-index: 20; }
         .node-card.selected {
             border-color: var(--primary) !important; /* 1. 强制覆盖 JS 的内联边框颜色，变回主色 (var(--primary)) */
             border-width: 2px;  /* 2. 加粗边框，让它比普通卡片的边框更显眼 */
@@ -976,6 +981,11 @@
                 0 0 0 1px #fff,                /* 内圈白描边，增加对比度 */
                 0 0 0 4px var(--shadow-color-active) !important; /* 外圈主色光晕 */
             z-index: 100; 
+        }
+        .node-card:hover,
+        .node-card:focus-within {
+            box-shadow: 0 8px 20px var(--shadow-color-hover);
+            z-index: 120;
         }
         .node-card.search-active::after {
             content: '';

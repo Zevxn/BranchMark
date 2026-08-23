@@ -320,22 +320,46 @@ routingContext.upperRelatedRect = {
 routingContext.lowerRelatedRect = {
     id: 'lower-related', left: 300, right: 460, top: 320, bottom: 420, width: 160, height: 100
 };
+routingContext.foldedChildNode = {
+    id: 'folded-parent', folded: true, children: [{ id: 'hidden-child' }]
+};
+routingContext.rootWithFoldedSides = {
+    id: 'root', foldedLeft: true, foldedRight: true,
+    children: [{ id: 'left-child', dir: 'left' }, { id: 'right-child', dir: 'right' }]
+};
+routingContext.state = { data: routingContext.rootWithFoldedSides };
+routingContext.findNode = (_root, id) => id === 'root'
+    ? routingContext.rootWithFoldedSides
+    : (id === 'folded-parent' ? routingContext.foldedChildNode : null);
+routingContext.getMindMapNodeBranchSide = () => 'right';
+const foldedPortContext = vm.runInContext(
+    "getMindMapRelationPortContext('folded-parent')",
+    routingContext,
+);
+assert.equal(foldedPortContext.hasChildren, true,
+    '普通卡片即使子树已折叠，子连线侧仍应视为被占用');
+const foldedRootContext = vm.runInContext(
+    "getMindMapRelationPortContext('root')",
+    routingContext,
+);
+assert.deepEqual(Array.from(foldedRootContext.childSides), ['left', 'right'],
+    '根节点左右子树折叠后，两侧折叠入口仍应保留占用状态');
 
 assert.equal(vm.runInContext(`
     getMindMapRelationPreferredAlong(
         relationCardRect,
         'right',
         upperRelatedRect,
-        { branchSide: 'right', hasVisibleChildren: false, visibleChildSides: [] }
+        { branchSide: 'right', hasChildren: false, childSides: [] }
     )
 `, routingContext), 200,
-    '右支卡片没有可见子节点时，右侧关联线仍应使用边缘中点');
+    '右支卡片没有子节点时，右侧关联线仍应使用边缘中点');
 assert.equal(vm.runInContext(`
     getMindMapRelationPreferredAlong(
         relationCardRect,
         'right',
         upperRelatedRect,
-        { branchSide: 'right', hasVisibleChildren: true, visibleChildSides: [] }
+        { branchSide: 'right', hasChildren: true, childSides: [] }
     )
 `, routingContext), 150,
     '右支卡片的右侧子连线被占用且对方在上时，端点应上移至四分之一高度');
@@ -344,7 +368,7 @@ assert.equal(vm.runInContext(`
         relationCardRect,
         'left',
         lowerRelatedRect,
-        { branchSide: 'right', hasVisibleChildren: false, visibleChildSides: [] }
+        { branchSide: 'right', hasChildren: false, childSides: [] }
     )
 `, routingContext), 250,
     '右支卡片的左侧父连线始终被占用，对方在下时端点应下移至四分之三高度');
@@ -353,16 +377,16 @@ assert.equal(vm.runInContext(`
         relationCardRect,
         'left',
         upperRelatedRect,
-        { branchSide: 'left', hasVisibleChildren: false, visibleChildSides: [] }
+        { branchSide: 'left', hasChildren: false, childSides: [] }
     )
 `, routingContext), 200,
-    '左支卡片没有可见子节点时，左侧关联线应使用边缘中点');
+    '左支卡片没有子节点时，左侧关联线应使用边缘中点');
 assert.equal(vm.runInContext(`
     getMindMapRelationPreferredAlong(
         relationCardRect,
         'right',
         upperRelatedRect,
-        { branchSide: 'left', hasVisibleChildren: false, visibleChildSides: [] }
+        { branchSide: 'left', hasChildren: false, childSides: [] }
     )
 `, routingContext), 150,
     '左支卡片的右侧父连线应与右支规则水平镜像');
@@ -371,10 +395,10 @@ assert.equal(vm.runInContext(`
         relationCardRect,
         'left',
         upperRelatedRect,
-        { branchSide: 'left', hasVisibleChildren: true, visibleChildSides: [] }
+        { branchSide: 'left', hasChildren: true, childSides: [] }
     )
 `, routingContext), 150,
-    '左支卡片有可见子节点时，左侧子连线端点应按镜像规则避让');
+    '左支卡片有子节点时，左侧子连线端点应按镜像规则避让');
 
 routingContext.compactRelationCardRect = {
     left: 0, right: 120, top: 0, bottom: 46, width: 120, height: 46
@@ -391,8 +415,8 @@ const independentPorts = vm.runInContext(`
         upperRelatedRect,
         new Set(),
         new Set(),
-        { branchSide: 'right', hasVisibleChildren: true, visibleChildSides: [] },
-        { branchSide: 'right', hasVisibleChildren: false, visibleChildSides: [] }
+        { branchSide: 'right', hasChildren: true, childSides: [] },
+        { branchSide: 'right', hasChildren: false, childSides: [] }
     ).find(candidate => candidate.sourceSide === 'right' && candidate.targetSide === 'left')
 `, routingContext);
 assert.equal(independentPorts.sourcePort.port.y, 150,

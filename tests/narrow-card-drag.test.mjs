@@ -19,11 +19,28 @@ assert.match(toolbarRule[1], /pointer-events:\s*none/,
 assert.match(html,
     /\.node-card:hover > \.card-floating-tools,[\s\S]*?\.summary-editor:hover > \.card-floating-tools[\s\S]*?pointer-events:\s*auto/,
     '普通卡片与总结卡片悬停时都应显示并启用工具栏');
+assert.match(html, /\.children-container\s*\{[^}]*z-index:\s*auto/s,
+    '子树容器不应创建会限制悬浮工具栏的独立层叠上下文');
+assert.match(html, /\.node-card:hover,\s*\.node-card:focus-within\s*\{[^}]*z-index:\s*120/s,
+    '悬停或聚焦卡片应整体提升到选中卡片之上');
+assert.ok(html.search(/\.node-card:hover,\s*\.node-card:focus-within\s*\{/) > html.indexOf('.node-card.selected {'),
+    '悬停层级规则应位于选中规则之后，确保选中卡片悬停时也不会被覆盖');
+assert.match(html, /\.summary-label-layer:hover,\s*\.summary-label-layer:focus-within\s*\{[^}]*z-index:\s*120/s,
+    '总结卡片悬浮工具栏显示时应连同所在图层一起提升');
 
 assert.match(mindMap, /e\.target\.closest\('\.header-tools'\)/,
     '工具图标点击仍应与卡片选中和拖动隔离');
 assert.match(mindMap, /if\(e\.target\.closest\('\.card-header'\)\)\s*\{\s*state\.mode = 'PRE_DRAG_NODE'/,
     '标题栏未被工具图标命中时应能启动卡片预拖动');
+const canvasPointerDownSource = mindMap.slice(
+    mindMap.indexOf("if(!e.target.closest('.card-dock-container'))"),
+    mindMap.indexOf('// #region 鼠标移动事件'),
+);
+assert.doesNotMatch(canvasPointerDownSource, /state\.selectedIds\.clear\(\)/,
+    '画布按下并进入平移候选时不应立即清除卡片选中');
+assert.match(mindMap,
+    /state\.mode==='PANNING' && Math\.hypot\([\s\S]*?<5\) \{ state\.selectedIds\.clear\(\); updateSelection\(\); \}/,
+    '只有空白画布无位移单击时才应取消卡片选中');
 assert.match(mindMap, /<div class="header-tools card-floating-tools">/,
     '卡片工具栏应脱离标题遮罩并复用悬浮工具栏');
 assert.match(mindMap, /function focusMindMapNodeTopic[\s\S]*?range\.selectNodeContents\(topic\)/,

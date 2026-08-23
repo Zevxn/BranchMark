@@ -48,15 +48,55 @@ function showMindMapImportFeedback(message) {
     else window.alert(message);
 }
 
+function isMindMapNodeData(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    return typeof value.id === 'string'
+        || typeof value.topic === 'string'
+        || typeof value.content === 'string'
+        || Array.isArray(value.children);
+}
+
+function normalizeImportedMindMapTree(node) {
+    if (!isMindMapNodeData(node)) {
+        throw new Error('思维导图节点格式不正确');
+    }
+
+    if (!Array.isArray(node.children)) node.children = [];
+    node.children.forEach(normalizeImportedMindMapTree);
+    return node;
+}
+
+function normalizeImportedMindMap(imported) {
+    if (!imported || typeof imported !== 'object' || Array.isArray(imported)) {
+        throw new Error('文件格式不正确');
+    }
+
+    // 兼容两种格式：完整存档 { data, view, ... }，以及直接导出的根节点 data。
+    const isSavedSnapshot = isMindMapNodeData(imported.data);
+    const data = normalizeImportedMindMapTree(isSavedSnapshot ? imported.data : imported);
+
+    // 根节点的扩展数据在纯 data 文件中通常不存在，补齐默认值以复用现有卡片、关联线和总结逻辑。
+    if (!Array.isArray(data.relations)) data.relations = [];
+    if (!Array.isArray(data.summaries)) data.summaries = [];
+    if (typeof data.foldedLeft !== 'boolean') data.foldedLeft = false;
+    if (typeof data.foldedRight !== 'boolean') data.foldedRight = false;
+
+    return {
+        data,
+        view: isSavedSnapshot ? imported.view : null,
+        scrollMap: isSavedSnapshot ? imported.scrollMap : null
+    };
+}
+
 function applyImportedMindMap(content) {
     try {
-        const imported = JSON.parse(content);
-        if (!imported || !imported.data) throw new Error('文件中没有思维导图数据');
+        const imported = normalizeImportedMindMap(JSON.parse(content));
         state.data = imported.data;
         state.selectedRelationId = null;
         state.selectedSummaryId = null;
         closeMindMapRelationEditor();
         state.view = imported.view || state.view;
+        state.scrollMap = new Map(Object.entries(imported.scrollMap || {}));
         state.history = [];
         state.historyIndex = -1;
         resetMapSearch();
@@ -735,24 +775,12 @@ function initializeMapToolbar() {
         if(!f)return; 
         const r=new FileReader(); 
         r.onload=(ev)=>{ 
-            try{
-                const j=JSON.parse(ev.target.result);
-                 if(j.data){
-                    state.data=j.data;
-                    state.selectedRelationId = null;
-                    state.selectedSummaryId = null;
-                    closeMindMapRelationEditor();
-                    state.view=j.view||state.view;
-                    state.history=[];
-                    state.historyIndex=-1;
-                    resetMapSearch();
-                    sessionStorage.removeItem('currentFileID');
-                    recordHistory();
-                    renderTree();
-                }
-            }catch(e){
-                alert('Error');
-            } e.target.value=''; 
+            applyImportedMindMap(ev.target.result);
+            e.target.value='';
+        };
+        r.onerror=()=>{
+            showMindMapImportFeedback('❌ 导入失败：无法读取文件');
+            e.target.value='';
         };
         r.readAsText(f);
     };
@@ -1458,12 +1486,8 @@ function initializeMapMouseEvents() {
                 else { 
                     state.mode = 'PANNING';
                     e.preventDefault(); 
-                    
-                    // --- 优化 1：仅在确实有选中节点时才更新 DOM，减少重排 ---
-                    if (state.selectedIds.size > 0) {
-                        state.selectedIds.clear(); 
-                        updateSelection(); 
-                    }
+
+                    // 画布按下时先保留卡片选中；只有无位移单击才在 onMouseUp 中清除。
 
                     // --- 优化 2：【关键修复】不要重新渲染整个 Dock ---
                     // 仅仅是通过 DOM 操作移除 .active 类，开销几乎为 0
@@ -2296,33 +2320,28 @@ function getMindMapRelationPortContext(nodeId) {
     const node = findNode(state.data, nodeId);
     if (!node) return null;
     if (nodeId === state.data.id) {
-        const visibleChildSides = [];
+        const childSides = [];
         const children = node.children || [];
-        const leftVisible = !node.foldedLeft || isMapRootDirectionTemporarilyExpanded('left');
-        const rightVisible = !node.foldedRight || isMapRootDirectionTemporarilyExpanded('right');
-        if (leftVisible && children.some(child => child.dir === 'left')) visibleChildSides.push('left');
-        if (rightVisible && children.some(child => child.dir !== 'left')) visibleChildSides.push('right');
-        return { branchSide: 'root', hasVisibleChildren: visibleChildSides.length > 0, visibleChildSides };
+        if (children.some(child => child.dir === 'left')) childSides.push('left');
+        if (children.some(child => child.dir !== 'left')) childSides.push('right');
+        return { branchSide: 'root', hasChildren: childSides.length > 0, childSides };
     }
 
     return {
         branchSide: getMindMapNodeBranchSide(nodeId),
-        hasVisibleChildren: Boolean(
-            node.children?.length
-            && (!node.folded || isMapNodeTemporarilyExpanded(node.id))
-        )
+        hasChildren: Boolean(node.children?.length)
     };
 }
 
 function isMindMapRelationSideOccupied(side, portContext) {
     if (!portContext || (side !== 'left' && side !== 'right')) return false;
     if (portContext.branchSide === 'root') {
-        return portContext.visibleChildSides?.includes(side) || false;
+        return portContext.childSides?.includes(side) || false;
     }
 
     const childSide = portContext.branchSide === 'left' ? 'left' : 'right';
     const parentSide = childSide === 'left' ? 'right' : 'left';
-    return side === parentSide || (side === childSide && portContext.hasVisibleChildren);
+    return side === parentSide || (side === childSide && portContext.hasChildren);
 }
 
 function getMindMapRelationPreferredAlong(rect, side, otherRect, portContext = null) {
