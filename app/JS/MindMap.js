@@ -186,7 +186,7 @@ let state = {
     scrollMap: new Map(Object.entries(saveData.scrollMap || {})),
     selectedIds: new Set(), selectedRelationId: null, selectedSummaryId: null, history: [], historyIndex: -1,
     mode: 'IDLE', dockCollapsed: false, activeDockIndex: -1,
-    editingNode: null, isReadOnly: false,
+    editingNode: null, editingEntityKind: 'node', isReadOnly: false,
     startPos: {x:0,y:0}, viewStart: {x:0,y:0},
     drag: { source: null, nodeId: null, data: null, title: '', targetId: null, dropType: null },
     resize: { node: null, dir: '', startW: 0, startH: 0, mx: 0, my: 0 },
@@ -520,13 +520,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (activeEl === $('#mapSearchInput')) return;
         }
 
-        // Ctrl+Enter：从画布或节点标题进入当前单选卡片的 Markdown 源码编辑。
+        // Ctrl+Enter：从画布或标题进入当前单选卡片/总结的 Markdown 源码编辑。
         if (!isModalActive && (e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-            const canOpenEditor = !isInput || activeEl.classList.contains('node-topic');
-            if (canOpenEditor && state.selectedIds.size === 1) {
+            const canOpenEditor = !isInput || activeEl.classList.contains('node-topic') || activeEl.classList.contains('summary-topic');
+            const summary = getMindMapSummaryById(state.selectedSummaryId);
+            if (canOpenEditor && (summary || state.selectedIds.size === 1)) {
                 e.preventDefault();
                 syncCurrentInput();
-                const node = findNode(state.data, Array.from(state.selectedIds)[0]);
+                const node = summary || findNode(state.data, Array.from(state.selectedIds)[0]);
                 if (node) openMindMapEditor(node, false, true);
             }
             return;
@@ -1230,17 +1231,20 @@ function selectAllMindMapNodes() {
 
 function openMindMapEditor(node, readOnly = false, focusSource = false) {
     if (!node) return;
+    const entityKind = getMindMapSummaryById(node.id) === node ? 'summary' : 'node';
     syncCurrentInput();
     state.editingNode = node;
+    state.editingEntityKind = entityKind;
     state.isReadOnly = readOnly;
     $('#editorModal').classList.add('active');
     $('#modalWin').className = readOnly ? 'modal-win narrow' : 'modal-win';
-    $('#modalTopicInput').value = node.topic;
+    $('#modalTopicInput').value = entityKind === 'summary' ? (node.topic || '总结') : (node.topic || '');
     $('#modalTopicInput').disabled = readOnly;
     const sourceEditor = $('#editorTextarea');
-    sourceEditor.value = node.content || '';
+    const content = entityKind === 'summary' ? getMindMapSummaryContent(node) : (node.content || '');
+    sourceEditor.value = content;
     sourceEditor.parentElement.style.display = readOnly ? 'none' : 'flex';
-    $('#previewContent').innerHTML = renderMarkdown(node.content);
+    $('#previewContent').innerHTML = renderMarkdown(content);
     processRichContent($('#previewContent'));
     $('#btn-close-modal').innerText = readOnly ? '关闭' : '完成';
     if (focusSource && !readOnly) {
@@ -1676,34 +1680,45 @@ function initializeEditorToolbar() {
         if(!state.isReadOnly && state.editingNode) {
             const t = $('#modalTopicInput').value;
             const c = $('#editorTextarea').value;
+            const editingKind = state.editingEntityKind || 'node';
+            const previousContent = editingKind === 'summary'
+                ? getMindMapSummaryContent(state.editingNode)
+                : (state.editingNode.content || '');
             
             // 检查是否有变化
             const topicChanged = state.editingNode.topic !== t;
-            const contentChanged = state.editingNode.content !== c;
+            const contentChanged = previousContent !== c;
 
             if(topicChanged || contentChanged) { 
                 state.editingNode.topic = t; 
-                state.editingNode.content = c; 
+                if (editingKind === 'summary') setMindMapSummaryContent(state.editingNode, c);
+                else state.editingNode.content = c;
                 recordHistory(); 
-                
-                // 核心修复逻辑：
-                // 1. 如果内容(Content)变了，因为涉及到 body 的增删和图标的显示隐藏，必须重建 DOM。
-                // 2. 如果仅仅是标题(Topic)变了，为了性能可以直接修改文字，但为了保险起见，建议统一调用 updateNodeDOM，
-                //    或者像下面这样区分处理：
-                
-                if (contentChanged) {
-                    // 内容变了（包括删除干净、从无到有），必须更新结构
-                    updateNodeDOM(state.editingNode.id);
-                } else if (topicChanged) {
-                    // 只有标题变了，简单更新文字即可（避免闪烁）
-                    const card = document.getElementById(`card-${state.editingNode.id}`);
-                    if(card) card.querySelector('.node-topic').innerText = t;
-                    updateNodeDOM(state.editingNode.id); 
+
+                if (editingKind === 'summary') {
+                    scheduleRenderMindMapSummaries();
+                } else {
+
+                    // 核心修复逻辑：
+                    // 1. 如果内容(Content)变了，因为涉及到 body 的增删和图标的显示隐藏，必须重建 DOM。
+                    // 2. 如果仅仅是标题(Topic)变了，为了性能可以直接修改文字，但为了保险起见，建议统一调用 updateNodeDOM，
+                    //    或者像下面这样区分处理：
+
+                    if (contentChanged) {
+                        // 内容变了（包括删除干净、从无到有），必须更新结构
+                        updateNodeDOM(state.editingNode.id);
+                    } else if (topicChanged) {
+                        // 只有标题变了，简单更新文字即可（避免闪烁）
+                        const card = document.getElementById(`card-${state.editingNode.id}`);
+                        if(card) card.querySelector('.node-topic').innerText = t;
+                        updateNodeDOM(state.editingNode.id);
+                    }
                 }
             }
         }
         $('#editorModal').classList.remove('active'); 
         state.editingNode = null;
+        state.editingEntityKind = 'node';
     };
     
     
@@ -3264,6 +3279,17 @@ function ensureMindMapSummaries() {
     return state.data.summaries;
 }
 
+function getMindMapSummaryContent(summary) {
+    const content = typeof summary?.content === 'string' ? summary.content : summary?.text;
+    return String(content || '').slice(0, MINDMAP_SUMMARY_TEXT_LIMIT);
+}
+
+function setMindMapSummaryContent(summary, content) {
+    if (!summary) return;
+    summary.content = String(content || '').slice(0, MINDMAP_SUMMARY_TEXT_LIMIT);
+    delete summary.text;
+}
+
 function getMindMapSummaryById(summaryId) {
     return getMindMapSummaries().find(summary => summary.id === summaryId) || null;
 }
@@ -3350,6 +3376,7 @@ function selectMindMapSummary(summaryId) {
 function clearSelectedMindMapSummary() {
     if (!state.selectedSummaryId) return;
     state.selectedSummaryId = null;
+    updateMindMapSummaryMemberHighlights();
     scheduleRenderMindMapSummaries();
     updateToolbar();
 }
@@ -3409,8 +3436,8 @@ function addSummaryForSelectedCards() {
     const summary = {
         id: `summary_${generateNodeId()}`,
         nodeIds: selection.nodeIds,
-        topic: '卡片总结',
-        text: '',
+        topic: '总结',
+        content: '',
         side: selection.side,
         color: '',
         isSimple: false,
@@ -3426,8 +3453,7 @@ function addSummaryForSelectedCards() {
     updateSelection();
     scheduleRenderMindMapSummaries();
     requestAnimationFrame(() => {
-        const input = document.querySelector(`.summary-editor[data-summary-id="${summary.id}"] textarea`);
-        if (input) input.focus();
+        openMindMapEditor(summary, false, true);
     });
 }
 
@@ -3454,10 +3480,6 @@ function createMindMapSummaryEditor(summaryId) {
     toggleButton.type = 'button';
     toggleButton.className = 'summary-tool summary-mode-toggle';
     toggleButton.dataset.summaryAction = 'toggle-simple';
-    const textarea = document.createElement('textarea');
-    textarea.maxLength = MINDMAP_SUMMARY_TEXT_LIMIT;
-    textarea.placeholder = '输入总结…';
-    textarea.setAttribute('aria-label', '卡片总结');
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.className = 'summary-tool summary-delete';
@@ -3465,10 +3487,9 @@ function createMindMapSummaryEditor(summaryId) {
     deleteButton.setAttribute('aria-label', '删除总结');
     deleteButton.innerHTML = '<i class="ri-delete-bin-line"></i>';
     const body = document.createElement('div');
-    body.className = 'summary-card-body';
+    body.className = 'summary-card-body md-content';
     tools.append(toggleButton, deleteButton);
     header.appendChild(title);
-    body.appendChild(textarea);
     editor.append(header, body, tools);
     editor.insertAdjacentHTML('beforeend', getMindMapResizeHandlesHTML());
 
@@ -3482,9 +3503,11 @@ function createMindMapSummaryEditor(summaryId) {
     });
     editor.addEventListener('dblclick', event => {
         const handle = event.target.closest('.resize-handle');
-        if (!handle) return;
         const summary = getMindMapSummaryById(editor.dataset.summaryId);
-        if (summary) autoFitMindMapEntity(summary, 'summary', handle.dataset.resize);
+        if (!summary) return;
+        if (handle) autoFitMindMapEntity(summary, 'summary', handle.dataset.resize);
+        else if (!event.target.closest('.summary-topic, .summary-tools')) openMindMapEditor(summary);
+        else return;
         event.preventDefault();
         event.stopPropagation();
     });
@@ -3502,19 +3525,6 @@ function createMindMapSummaryEditor(summaryId) {
             topic.blur();
         }
     });
-    textarea.addEventListener('focus', () => selectMindMapSummary(editor.dataset.summaryId));
-    textarea.addEventListener('input', () => {
-        const summary = getMindMapSummaryById(editor.dataset.summaryId);
-        if (summary) summary.text = textarea.value.slice(0, MINDMAP_SUMMARY_TEXT_LIMIT);
-    });
-    textarea.addEventListener('change', recordHistory);
-    textarea.addEventListener('keydown', event => {
-        event.stopPropagation();
-        if (event.key === 'Escape' || ((event.ctrlKey || event.metaKey) && event.key === 'Enter')) {
-            event.preventDefault();
-            textarea.blur();
-        }
-    });
     toggleButton.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
@@ -3524,7 +3534,7 @@ function createMindMapSummaryEditor(summaryId) {
         state.selectedSummaryId = summary.id;
         recordHistory();
         scheduleRenderMindMapSummaries();
-        requestAnimationFrame(() => (summary.isSimple ? topic : textarea).focus());
+        requestAnimationFrame(() => topic.focus());
     });
     deleteButton.addEventListener('click', event => {
         event.preventDefault();
@@ -3571,6 +3581,7 @@ function renderMindMapSummaries() {
     if (state.selectedSummaryId && !summaries.some(summary => summary.id === state.selectedSummaryId)) {
         state.selectedSummaryId = null;
     }
+    updateMindMapSummaryMemberHighlights();
     const visibleSummaryIds = new Set();
     summaries.forEach(summary => {
         const geometry = getMindMapSummaryGeometry(summary);
@@ -3608,7 +3619,6 @@ function renderMindMapSummaries() {
         editor.style.height = summary.isSimple && summary.heightMode === 'manual' && summary.bodyHeight
             ? `${summary.bodyHeight}px`
             : '';
-        const textarea = editor.querySelector('textarea');
         const topic = editor.querySelector('.summary-topic');
         const body = editor.querySelector('.summary-card-body');
         const toggleButton = editor.querySelector('[data-summary-action="toggle-simple"]');
@@ -3621,10 +3631,15 @@ function renderMindMapSummaries() {
         body.style.height = !isSimple && summary.heightMode === 'manual' && summary.bodyHeight
             ? `${summary.bodyHeight}px`
             : '';
-        const summaryTopic = String(summary.topic || '卡片总结').slice(0, 200);
+        const summaryTopic = String(summary.topic || '总结').slice(0, 200);
         if (document.activeElement !== topic && topic.innerText !== summaryTopic) topic.textContent = summaryTopic;
-        const summaryText = String(summary.text || '').slice(0, MINDMAP_SUMMARY_TEXT_LIMIT);
-        if (document.activeElement !== textarea && textarea.value !== summaryText) textarea.value = summaryText;
+        const summaryContent = getMindMapSummaryContent(summary);
+        editor.classList.toggle('has-content', Boolean(summaryContent));
+        if (body.dataset.summaryContent !== summaryContent) {
+            body.innerHTML = renderMarkdown(summaryContent);
+            body.dataset.summaryContent = summaryContent;
+            processRichContent(body);
+        }
     });
 
     labelLayer.querySelectorAll('.summary-editor').forEach(editor => {
@@ -4230,7 +4245,7 @@ function syncCurrentInput() {
 function commitMindMapInlineEditor() {
     syncCurrentInput();
     const activeEl = document.activeElement;
-    if (activeEl?.matches('.node-topic, .summary-topic, .summary-editor textarea')) {
+    if (activeEl?.matches('.node-topic, .summary-topic')) {
         activeEl.blur();
     }
 }
@@ -4842,9 +4857,21 @@ function updateSelection() {
         const el = document.querySelector(`.node-card[data-node-id="${id}"]`);
         if(el) el.classList.add('selected');
     });
+    updateMindMapSummaryMemberHighlights();
     updateMindMapSummarySelectionAction();
     updateToolbar();
 };
+
+function updateMindMapSummaryMemberHighlights() {
+    document.querySelectorAll('.node-card.summary-member').forEach(card => {
+        card.classList.remove('summary-member');
+    });
+    const summary = getMindMapSummaryById(state.selectedSummaryId);
+    if (!summary || !Array.isArray(summary.nodeIds)) return;
+    summary.nodeIds.forEach(nodeId => {
+        document.getElementById(`card-${nodeId}`)?.classList.add('summary-member');
+    });
+}
 
 function renderDock() {
     // const container = $('#dock-container');

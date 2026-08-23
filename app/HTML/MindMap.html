@@ -622,7 +622,9 @@
         }
         .summary-editor {
             position: absolute;
-            width: 240px;
+            width: max-content;
+            min-width: 120px;
+            max-width: 600px;
             min-height: 0;
             box-sizing: border-box;
             transform: translateY(-50%);
@@ -702,30 +704,18 @@
         .summary-card-body {
             flex: 0 0 auto;
             min-height: 0;
-            display: flex;
+            display: block;
             box-sizing: border-box;
-            padding: 8px 10px 10px;
-            overflow: hidden;
+            padding: 3px 10px;
+            overflow-y: auto;
+            overflow-x: hidden;
             background: var(--card-bg);
             border-radius: 0 0 6px 6px;
-        }
-        .summary-editor textarea {
-            width: 100%;
-            min-width: 100%;
-            min-height: 70px;
-            height: 100%;
-            box-sizing: border-box;
-            padding: 0;
-            resize: none;
-            border: 0;
-            outline: 0;
-            background: transparent;
             color: var(--text-color);
-            font: inherit;
-            font-size: 14px;
-            line-height: 1.55;
+            max-height: 600px;
+            user-select: text;
         }
-        .summary-editor textarea::placeholder { color: var(--text-color-secondary); }
+        .summary-editor:not(.has-content) .summary-card-body { display: none; }
         .summary-editor.simple {
             min-width: 150px;
             max-height: 400px;
@@ -986,6 +976,12 @@
         .node-card:focus-within {
             box-shadow: 0 8px 20px var(--shadow-color-hover);
             z-index: 120;
+        }
+        .node-card.summary-member {
+            border-color: var(--primary) !important;
+            outline: 2px solid color-mix(in srgb, var(--primary) 42%, transparent);
+            outline-offset: 3px;
+            box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 16%, transparent), 0 5px 15px var(--shadow-color-hover);
         }
         .node-card.search-active::after {
             content: '';

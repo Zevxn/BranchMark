@@ -21,6 +21,10 @@ assert.match(html, /\.summary-editor\.simple\s*\{[\s\S]*?background:/,
     '总结框应提供与卡片一致的便利贴视觉模式');
 assert.match(html, /\.summary-editor\s*\{[\s\S]*?min-height:\s*0/,
     '总结卡片容器不应额外锁定高于普通卡片的最小高度');
+assert.match(html, /\.summary-label-layer\s*\{[\s\S]*?width:\s*1px/,
+    '总结编辑器覆盖层应继续使用不干扰画布布局的最小尺寸');
+assert.match(html, /\.summary-editor\s*\{[\s\S]*?width:\s*max-content;[\s\S]*?min-width:\s*120px;[\s\S]*?max-width:\s*600px/,
+    '总结卡片自动宽度应按内容固有宽度计算，并复用普通卡片的尺寸边界');
 assert.match(html, /\.node-card\.simple,\s*\.summary-editor\.simple\s*\{\s*min-height:\s*60px/,
     '普通便利贴与总结便利贴应复用一致的最小高度');
 assert.match(html, /\.summary-editor\.simple \.summary-card-body\s*\{\s*display:\s*none/,
@@ -29,6 +33,8 @@ assert.match(html, /\.card-floating-tools\s*\{[\s\S]*?opacity:\s*0/,
     '总结框与普通卡片应复用默认隐藏的悬浮工具栏');
 assert.match(html, /\.summary-brace\s*\{[\s\S]*?vector-effect:\s*non-scaling-stroke/,
     '大括号在画布缩放时应保持清晰稳定的描边');
+assert.match(html, /\.node-card\.summary-member\s*\{[\s\S]*?outline:[\s\S]*?box-shadow:/,
+    '选中总结时，其成员卡片应具有独立的高亮样式');
 
 assert.match(mindMap, /relations:\s*\[\],\s*summaries:\s*\[\]/,
     '新建思维导图应初始化独立的总结数据集合');
@@ -46,24 +52,34 @@ assert.match(mindMap, /createElementNS\(MINDMAP_SUMMARY_SVG_NS, 'path'\)/,
     '总结范围应使用 SVG 路径绘制');
 assert.match(mindMap, /createMindMapSummaryEditor\(summary\.id\)/,
     '每个可见总结应复用对应的 HTML 编辑器');
+assert.match(mindMap, /function updateMindMapSummaryMemberHighlights\(\)[\s\S]*?getMindMapSummaryById\(state\.selectedSummaryId\)[\s\S]*?summary\.nodeIds\.forEach[\s\S]*?classList\.add\('summary-member'\)/,
+    '选中总结时应根据 nodeIds 高亮所有被总结卡片');
+assert.match(mindMap, /function clearSelectedMindMapSummary\(\)[\s\S]*?state\.selectedSummaryId = null;[\s\S]*?updateMindMapSummaryMemberHighlights\(\)/,
+    '取消总结选中时应同步移除成员卡片高亮');
 assert.match(mindMap, /isSimple:\s*false/,
     '新建总结应默认使用卡片模式');
-assert.match(mindMap, /topic:\s*'卡片总结'/,
-    '新建总结应保存可编辑的卡片标题');
+assert.match(mindMap, /topic:\s*'总结'/,
+    '新建总结的默认标题应为“总结”');
 assert.match(mindMap, /toggleMindMapEntitySimpleMode\(summary\)[\s\S]*?recordHistory\(\)/,
     '总结应复用卡片模式切换规则，并记录撤销历史');
 assert.match(mindMap, /function toggleMindMapEntitySimpleMode[\s\S]*?entity\.widthMode = 'manual'/,
     '普通卡片与总结卡片应共用便利贴尺寸初始化逻辑');
 assert.match(mindMap, /classList\.toggle\('simple',\s*Boolean\(summary\.isSimple\)\)/,
     '渲染总结时应恢复已保存的展示模式');
-assert.match(mindMap, /textarea\.addEventListener\('input'[\s\S]*?summary\.text\s*=/,
-    '编辑总结时应实时同步独立总结对象');
+assert.match(mindMap, /function getMindMapSummaryContent\(summary\)[\s\S]*?summary\?\.text/,
+    '总结 Markdown 内容应兼容读取旧版 text 字段');
+assert.match(mindMap, /function setMindMapSummaryContent\(summary, content\)[\s\S]*?summary\.content\s*=[\s\S]*?delete summary\.text/,
+    '保存总结 Markdown 时应迁移到与普通卡片一致的 content 字段');
 assert.match(mindMap, /topic\.addEventListener\('input'[\s\S]*?summary\.topic\s*=/,
     '总结标题应独立保存，并供便利贴模式展示');
 assert.match(mindMap, /beginMindMapResize\(event, summary, 'summary', editor\)/,
     '总结卡片应复用卡片尺寸调整状态机');
-assert.match(mindMap, /editor\.addEventListener\('dblclick'[\s\S]*?autoFitMindMapEntity\(summary, 'summary', handle\.dataset\.resize\)/,
-    '总结尺寸层应就近接收双击，并复用公共自适应逻辑');
+assert.match(mindMap, /editor\.addEventListener\('dblclick'[\s\S]*?if \(handle\) autoFitMindMapEntity\(summary, 'summary', handle\.dataset\.resize\);[\s\S]*?openMindMapEditor\(summary\)/,
+    '总结卡片双击应打开公共 Markdown 编辑器，仅尺寸手柄双击执行自适应');
+assert.match(mindMap, /const summary = getMindMapSummaryById\(state\.selectedSummaryId\);[\s\S]*?const node = summary \|\| findNode[\s\S]*?openMindMapEditor\(node, false, true\)/,
+    '选中总结时 Ctrl+Enter 应复用公共 Markdown 源码编辑入口');
+assert.match(mindMap, /body\.innerHTML = renderMarkdown\(summaryContent\);[\s\S]*?processRichContent\(body\)/,
+    '总结正文应复用普通卡片的 Markdown 渲染与富内容处理');
 assert.match(mindMap, /tools\.className = 'summary-tools card-floating-tools'/,
     '总结卡片应复用卡片顶部居中的悬浮工具栏');
 assert.match(mindMap, /editor\.append\(header, body, tools\)/,
