@@ -65,12 +65,23 @@ vm.runInContext(`
     ${normalizerSource}
     ${clipboardSource}
     globalThis.getMindMapClipboardNodes = getMindMapClipboardNodes;
+    globalThis.pasteMindMapNodesToSelection = pasteMindMapNodesToSelection;
     globalThis.pasteNodesToSelection = pasteNodesToSelection;
 `, context);
 
 const pureNodes = context.getMindMapClipboardNodes(pureData);
 assert.equal(pureNodes.length, 1, '纯 data 根节点应转换为一棵待粘贴子树');
 assert.equal(pureNodes[0].topic, '陈映荣');
+
+assert.equal(context.pasteMindMapNodesToSelection(context.getMindMapClipboardNodes(pureData)), true,
+    '搜索框粘贴已解析 JSON 时应可直接复用子树插入逻辑');
+assert.equal(root.children[0].children[0].topic, '陈映荣');
+root.children[0].children = [];
+context.state.selectedIds = new Set(['target']);
+nextId = 0;
+historyCount = 0;
+updatedParentId = null;
+toast = '';
 
 await context.pasteNodesToSelection();
 

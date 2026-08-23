@@ -26,8 +26,20 @@ assert.match(mindMap, /function openMapSearch\(\{ prefillFromClipboard = false \
     '搜索打开后应立即聚焦并选中搜索输入框');
 assert.match(mindMap, /navigator\.clipboard\.readText\(\)[\s\S]*?requestId === mapSearchState\.clipboardRequestId[\s\S]*?input\.value === initialValue/,
     '短剪贴板文本只能在请求仍有效且用户尚未输入时自动填充');
+assert.match(mindMap, /async function readMapSearchClipboardText\(\)[\s\S]*?navigator\.clipboard\.readText[\s\S]*?navigator\.clipboard\.read\(\)/,
+    '搜索剪贴板预填应在 readText 不可靠时回退到 ClipboardItem 读取');
+const clipboardApplySource = mindMap.slice(
+    mindMap.indexOf('async function applyMapSearchClipboardQuery'),
+    mindMap.indexOf('function openMapSearch'),
+);
+assert.doesNotMatch(clipboardApplySource, /document\.activeElement === input/,
+    '剪贴板异步读取完成时不应因 WebView2 焦点时序而放弃短文本搜索');
 assert.match(mindMap, /\$\('#btn-search'\)\.onclick = \(\) => openMapSearch\(\)/,
     '工具栏搜索按钮不应自动读取剪贴板');
+assert.match(mindMap, /input\.addEventListener\('paste', event => \{[\s\S]*?getMindMapClipboardNodes\(JSON\.parse\(text\)\)[\s\S]*?pasteMindMapNodesToSelection\(nodes\)/,
+    '搜索框接收到脑图 JSON 时应阻止文本粘贴，并将其作为当前选中节点的子树导入');
+assert.match(mindMap, /if \(isMapSearchOpen\(\)\) \{[\s\S]*?activeEl === \$\('#mapSearchInput'\)\) return;/,
+    '搜索面板显示但焦点离开输入框后，不应拦截画布的节点粘贴快捷键');
 assert.match(mindMap, /state\.selectedIds\.clear\(\);\s*state\.selectedIds\.add\(result\.id\);/,
     '定位结果后应将目标卡片设为单选');
 assert.match(mindMap, /state\.view\.tx \+= targetX[\s\S]*?state\.view\.ty \+= targetY[\s\S]*?updateTransform\(\)/,
@@ -118,5 +130,34 @@ assert.equal(vm.runInContext('getMapSearchClipboardQuery(longText)', clipboardCo
     '超过 15 个字符的剪贴板文本不得自动填入');
 assert.equal(vm.runInContext("getMapSearchClipboardQuery('   ')", clipboardContext), '',
     '空白剪贴板文本不得覆盖现有搜索词');
+
+const clipboardApplyStart = mindMap.indexOf('function getMapSearchClipboardQuery');
+const clipboardApplyEnd = mindMap.indexOf('function openMapSearch', clipboardApplyStart);
+const appliedQueries = [];
+const clipboardFallbackContext = vm.createContext({
+    navigator: {
+        clipboard: {
+            async readText() { throw new Error('WebView2 readText unavailable'); },
+            async read() {
+                return [{
+                    types: ['text/plain'],
+                    async getType() {
+                        return { async text() { return '陈映荣'; } };
+                    }
+                }];
+            }
+        }
+    },
+    mapSearchState: { clipboardRequestId: 3 },
+    document: { activeElement: null },
+    isMapSearchOpen: () => true,
+    executeMapSearch: query => appliedQueries.push(query),
+    MAP_SEARCH_CLIPBOARD_MAX_CHARS: 15,
+});
+vm.runInContext(mindMap.slice(clipboardApplyStart, clipboardApplyEnd), clipboardFallbackContext);
+const delayedInput = { value: '' };
+await clipboardFallbackContext.applyMapSearchClipboardQuery(delayedInput, '', 3);
+assert.equal(delayedInput.value, '陈映荣', 'readText 失败时应通过 ClipboardItem 回退填入短文本');
+assert.deepEqual(appliedQueries, ['陈映荣'], '短剪贴板文本填入后应立即执行搜索');
 
 console.log('搜索定位校验通过：聚焦、短剪贴板预填、检索排序、路径展开与居中选择逻辑完整。');

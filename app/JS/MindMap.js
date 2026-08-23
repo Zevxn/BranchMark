@@ -514,8 +514,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.key === 'Escape') {
                 e.preventDefault();
                 closeMapSearch();
+                return;
             }
-            return;
+            // 搜索输入框保留文字快捷键；焦点离开后，画布仍可执行粘贴等节点操作。
+            if (activeEl === $('#mapSearchInput')) return;
         }
 
         // Ctrl+Enter：从画布或节点标题进入当前单选卡片的 Markdown 源码编辑。
@@ -1484,6 +1486,8 @@ function initializeMapMouseEvents() {
                     $('#selRect').style.height='0'; 
                 }
                 else { 
+                    // 点击空白画布时提交并退出内联编辑，避免 :focus-within 让悬浮工具栏残留。
+                    commitMindMapInlineEditor();
                     state.mode = 'PANNING';
                     e.preventDefault(); 
 
@@ -1542,7 +1546,7 @@ function initializeMapMouseEvents() {
                 const maxHeightLimit = isSimple ? 400 : 800;
                 
                 newHeight = state.resize.startH + (delta * 2 / s);
-                newHeight = Math.max(50, Math.min(maxHeightLimit, newHeight));
+                newHeight = Math.max(state.resize.minHeight, Math.min(maxHeightLimit, newHeight));
             }
 
             // 3. 应用到当前操作的节点
@@ -3813,14 +3817,36 @@ function getMapSearchClipboardQuery(value) {
     return characterCount > 0 && characterCount <= MAP_SEARCH_CLIPBOARD_MAX_CHARS ? query : '';
 }
 
-async function applyMapSearchClipboardQuery(input, initialValue, requestId) {
-    if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') return;
+async function readMapSearchClipboardText() {
+    if (!navigator.clipboard) return '';
     try {
-        const query = getMapSearchClipboardQuery(await navigator.clipboard.readText());
+        if (typeof navigator.clipboard.readText === 'function') {
+            const text = await navigator.clipboard.readText();
+            if (text) return text;
+        }
+    } catch (_) {
+        // 部分 WebView2 对 readText 支持不稳定，继续尝试 ClipboardItem 回退。
+    }
+
+    try {
+        if (typeof navigator.clipboard.read !== 'function') return '';
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+            if (!item.types.includes('text/plain')) continue;
+            return await (await item.getType('text/plain')).text();
+        }
+    } catch (_) {
+        // 保留空字符串，搜索框仍可正常手动输入。
+    }
+    return '';
+}
+
+async function applyMapSearchClipboardQuery(input, initialValue, requestId) {
+    try {
+        const query = getMapSearchClipboardQuery(await readMapSearchClipboardText());
         const canApply = query
             && requestId === mapSearchState.clipboardRequestId
             && isMapSearchOpen()
-            && document.activeElement === input
             && input.value === initialValue;
         if (!canApply) return;
         input.value = query;
@@ -3951,6 +3977,26 @@ function initializeMapSearch() {
     $('#btn-search-next').onclick = () => navigateMapSearch(1);
 
     input.addEventListener('input', () => executeMapSearch(input.value));
+    input.addEventListener('paste', event => {
+        const clipboard = event.clipboardData;
+        const customText = clipboard?.getData(CUSTOM_MIME_TYPE);
+        const plainText = clipboard?.getData('text/plain');
+        const text = customText || plainText;
+        if (!text) return;
+
+        try {
+            const nodes = getMindMapClipboardNodes(JSON.parse(text));
+            if (!nodes) return;
+            event.preventDefault();
+            pasteMindMapNodesToSelection(nodes);
+        } catch (_) {
+            // 私有剪贴板格式在部分浏览器只暴露占位文本，回退到既有异步读取流程。
+            if (plainText?.startsWith('[MindMap Nodes:')) {
+                event.preventDefault();
+                void pasteNodesToSelection();
+            }
+        }
+    });
     results.addEventListener('click', (event) => {
         const item = event.target.closest('[data-search-index]');
         if (item) locateMapSearchResult(Number(item.dataset.searchIndex));
@@ -4181,6 +4227,14 @@ function syncCurrentInput() {
     }
 };
 
+function commitMindMapInlineEditor() {
+    syncCurrentInput();
+    const activeEl = document.activeElement;
+    if (activeEl?.matches('.node-topic, .summary-topic, .summary-editor textarea')) {
+        activeEl.blur();
+    }
+}
+
 
 // ==========================================
 // #region 存储相关
@@ -4327,6 +4381,8 @@ function getMindMapResizeTarget(element) {
 
 function autoFitMindMapEntity(target, kind = 'node', direction = 'wh') {
     if (!target) return;
+    // 双击手柄会触发局部 DOM 更新，先同步未失焦的 topic，避免新输入被旧数据覆盖。
+    syncCurrentInput();
     if (direction.includes('w')) target.widthMode = 'auto';
     if (direction.includes('h')) target.heightMode = 'auto';
     recordHistory();
@@ -4338,6 +4394,8 @@ function beginMindMapResize(event, target, kind, element) {
     if (!target || !element) return;
     const bodySelector = kind === 'summary' ? '.summary-card-body' : '.card-body';
     const body = target.isSimple ? null : element.querySelector(bodySelector);
+    const heightElement = body || element;
+    const minHeight = Number.parseFloat(window.getComputedStyle(heightElement).minHeight);
     state.mode = 'RESIZING';
     state.resize = {
         node: target,
@@ -4347,6 +4405,7 @@ function beginMindMapResize(event, target, kind, element) {
         handleEl: event.target,
         startW: element.offsetWidth,
         startH: body ? body.offsetHeight : element.offsetHeight,
+        minHeight: Number.isFinite(minHeight) ? minHeight : 0,
         mx: event.clientX,
         my: event.clientY,
         startViewTy: state.view.ty
@@ -5202,118 +5261,101 @@ async function cutSelectedNodes() {
 
 /* MindMap.js */
 
-/**
- * 执行粘贴逻辑 (修复版：正确统计粘贴总数)
- */
-async function pasteNodesToSelection() {
-    // 1. 确定粘贴目标
+function pasteMindMapNodesToSelection(nodesToPaste) {
+    if (!Array.isArray(nodesToPaste) || nodesToPaste.length === 0) return false;
+
     let targetId = state.data.id;
     if (state.selectedIds.size === 1) {
         targetId = Array.from(state.selectedIds)[0];
     } else if (state.selectedIds.size > 1) {
         showTopToast('⚠️ 请只选中一个节点作为粘贴目标');
-        return;
+        return false;
     }
 
     const targetNode = findNode(state.data, targetId);
-    if (!targetNode) return;
+    if (!targetNode) return false;
 
+    if (!targetNode.children) targetNode.children = [];
+    const isRoot = targetNode.id === state.data.id;
+
+    let totalCount = 0;
+    const countNodes = list => {
+        list.forEach(node => {
+            totalCount++;
+            if (node.children?.length) countNodes(node.children);
+        });
+    };
+    countNodes(nodesToPaste);
+
+    nodesToPaste.forEach(node => {
+        const newNode = renewNodeIds(node); // 重生成 ID
+        if (isRoot) newNode.dir = 'right';
+        else delete newNode.dir;
+        targetNode.children.push(newNode);
+    });
+
+    targetNode.folded = false;
+    recordHistory();
+    updateChildrenDOM(targetNode.id);
+    state.selectedIds.clear();
+    nodesToPaste.forEach(node => state.selectedIds.add(node.id));
+    updateSelection();
+    showTopToast(`📋 已粘贴 ${totalCount} 个节点`);
+    return true;
+}
+
+/**
+ * 执行粘贴逻辑 (修复版：正确统计粘贴总数)
+ */
+async function pasteNodesToSelection() {
     let nodesToPaste = [];
     let isMindMapData = false;
 
     try {
-        // --- 2. 尝试读取剪贴板 (优先尝试私有格式) ---
-        // (保持原有的读取逻辑不变)
+        // 优先读取私有剪贴板格式。
         try {
             const clipboardItems = await navigator.clipboard.read();
             for (const item of clipboardItems) {
-                if (item.types.includes(CUSTOM_MIME_TYPE)) {
-                    const blob = await item.getType(CUSTOM_MIME_TYPE);
-                    const text = await blob.text();
-                    const json = JSON.parse(text);
-                    const clipboardNodes = getMindMapClipboardNodes(json);
-                    if (clipboardNodes) {
-                        nodesToPaste = clipboardNodes;
-                        isMindMapData = true;
-                        break;
-                    }
-                }
+                if (!item.types.includes(CUSTOM_MIME_TYPE)) continue;
+                const text = await (await item.getType(CUSTOM_MIME_TYPE)).text();
+                const clipboardNodes = getMindMapClipboardNodes(JSON.parse(text));
+                if (!clipboardNodes) continue;
+                nodesToPaste = clipboardNodes;
+                isMindMapData = true;
+                break;
             }
-        } catch(e) { /* 读取失败或不支持，忽略 */ }
+        } catch (_) { /* 读取失败或不支持时回退到纯文本 */ }
 
-        // 回退到纯文本读取
         if (!isMindMapData) {
             const text = await navigator.clipboard.readText();
             if (text) {
                 try {
-                    const json = JSON.parse(text);
-                    const clipboardNodes = getMindMapClipboardNodes(json);
+                    const clipboardNodes = getMindMapClipboardNodes(JSON.parse(text));
                     if (clipboardNodes) {
                         nodesToPaste = clipboardNodes;
                         isMindMapData = true;
                     }
-                } catch (e) { /* 无法解析 JSON 时按普通文本处理 */ }
+                } catch (_) { /* 无法解析 JSON 时按普通文本处理 */ }
 
                 if (!isMindMapData) {
-                    // 普通文本处理
-                    if (!text.startsWith('[MindMap Nodes:')) {
-                        nodesToPaste = [{
-                            id: generateNodeId(),
-                            topic: text.length > 20 ? text.substring(0, 20) + '...' : text,
-                            content: text,
-                            widthMode: 'auto',
-                            heightMode: 'auto'
-                        }];
-                    } else {
+                    if (text.startsWith('[MindMap Nodes:')) {
                         showTopToast('⚠️ 无法识别节点数据');
                         return;
                     }
+                    nodesToPaste = [{
+                        id: generateNodeId(),
+                        topic: text.length > 20 ? text.substring(0, 20) + '...' : text,
+                        content: text,
+                        widthMode: 'auto',
+                        heightMode: 'auto'
+                    }];
                 }
             }
         }
 
-        // --- 3. 执行粘贴 ---
-        if (nodesToPaste.length > 0) {
-            if (!targetNode.children) targetNode.children = [];
-            const isRoot = targetNode.id === state.data.id;
-
-            // ▼▼▼ 新增：递归计算节点总数 ▼▼▼
-            let totalCount = 0;
-            const countNodes = (list) => {
-                if (!list) return;
-                list.forEach(node => {
-                    totalCount++; // 自己算一个
-                    if (node.children && node.children.length > 0) {
-                        countNodes(node.children); // 递归算孩子
-                    }
-                });
-            };
-            countNodes(nodesToPaste);
-            // ▲▲▲ 新增结束 ▲▲▲
-
-            nodesToPaste.forEach(node => {
-                const newNode = renewNodeIds(node); // 重生成 ID
-                if (isRoot) newNode.dir = 'right';
-                else delete newNode.dir;
-                targetNode.children.push(newNode);
-            });
-
-            targetNode.folded = false;
-            recordHistory();
-            updateChildrenDOM(targetNode.id);
-            
-            // 选中新粘贴的顶层节点 (保持界面整洁，只高亮顶层即可)
-            state.selectedIds.clear();
-            nodesToPaste.forEach(n => state.selectedIds.add(n.id));
-            updateSelection();
-            
-            // 使用计算出的总数进行提示
-            showTopToast(`📋 已粘贴 ${totalCount} 个节点`);
-        }
-
+        pasteMindMapNodesToSelection(nodesToPaste);
     } catch (err) {
         console.log('粘贴过程出错:', err);
-        // showTopToast('❌ 无法读取剪贴板');
     }
 }
 
