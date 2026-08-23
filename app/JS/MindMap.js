@@ -559,6 +559,18 @@ document.addEventListener('DOMContentLoaded', () => {
             return; 
         }
 
+        // 方向键：按画布实际方向在父子和同侧兄弟之间移动单选卡片。
+        if (
+            state.mode === 'IDLE'
+            && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)
+            && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey
+            && state.selectedIds.size === 1
+        ) {
+            e.preventDefault();
+            moveMindMapSelectionByArrow(e.key);
+            return;
+        }
+
         // ▼▼▼ 下面是纯粹的“脑图节点操作” ▼▼▼
         
         // 复制节点 (Ctrl + C)
@@ -1227,6 +1239,109 @@ function selectAllMindMapNodes() {
     collectMindMapNodeIds(state.data).forEach(nodeId => state.selectedIds.add(nodeId));
     window.getSelection()?.removeAllRanges();
     updateSelection();
+}
+
+function getVisibleMindMapNodeCard(nodeId) {
+    const card = nodeId ? document.getElementById(`card-${nodeId}`) : null;
+    return card && card.getClientRects().length > 0 ? card : null;
+}
+
+function getMindMapClosestVisibleNodeId(nodeIds, referenceNodeId) {
+    const referenceCard = getVisibleMindMapNodeCard(referenceNodeId);
+    const referenceRect = referenceCard?.getBoundingClientRect();
+    const referenceY = referenceRect ? referenceRect.top + referenceRect.height / 2 : 0;
+    let closestId = null;
+    let closestDistance = Infinity;
+
+    (nodeIds || []).forEach(nodeId => {
+        const card = getVisibleMindMapNodeCard(nodeId);
+        if (!card) return;
+        const rect = card.getBoundingClientRect();
+        const distance = referenceRect ? Math.abs(rect.top + rect.height / 2 - referenceY) : 0;
+        if (distance < closestDistance) {
+            closestId = nodeId;
+            closestDistance = distance;
+        }
+    });
+    return closestId;
+}
+
+function getMindMapKeyboardNavigationTarget(nodeId, key) {
+    const node = findNode(state.data, nodeId);
+    if (!node) return null;
+
+    if (key === 'ArrowUp' || key === 'ArrowDown') {
+        const parent = findParent(state.data, nodeId);
+        if (!parent) return null;
+        const branchSide = getMindMapNodeBranchSide(nodeId);
+        const siblings = (parent.children || []).filter(sibling => {
+            if (!getVisibleMindMapNodeCard(sibling.id)) return false;
+            return parent.id !== state.data.id || getMindMapNodeBranchSide(sibling.id) === branchSide;
+        });
+        const index = siblings.findIndex(sibling => sibling.id === nodeId);
+        const targetIndex = index + (key === 'ArrowUp' ? -1 : 1);
+        return index >= 0 && targetIndex >= 0 && targetIndex < siblings.length
+            ? siblings[targetIndex].id
+            : null;
+    }
+
+    if (node.id === state.data.id) {
+        const targetSide = key === 'ArrowLeft' ? 'left' : (key === 'ArrowRight' ? 'right' : null);
+        if (!targetSide) return null;
+        const children = (node.children || [])
+            .filter(child => getMindMapNodeBranchSide(child.id) === targetSide)
+            .map(child => child.id);
+        return getMindMapClosestVisibleNodeId(children, node.id);
+    }
+
+    const branchSide = getMindMapNodeBranchSide(nodeId);
+    const towardRoot = (branchSide === 'right' && key === 'ArrowLeft')
+        || (branchSide === 'left' && key === 'ArrowRight');
+    if (towardRoot) return findParent(state.data, nodeId)?.id || null;
+
+    const awayFromRoot = (branchSide === 'right' && key === 'ArrowRight')
+        || (branchSide === 'left' && key === 'ArrowLeft');
+    if (!awayFromRoot) return null;
+    return getMindMapClosestVisibleNodeId((node.children || []).map(child => child.id), node.id);
+}
+
+function keepMindMapKeyboardSelectionVisible(card) {
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    const toolbarRect = document.querySelector('.toolbar')?.getBoundingClientRect();
+    const margin = 24;
+    const viewport = {
+        left: margin,
+        top: Math.max(margin, (toolbarRect?.bottom || 0) + 12),
+        right: window.innerWidth - margin,
+        bottom: window.innerHeight - margin
+    };
+    let dx = 0;
+    let dy = 0;
+    if (rect.left < viewport.left) dx = viewport.left - rect.left;
+    else if (rect.right > viewport.right) dx = viewport.right - rect.right;
+    if (rect.top < viewport.top) dy = viewport.top - rect.top;
+    else if (rect.bottom > viewport.bottom) dy = viewport.bottom - rect.bottom;
+    if (!dx && !dy) return;
+    state.view.tx += dx;
+    state.view.ty += dy;
+    updateTransform();
+}
+
+function moveMindMapSelectionByArrow(key) {
+    if (state.selectedIds.size !== 1) return false;
+    const currentId = Array.from(state.selectedIds)[0];
+    const targetId = getMindMapKeyboardNavigationTarget(currentId, key);
+    if (!targetId || targetId === currentId) return false;
+
+    clearSelectedMindMapRelation();
+    clearSelectedMindMapSummary();
+    state.selectedIds.clear();
+    state.selectedIds.add(targetId);
+    window.getSelection()?.removeAllRanges();
+    updateSelection();
+    keepMindMapKeyboardSelectionVisible(getVisibleMindMapNodeCard(targetId));
+    return true;
 }
 
 function openMindMapEditor(node, readOnly = false, focusSource = false) {
@@ -4739,6 +4854,7 @@ function updateChildrenDOM(nodeId) {
     restoreGlobalScrolls();
     scheduleRenderMindMapRelations();
     scheduleRenderMindMapSummaries();
+    updateMindMapNodeStats();
 };
 
 function updateNodeDOM(nodeId) {
@@ -4922,7 +5038,34 @@ function updateToolbar() {
             ? 'ri-menu-unfold-line'
             : 'ri-menu-fold-line';
     }
+    updateMindMapNodeStats();
 };
+
+function getMindMapNodeStats() {
+    const total = collectMindMapNodeIds(state.data).size;
+    if (state.selectedIds.size !== 1) return { total, children: null, siblings: null };
+
+    const nodeId = Array.from(state.selectedIds)[0];
+    const node = findNode(state.data, nodeId);
+    if (!node) return { total, children: null, siblings: null };
+    const parent = findParent(state.data, nodeId);
+    return {
+        total,
+        children: Array.isArray(node.children) ? node.children.length : 0,
+        siblings: parent && Array.isArray(parent.children) ? Math.max(0, parent.children.length - 1) : 0
+    };
+}
+
+function updateMindMapNodeStats() {
+    const totalElement = $('#nodeStatsTotal');
+    const childrenElement = $('#nodeStatsChildren');
+    const siblingsElement = $('#nodeStatsSiblings');
+    if (!totalElement || !childrenElement || !siblingsElement) return;
+    const stats = getMindMapNodeStats();
+    totalElement.textContent = String(stats.total);
+    childrenElement.textContent = stats.children === null ? '—' : String(stats.children);
+    siblingsElement.textContent = stats.siblings === null ? '—' : String(stats.siblings);
+}
 
 function findNode(r,id) {
     if(r.id===id)return r;
