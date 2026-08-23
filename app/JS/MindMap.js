@@ -5078,6 +5078,25 @@ function renewNodeIds(node) {
     return node;
 }
 
+function getMindMapClipboardNodes(json) {
+    if (json && json.signature === CLIPBOARD_SIGN && Array.isArray(json.nodes)) {
+        return json.nodes;
+    }
+
+    try {
+        // 导入文件与剪贴板共用格式识别：完整存档和纯 data 树都作为一棵待粘贴的子树。
+        const node = JSON.parse(JSON.stringify(normalizeImportedMindMap(json).data));
+        // 关联线和总结属于整张图的数据，不能跟随根节点成为子卡片属性。
+        delete node.relations;
+        delete node.summaries;
+        delete node.foldedLeft;
+        delete node.foldedRight;
+        return [node];
+    } catch (error) {
+        return null;
+    }
+}
+
 /* MindMap.js 底部 */
 
 /**
@@ -5212,8 +5231,9 @@ async function pasteNodesToSelection() {
                     const blob = await item.getType(CUSTOM_MIME_TYPE);
                     const text = await blob.text();
                     const json = JSON.parse(text);
-                    if (json && json.signature === CLIPBOARD_SIGN && Array.isArray(json.nodes)) {
-                        nodesToPaste = json.nodes;
+                    const clipboardNodes = getMindMapClipboardNodes(json);
+                    if (clipboardNodes) {
+                        nodesToPaste = clipboardNodes;
                         isMindMapData = true;
                         break;
                     }
@@ -5227,11 +5247,14 @@ async function pasteNodesToSelection() {
             if (text) {
                 try {
                     const json = JSON.parse(text);
-                    if (json && json.signature === CLIPBOARD_SIGN && Array.isArray(json.nodes)) {
-                        nodesToPaste = json.nodes;
+                    const clipboardNodes = getMindMapClipboardNodes(json);
+                    if (clipboardNodes) {
+                        nodesToPaste = clipboardNodes;
                         isMindMapData = true;
                     }
-                } catch (e) {
+                } catch (e) { /* 无法解析 JSON 时按普通文本处理 */ }
+
+                if (!isMindMapData) {
                     // 普通文本处理
                     if (!text.startsWith('[MindMap Nodes:')) {
                         nodesToPaste = [{
