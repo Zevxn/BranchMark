@@ -398,7 +398,7 @@
         .relation-editor-delete:hover { color: #fff; background: #d9363e; border-color: #d9363e; }
         .map-search-bar {
             display: grid;
-            grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+            grid-template-columns: auto minmax(0, 1fr) auto auto auto auto auto;
             align-items: center;
             gap: 4px;
             min-height: 46px;
@@ -442,6 +442,11 @@
         .map-search-action:hover:not(:disabled) {
             color: var(--primary);
             background: var(--btn-hover);
+        }
+        .map-search-action.active,
+        .map-search-action[aria-pressed="true"] {
+            color: var(--primary);
+            background: color-mix(in srgb, var(--primary) 12%, transparent);
         }
         .map-search-action:disabled { opacity: 0.35; cursor: default; }
         .map-search-results {
@@ -1751,6 +1756,7 @@
             <i class="ri-search-line" aria-hidden="true"></i>
             <input class="map-search-input" id="mapSearchInput" type="search" placeholder="搜索标题或正文" autocomplete="off" spellcheck="false">
             <span class="map-search-count" id="mapSearchCount" aria-live="polite">0/0</span>
+            <button class="map-search-action" id="btn-search-visible" type="button" title="仅搜索未折叠卡片" aria-label="仅搜索未折叠卡片" aria-pressed="false"><i class="ri-eye-line"></i></button>
             <button class="map-search-action" id="btn-search-prev" type="button" title="上一个 (Shift+Enter)" aria-label="上一个结果" disabled><i class="ri-arrow-up-s-line"></i></button>
             <button class="map-search-action" id="btn-search-next" type="button" title="下一个 (Enter)" aria-label="下一个结果" disabled><i class="ri-arrow-down-s-line"></i></button>
             <button class="map-search-action" id="btn-search-close" type="button" title="关闭 (Esc)" aria-label="关闭搜索"><i class="ri-close-line"></i></button>

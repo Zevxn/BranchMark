@@ -198,6 +198,7 @@ const mapSearchState = {
     results: [],
     activeIndex: -1,
     hasLocated: false,
+    visibleOnly: false,
     revealedNodeIds: new Set(),
     revealedRootDirections: new Set(),
     pulseTimer: null,
@@ -3912,7 +3913,7 @@ function makeMapSearchSnippet(content, terms) {
     return `${start > 0 ? '…' : ''}${snippet}${start + 108 < plainText.length ? '…' : ''}`;
 }
 
-function collectMapSearchResults(root, query) {
+function collectMapSearchResults(root, query, allowedNodeIds = null) {
     const terms = normalizeMapSearchText(query).trim().split(/[\s\u3000]+/u).filter(Boolean);
     if (!root || terms.length === 0) return [];
 
@@ -3926,7 +3927,8 @@ function collectMapSearchResults(root, query) {
         const normalizedContent = normalizeMapSearchText(stripMarkdownForSearch(content));
         const searchableText = `${normalizedTopic}\n${normalizedContent}`;
 
-        if (terms.every(term => searchableText.includes(term))) {
+        const isAllowed = !allowedNodeIds || allowedNodeIds.has(node.id);
+        if (isAllowed && terms.every(term => searchableText.includes(term))) {
             const titleMatches = terms.filter(term => normalizedTopic.includes(term)).length;
             const titleRank = titleMatches === terms.length ? 0 : titleMatches > 0 ? 1 : 2;
             const route = [...ancestors, node];
@@ -3952,6 +3954,13 @@ function collectMapSearchResults(root, query) {
     return results.sort((a, b) => a.titleRank - b.titleRank || a.treeOrder - b.treeOrder);
 }
 
+function getRenderedMapSearchNodeIds() {
+    return new Set(Array.from(
+        document.querySelectorAll('#tree-root .node-card[data-node-id]'),
+        card => card.dataset.nodeId
+    ));
+}
+
 function isMapSearchOpen() {
     return Boolean($('#mapSearchPanel')?.classList.contains('active'));
 }
@@ -3970,6 +3979,22 @@ function clearMapSearchReveal() {
     mapSearchState.revealedNodeIds.clear();
     mapSearchState.revealedRootDirections.clear();
     return hadReveal;
+}
+
+function syncMapSearchScopeButton() {
+    const button = $('#btn-search-visible');
+    if (!button) return;
+    const visibleOnly = mapSearchState.visibleOnly;
+    button.classList.toggle('active', visibleOnly);
+    button.setAttribute('aria-pressed', String(visibleOnly));
+    const label = visibleOnly ? '搜索全部卡片' : '仅搜索未折叠卡片';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+}
+
+function refreshVisibleMapSearchResults() {
+    if (!mapSearchState.visibleOnly || !isMapSearchOpen()) return;
+    executeMapSearch(mapSearchState.query);
 }
 
 function renderMapSearchResults() {
@@ -3996,7 +4021,9 @@ function renderMapSearchResults() {
     if (total === 0) {
         const empty = document.createElement('div');
         empty.className = 'map-search-empty';
-        empty.textContent = '没有找到匹配的卡片';
+        empty.textContent = mapSearchState.visibleOnly
+            ? '当前未折叠卡片中没有匹配结果'
+            : '没有找到匹配的卡片';
         container.appendChild(empty);
         return;
     }
@@ -4032,7 +4059,8 @@ function renderMapSearchResults() {
 
 function executeMapSearch(query) {
     mapSearchState.query = String(query ?? '');
-    mapSearchState.results = collectMapSearchResults(state.data, mapSearchState.query);
+    const allowedNodeIds = mapSearchState.visibleOnly ? getRenderedMapSearchNodeIds() : null;
+    mapSearchState.results = collectMapSearchResults(state.data, mapSearchState.query, allowedNodeIds);
     mapSearchState.activeIndex = mapSearchState.results.length > 0 ? 0 : -1;
     mapSearchState.hasLocated = false;
     // 输入中的新关键词（包括无结果）不应收起已定位结果临时展开的路径。
@@ -4119,8 +4147,10 @@ function resetMapSearch() {
     mapSearchState.results = [];
     mapSearchState.activeIndex = -1;
     mapSearchState.hasLocated = false;
+    mapSearchState.visibleOnly = false;
     const input = $('#mapSearchInput');
     if (input) input.value = '';
+    syncMapSearchScopeButton();
     closeMapSearch();
     renderMapSearchResults();
 }
@@ -4161,12 +4191,14 @@ function locateMapSearchResult(index) {
 
     mapSearchState.activeIndex = index;
     mapSearchState.hasLocated = true;
-    clearMapSearchReveal();
-    result.pathIds.forEach(id => {
-        if (id !== state.data.id) mapSearchState.revealedNodeIds.add(id);
-    });
-    if (result.rootDirection) mapSearchState.revealedRootDirections.add(result.rootDirection);
-    renderTree();
+    if (!mapSearchState.visibleOnly) {
+        clearMapSearchReveal();
+        result.pathIds.forEach(id => {
+            if (id !== state.data.id) mapSearchState.revealedNodeIds.add(id);
+        });
+        if (result.rootDirection) mapSearchState.revealedRootDirections.add(result.rootDirection);
+        renderTree();
+    }
 
     state.selectedRelationId = null;
     state.selectedSummaryId = null;
@@ -4204,6 +4236,12 @@ function initializeMapSearch() {
     $('#btn-search-close').onclick = closeMapSearch;
     $('#btn-search-prev').onclick = () => navigateMapSearch(-1);
     $('#btn-search-next').onclick = () => navigateMapSearch(1);
+    $('#btn-search-visible').onclick = () => {
+        mapSearchState.visibleOnly = !mapSearchState.visibleOnly;
+        syncMapSearchScopeButton();
+        executeMapSearch(input.value);
+    };
+    syncMapSearchScopeButton();
 
     input.addEventListener('input', () => executeMapSearch(input.value));
     input.addEventListener('paste', event => {
@@ -4880,6 +4918,7 @@ function renderTree() {
     }
     
     updateToolbar();
+    refreshVisibleMapSearchResults();
 };
 
 function isDescendantOfLeft(id) {
@@ -4955,6 +4994,7 @@ function updateChildrenDOM(nodeId) {
     scheduleRenderMindMapRelations();
     scheduleRenderMindMapSummaries();
     updateMindMapNodeStats();
+    refreshVisibleMapSearchResults();
 };
 
 function updateNodeDOM(nodeId) {

@@ -13,6 +13,7 @@ for (const id of [
     'mapSearchInput',
     'mapSearchResults',
     'mapSearchCount',
+    'btn-search-visible',
     'btn-search-prev',
     'btn-search-next',
     'btn-search-close',
@@ -58,6 +59,14 @@ assert.doesNotMatch(executeSearchSource, /clearMapSearchReveal\(\)|renderTree\(\
     '搜索词变化或无结果时不应清除已定位结果的临时展开路径并重绘折叠视图');
 assert.match(mindMap, /function locateMapSearchResult\(index\)[\s\S]*?clearMapSearchReveal\(\)/,
     '定位另一条结果时仍应先清除旧的临时展开路径');
+assert.match(mindMap, /document\.querySelectorAll\('#tree-root \.node-card\[data-node-id\]'\)/,
+    '可见范围应由当前树中已渲染的卡片决定，不应按屏幕视口过滤');
+assert.match(mindMap, /mapSearchState\.visibleOnly \? getRenderedMapSearchNodeIds\(\) : null/,
+    '开启可见范围时应将已渲染节点集合传入搜索');
+assert.match(mindMap, /if \(!mapSearchState\.visibleOnly\) \{[\s\S]*?clearMapSearchReveal\(\)[\s\S]*?renderTree\(\)/,
+    '可见范围内的结果定位不应触发折叠路径临时展开');
+assert.match(mindMap, /mapSearchState\.visibleOnly = !mapSearchState\.visibleOnly;[\s\S]*?executeMapSearch\(input\.value\)/,
+    '切换搜索范围后应立即按现有关键词刷新结果');
 assert.match(html, /animation:\s*map-search-pulse\s+1s\s+ease-out\s+forwards/,
     '定位光效结束后应保持末帧，避免橙色边框样式突然回跳');
 assert.match(html, /100%\s*\{[^}]*opacity:\s*0[^}]*\}/,
@@ -123,6 +132,20 @@ assert.deepEqual([...normalizedResults.map(item => item.id)], ['left-parent', 'r
 context.query = '   ';
 assert.equal(vm.runInContext('collectMapSearchResults(tree, query).length', context), 0,
     '空白关键词不应返回全部卡片');
+
+context.query = 'alpha';
+context.renderedNodeIds = new Set(['root', 'right-body']);
+const visibleResults = vm.runInContext(
+    'collectMapSearchResults(tree, query, renderedNodeIds)',
+    context,
+);
+assert.deepEqual([...visibleResults.map(item => item.id)], ['right-body'],
+    '仅搜索可见卡片时，已折叠分支中的匹配节点必须被过滤');
+context.query = '项目总览';
+assert.equal(vm.runInContext(
+    'collectMapSearchResults(tree, query, renderedNodeIds)[0].id',
+    context,
+), 'root', '根卡片作为始终渲染的节点应仍可被搜索');
 
 const clipboardQueryStart = mindMap.indexOf('function getMapSearchClipboardQuery');
 const clipboardQueryEnd = mindMap.indexOf('async function applyMapSearchClipboardQuery', clipboardQueryStart);
