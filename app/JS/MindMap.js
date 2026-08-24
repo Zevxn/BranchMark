@@ -2213,6 +2213,36 @@ function collectMindMapNodeIds(node, targetSet = new Set()) {
     return targetSet;
 }
 
+function getMindMapNodeTreeOrder() {
+    const order = new Map();
+    let index = 0;
+    const visit = node => {
+        if (!node) return;
+        order.set(node.id, index++);
+        (node.children || []).forEach(visit);
+    };
+    visit(state.data);
+    return order;
+}
+
+function sortMindMapNodeIdsByTreeOrder(nodeIds) {
+    const order = getMindMapNodeTreeOrder();
+    return Array.from(new Set(nodeIds || []))
+        .map((id, selectionIndex) => ({
+            id,
+            selectionIndex,
+            treeIndex: order.get(id) ?? Number.MAX_SAFE_INTEGER
+        }))
+        .sort((left, right) => left.treeIndex - right.treeIndex || left.selectionIndex - right.selectionIndex)
+        .map(item => item.id);
+}
+
+function getMindMapDragProcessingOrder(nodeIds, dropType) {
+    const orderedNodes = sortMindMapNodeIdsByTreeOrder(nodeIds);
+    // “插入到目标后方”时，后处理的节点会更靠近目标；反向处理可保持最终显示顺序。
+    return dropType === 'AFTER' ? [...orderedNodes].reverse() : orderedNodes;
+}
+
 function removeMindMapRelationsForNodes(nodeIds) {
     if (!nodeIds || nodeIds.size === 0 || !Array.isArray(state.data.relations)) return false;
     const previousLength = state.data.relations.length;
@@ -3932,12 +3962,12 @@ function renderMapSearchResults() {
 }
 
 function executeMapSearch(query) {
-    const revealChanged = clearMapSearchReveal();
     mapSearchState.query = String(query ?? '');
     mapSearchState.results = collectMapSearchResults(state.data, mapSearchState.query);
     mapSearchState.activeIndex = mapSearchState.results.length > 0 ? 0 : -1;
     mapSearchState.hasLocated = false;
-    if (revealChanged) renderTree();
+    // 输入中的新关键词（包括无结果）不应收起已定位结果临时展开的路径。
+    // 真正定位另一条结果时会在 locateMapSearchResult 中切换临时展开状态。
     renderMapSearchResults();
 }
 
@@ -4196,7 +4226,8 @@ function onMouseUp(e) {
             }
 
             if(state.drag.source==='node') {
-                const nodes = state.selectedIds.has(state.drag.nodeId) ? Array.from(state.selectedIds) : [state.drag.nodeId];
+                const selectedNodes = state.selectedIds.has(state.drag.nodeId) ? Array.from(state.selectedIds) : [state.drag.nodeId];
+                const nodes = getMindMapDragProcessingOrder(selectedNodes, state.drag.dropType);
                 let changed = false;
                 const parentsToUpdate = new Set();
                 const isCopy = e.ctrlKey || e.altKey;

@@ -50,6 +50,14 @@ assert.match(mindMap, /isMapRootDirectionTemporarilyExpanded\('left'\)/,
     '根节点左分支应支持搜索期间临时展开');
 assert.match(mindMap, /isMapRootDirectionTemporarilyExpanded\('right'\)/,
     '根节点右分支应支持搜索期间临时展开');
+const executeSearchSource = mindMap.slice(
+    mindMap.indexOf('function executeMapSearch'),
+    mindMap.indexOf('function getMapSearchClipboardQuery'),
+);
+assert.doesNotMatch(executeSearchSource, /clearMapSearchReveal\(\)|renderTree\(\)/,
+    '搜索词变化或无结果时不应清除已定位结果的临时展开路径并重绘折叠视图');
+assert.match(mindMap, /function locateMapSearchResult\(index\)[\s\S]*?clearMapSearchReveal\(\)/,
+    '定位另一条结果时仍应先清除旧的临时展开路径');
 assert.match(html, /animation:\s*map-search-pulse\s+1s\s+ease-out\s+forwards/,
     '定位光效结束后应保持末帧，避免橙色边框样式突然回跳');
 assert.match(html, /100%\s*\{[^}]*opacity:\s*0[^}]*\}/,
