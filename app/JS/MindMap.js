@@ -2081,6 +2081,8 @@ const MINDMAP_RELATION_CROSSING_PENALTY = 420;
 const MINDMAP_RELATION_OVERLAP_PENALTY = 720;
 const MINDMAP_RELATION_RESERVED_SIDE_PENALTY = 1200;
 const MINDMAP_RELATION_ROUTE_CANDIDATES = 12;
+const MINDMAP_RELATION_PORT_PAIR_CANDIDATES = 4;
+const MINDMAP_RELATION_PORT_DEVIATION_PENALTY = 0.2;
 let relationRenderFrame = null;
 let relationRouteCache = { key: '', routes: new Map() };
 
@@ -2521,6 +2523,68 @@ function getMindMapRelationPreferredAlong(rect, side, otherRect, portContext = n
     return centerAlong;
 }
 
+function getMindMapRelationPortCandidates(
+    rect,
+    side,
+    otherRect,
+    padding,
+    portContext = null
+) {
+    const horizontalSide = side === 'left' || side === 'right';
+    const start = horizontalSide ? rect.top : rect.left;
+    const length = horizontalSide ? rect.height : rect.width;
+    const centerAlong = start + length / 2;
+    const preferredAlong = getMindMapRelationPreferredAlong(rect, side, otherRect, portContext);
+    const allowQuarterPorts = horizontalSide && isMindMapRelationSideOccupied(side, portContext);
+    const rawCandidates = [
+        { kind: 'preferred', along: preferredAlong, preferred: true },
+        { kind: 'center', along: centerAlong },
+        ...(allowQuarterPorts ? [
+            { kind: 'quarter-start', along: start + length / 4 },
+            { kind: 'quarter-end', along: start + length * 3 / 4 }
+        ] : [])
+    ];
+    const candidates = [];
+
+    rawCandidates.forEach(rawCandidate => {
+        const port = getMindMapRelationPort(rect, side, 0, padding, rawCandidate.along);
+        const actualAlong = horizontalSide ? port.port.y : port.port.x;
+        const existing = candidates.find(candidate => Math.abs(candidate.along - actualAlong) < 0.1);
+        if (existing) {
+            if (!existing.kinds.includes(rawCandidate.kind)) existing.kinds.push(rawCandidate.kind);
+            existing.preferred = existing.preferred || Boolean(rawCandidate.preferred);
+            return;
+        }
+        candidates.push({
+            ...port,
+            along: actualAlong,
+            kinds: [rawCandidate.kind],
+            preferred: Boolean(rawCandidate.preferred),
+            deviationPenalty: Math.abs(actualAlong - preferredAlong)
+                * MINDMAP_RELATION_PORT_DEVIATION_PENALTY
+        });
+    });
+
+    return candidates;
+}
+
+function selectMindMapRelationPortPairCandidates(candidates) {
+    if (candidates.length <= MINDMAP_RELATION_PORT_PAIR_CANDIDATES) {
+        return candidates.sort((left, right) => left.estimate - right.estimate);
+    }
+
+    const sorted = [...candidates].sort((left, right) => left.estimate - right.estimate);
+    const preferred = sorted.find(candidate =>
+        candidate.sourcePort.preferred && candidate.targetPort.preferred
+    );
+    const selected = preferred ? [preferred] : [];
+    sorted.forEach(candidate => {
+        if (selected.length >= MINDMAP_RELATION_PORT_PAIR_CANDIDATES) return;
+        if (!selected.includes(candidate)) selected.push(candidate);
+    });
+    return selected.sort((left, right) => left.estimate - right.estimate);
+}
+
 function getMindMapRelationSideCandidates(
     sourceRect,
     targetRect,
@@ -2535,35 +2599,23 @@ function getMindMapRelationSideCandidates(
     const dx = targetCenter.x - sourceCenter.x;
     const dy = targetCenter.y - sourceCenter.y;
     const distance = Math.max(1, Math.hypot(dx, dy));
-    const candidates = [];
+    const sidePairCandidates = [];
 
     sides.forEach(sourceSide => {
         sides.forEach(targetSide => {
-            const sourcePreferredAlong = getMindMapRelationPreferredAlong(
+            const sourcePorts = getMindMapRelationPortCandidates(
                 sourceRect,
                 sourceSide,
                 targetRect,
+                MINDMAP_RELATION_SOURCE_CLEARANCE,
                 sourcePortContext
             );
-            const targetPreferredAlong = getMindMapRelationPreferredAlong(
+            const targetPorts = getMindMapRelationPortCandidates(
                 targetRect,
                 targetSide,
                 sourceRect,
-                targetPortContext
-            );
-            const sourcePort = getMindMapRelationPort(
-                sourceRect,
-                sourceSide,
-                0,
-                MINDMAP_RELATION_SOURCE_CLEARANCE,
-                sourcePreferredAlong
-            );
-            const targetPort = getMindMapRelationPort(
-                targetRect,
-                targetSide,
-                0,
                 MINDMAP_RELATION_TARGET_APPROACH,
-                targetPreferredAlong
+                targetPortContext
             );
             const sourceVector = getMindMapRelationSideVector(sourceSide);
             const targetVector = getMindMapRelationSideVector(targetSide);
@@ -2572,24 +2624,40 @@ function getMindMapRelationSideCandidates(
             const alignmentPenalty = (2 - sourceAlignment - targetAlignment) * 100;
             const reservedSidePenalty = (sourceReservedSides.has(sourceSide) ? MINDMAP_RELATION_RESERVED_SIDE_PENALTY : 0)
                 + (targetReservedSides.has(targetSide) ? MINDMAP_RELATION_RESERVED_SIDE_PENALTY : 0);
-            const estimatedDistance = Math.abs(sourcePort.routePoint.x - targetPort.routePoint.x)
-                + Math.abs(sourcePort.routePoint.y - targetPort.routePoint.y);
-            candidates.push({
-                sourceSide,
-                targetSide,
-                sourcePort,
-                targetPort,
-                estimatedDistance,
-                alignmentPenalty,
-                reservedSidePenalty,
-                estimate: estimatedDistance + alignmentPenalty + reservedSidePenalty
+            const portPairs = [];
+            sourcePorts.forEach(sourcePort => {
+                targetPorts.forEach(targetPort => {
+                    const estimatedDistance = Math.abs(sourcePort.routePoint.x - targetPort.routePoint.x)
+                        + Math.abs(sourcePort.routePoint.y - targetPort.routePoint.y);
+                    const portDeviationPenalty = sourcePort.deviationPenalty + targetPort.deviationPenalty;
+                    portPairs.push({
+                        sourceSide,
+                        targetSide,
+                        sourcePort,
+                        targetPort,
+                        estimatedDistance,
+                        alignmentPenalty,
+                        reservedSidePenalty,
+                        portDeviationPenalty,
+                        estimate: estimatedDistance
+                            + alignmentPenalty
+                            + reservedSidePenalty
+                            + portDeviationPenalty
+                    });
+                });
+            });
+            const selectedPortPairs = selectMindMapRelationPortPairCandidates(portPairs);
+            sidePairCandidates.push({
+                estimate: selectedPortPairs[0]?.estimate ?? Number.POSITIVE_INFINITY,
+                candidates: selectedPortPairs
             });
         });
     });
 
-    return candidates
-        .sort((a, b) => a.estimate - b.estimate)
-        .slice(0, MINDMAP_RELATION_ROUTE_CANDIDATES);
+    return sidePairCandidates
+        .sort((left, right) => left.estimate - right.estimate)
+        .slice(0, MINDMAP_RELATION_ROUTE_CANDIDATES)
+        .flatMap(group => group.candidates);
 }
 
 function isMindMapRelationPointInsideObstacle(point, obstacle, epsilon = 0.1) {
@@ -3038,6 +3106,7 @@ function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegment
         const totalCost = route.cost
             + candidate.alignmentPenalty
             + candidate.reservedSidePenalty
+            + candidate.portDeviationPenalty
             + candidate.estimatedDistance * 0.06;
         if (bestRoute && bestRoute.cost <= totalCost) return;
         const points = simplifyMindMapRelationPoints([

@@ -149,6 +149,8 @@ vm.runInContext(`
     const MINDMAP_RELATION_OVERLAP_PENALTY = 720;
     const MINDMAP_RELATION_RESERVED_SIDE_PENALTY = 1200;
     const MINDMAP_RELATION_ROUTE_CANDIDATES = 12;
+    const MINDMAP_RELATION_PORT_PAIR_CANDIDATES = 4;
+    const MINDMAP_RELATION_PORT_DEVIATION_PENALTY = 0.2;
     ${routingSource}
 `, routingContext);
 routingContext.routeStart = { x: 0, y: 50 };
@@ -281,6 +283,70 @@ const targetAwarePort = vm.runInContext(
 assert.equal(targetAwarePort.port.y, 82,
     '连接点应沿卡片边缘靠近目标位置，而不是始终固定在边缘中心');
 
+routingContext.adaptivePortRect = {
+    left: 0, right: 160, top: 100, bottom: 300, width: 160, height: 200
+};
+routingContext.distantLowerRect = {
+    left: 240, right: 560, top: 440, bottom: 720, width: 320, height: 280
+};
+const adaptiveRightPorts = vm.runInContext(`
+    getMindMapRelationPortCandidates(
+        adaptivePortRect,
+        'right',
+        distantLowerRect,
+        MINDMAP_RELATION_TARGET_APPROACH,
+        { branchSide: 'right', hasChildren: true, childSides: [] }
+    )
+`, routingContext);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(adaptiveRightPorts
+        .filter(candidate => candidate.kinds.some(kind => kind.startsWith('quarter')))
+        .map(candidate => candidate.port.y)
+        .sort((left, right) => left - right))),
+    [150, 250],
+    '每个卡片侧边应同时提供四分之一和四分之三端点候选',
+);
+assert.ok(adaptiveRightPorts.some(candidate => candidate.kinds.includes('center') && candidate.port.y === 200),
+    '侧边中心应作为稳定回退候选保留');
+assert.equal(
+    adaptiveRightPorts.find(candidate => candidate.preferred).deviationPenalty,
+    0,
+    '当子连线侧被占用时，靠近对方的首选四分位不应承担偏移惩罚',
+);
+assert.ok(
+    adaptiveRightPorts.find(candidate => candidate.kinds.includes('quarter-start')).deviationPenalty > 0,
+    '偏移端点应带有小额稳定性惩罚，避免轻微移动导致连接点跳动',
+);
+const leafRightPorts = vm.runInContext(`
+    getMindMapRelationPortCandidates(
+        adaptivePortRect,
+        'right',
+        distantLowerRect,
+        MINDMAP_RELATION_TARGET_APPROACH,
+        { branchSide: 'right', hasChildren: false, childSides: [] }
+    )
+`, routingContext);
+assert.equal(leafRightPorts.length, 1,
+    '无子节点右支卡片的右侧只应生成中心端点');
+assert.equal(leafRightPorts[0].port.y, 200,
+    '无子节点卡片的外侧关联线必须从中心连接');
+assert.equal(leafRightPorts[0].kinds.some(kind => kind.startsWith('quarter')), false,
+    '无子节点卡片的外侧四分位不得进入候选集');
+const adaptiveTopPorts = vm.runInContext(`
+    getMindMapRelationPortCandidates(
+        adaptivePortRect,
+        'top',
+        distantLowerRect,
+        MINDMAP_RELATION_TARGET_APPROACH
+    )
+`, routingContext);
+assert.equal(adaptiveTopPorts.length, 1,
+    '卡片上下边只应生成唯一的中心端点');
+assert.equal(adaptiveTopPorts[0].port.x, 80,
+    '卡片上侧连接点必须严格位于水平中心');
+assert.deepEqual([...adaptiveTopPorts[0].kinds], ['preferred', 'center'],
+    '卡片上下边不应包含四分位或投影端点');
+
 routingContext.alignedSourceRect = {
     id: 'upper', left: 20, right: 170, top: 0, bottom: 140, width: 150, height: 140
 };
@@ -289,7 +355,10 @@ routingContext.alignedTargetRect = {
 };
 const alignedCandidate = vm.runInContext(`
     getMindMapRelationSideCandidates(alignedSourceRect, alignedTargetRect)
-        .find(candidate => candidate.sourceSide === 'bottom' && candidate.targetSide === 'top')
+        .find(candidate => candidate.sourceSide === 'bottom'
+            && candidate.targetSide === 'top'
+            && candidate.sourcePort.preferred
+            && candidate.targetPort.preferred)
 `, routingContext);
 assert.equal(alignedCandidate.sourcePort.port.x, 95,
     '源卡片端点必须位于所选边的准确中点，不能为追求共线而偏移');
@@ -304,7 +373,10 @@ routingContext.centerTargetRect = {
 };
 const centeredMixedCandidate = vm.runInContext(`
     getMindMapRelationSideCandidates(centerSourceRect, centerTargetRect)
-        .find(candidate => candidate.sourceSide === 'right' && candidate.targetSide === 'top')
+        .find(candidate => candidate.sourceSide === 'right'
+            && candidate.targetSide === 'top'
+            && candidate.sourcePort.preferred
+            && candidate.targetPort.preferred)
 `, routingContext);
 assert.equal(centeredMixedCandidate.sourcePort.port.y, 50,
     '无法共线的混合方向连接应优先使用源卡片边中心');
@@ -417,7 +489,10 @@ const independentPorts = vm.runInContext(`
         new Set(),
         { branchSide: 'right', hasChildren: true, childSides: [] },
         { branchSide: 'right', hasChildren: false, childSides: [] }
-    ).find(candidate => candidate.sourceSide === 'right' && candidate.targetSide === 'left')
+    ).find(candidate => candidate.sourceSide === 'right'
+        && candidate.targetSide === 'left'
+        && candidate.sourcePort.preferred
+        && candidate.targetPort.preferred)
 `, routingContext);
 assert.equal(independentPorts.sourcePort.port.y, 150,
     '关联线起点应根据目标位置独立选取上四分位');
@@ -437,5 +512,57 @@ assert.equal(sourceClearance, 28,
     '关联线离开源卡片时应保留独立的短直线段');
 assert.equal(targetApproach, 48,
     '箭头进入目标卡片前应保留足够长的直线进场段');
+
+routingContext.lowerSourceRect = {
+    id: 'lower-source', left: 18, right: 400, top: 438, bottom: 722, width: 382, height: 284
+};
+routingContext.upperTargetRect = {
+    id: 'upper-target', left: 130, right: 315, top: 28, bottom: 203, width: 185, height: 175
+};
+const lowerToUpperRightCandidates = vm.runInContext(`
+    getMindMapRelationSideCandidates(
+        lowerSourceRect,
+        upperTargetRect,
+        new Set(['left', 'right', 'top']),
+        new Set(['left', 'top', 'bottom']),
+        null,
+        { branchSide: 'right', hasChildren: true, childSides: [] }
+    ).filter(candidate => candidate.sourceSide === 'bottom' && candidate.targetSide === 'right')
+`, routingContext);
+assert.ok(lowerToUpperRightCandidates.some(candidate => candidate.targetPort.port.y > 150),
+    '下方卡片连向上方卡片右侧时，应有右侧偏下的更近端点进入精确寻路');
+assert.ok(lowerToUpperRightCandidates.length <= 4,
+    '每组侧边组合应限制精确寻路数量，避免端点扩展导致性能失控');
+
+vm.runInContext(`
+    getMindMapRelationReservedSides = nodeId => nodeId === 'lower-source'
+        ? new Set(['left', 'right', 'top'])
+        : new Set(['left', 'top', 'bottom']);
+    getMindMapRelationPortContext = nodeId => nodeId === 'upper-target'
+        ? { branchSide: 'right', hasChildren: true, childSides: [] }
+        : null;
+`, routingContext);
+const adaptiveEndpointRoute = vm.runInContext(`
+    routeMindMapRelation(lowerSourceRect, upperTargetRect, [], [])
+`, routingContext);
+assert.equal(adaptiveEndpointRoute.sourceSide, 'bottom',
+    '当其他起点侧被树结构保留时，应从源卡片底边引出关联线');
+assert.equal(adaptiveEndpointRoute.targetSide, 'right',
+    '当其他终点侧被树结构保留时，应从目标卡片右侧进入');
+assert.ok(adaptiveEndpointRoute.points.at(-1).y > 150,
+    '精确避障评分应最终选中比右侧中心更靠近下方卡片的端点');
+
+vm.runInContext(`
+    getMindMapRelationPortContext = nodeId => nodeId === 'upper-target'
+        ? { branchSide: 'right', hasChildren: false, childSides: [] }
+        : null;
+`, routingContext);
+const leafEndpointRoute = vm.runInContext(`
+    routeMindMapRelation(lowerSourceRect, upperTargetRect, [], [])
+`, routingContext);
+assert.equal(leafEndpointRoute.targetSide, 'right',
+    '无子节点卡片的右侧仍应可作为关联线终点侧');
+assert.equal(leafEndpointRoute.points.at(-1).y, 115.5,
+    '无子节点卡片的最终关联线必须落在右侧中心');
 
 console.log('卡片关联校验通过：编辑、正交避障、分流防重叠、缓存与 Canvas 导出逻辑完整。');
