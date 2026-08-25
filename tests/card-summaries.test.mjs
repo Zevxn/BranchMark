@@ -102,8 +102,8 @@ assert.match(mindMap, /parentChildCount\s*>\s*siblingCount\s*\?\s*'horizontal'\s
     '只有选中卡片的直接父子关系多于兄弟配对时才使用横向总结');
 assert.match(mindMap, /function prepareMindMapSummaryLayout\(summaries\)[\s\S]*?getMindMapSummaryLayoutDeficit\(candidate\.requiredSpace, anchors\)[\s\S]*?spacingRequests/,
     '横向总结应先比较局部空白与实际所需空间，只对不足部分申请布局占位');
-assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, footprint = null\)[\s\S]*?boundaryCandidates[\s\S]*?direction:\s*placement === 'top' \? 'after' : 'before'/,
-    '总结应把占位插入成员与最近非成员兄弟之间，不应整体移动共同子树');
+assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, candidate = null\)[\s\S]*?querySelectorAll\('\.node-card'\)[\s\S]*?collisionRect[\s\S]*?direction:\s*placement === 'top' \? 'after' : 'before'/,
+    '总结应使用所有可见普通卡片的实际矩形查找布局障碍');
 assert.match(mindMap, /function getMindMapSummaryHorizontalBraceY\(bounds, placement\)[\s\S]*?bounds\.top - MINDMAP_SUMMARY_BRACE_OFFSET[\s\S]*?bounds\.bottom \+ MINDMAP_SUMMARY_BRACE_OFFSET/,
     '横向总结大括号必须贴近成员卡片，不能移到整张导图之外');
 assert.match(mindMap, /occupiedSummaryRects[\s\S]*?getMindMapSummaryCollisionOffset[\s\S]*?labelOffset \+= collisionOffset/,
@@ -236,6 +236,7 @@ assert.ok(localBottomCandidate.requiredSpace > localBottomCandidate.editorRect.b
     '所需空间应包含总结卡片外侧的安全间距');
 pathContext.wideGapAnchors = [{ distance: localBottomCandidate.requiredSpace + 40 }];
 pathContext.narrowGapAnchors = [{ distance: localBottomCandidate.requiredSpace - 35 }];
+pathContext.crossingGapAnchors = [{ distance: -10 }];
 assert.equal(
     vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, wideGapAnchors).deficit', pathContext),
     0,
@@ -244,6 +245,10 @@ assert.equal(
 assert.ok(Math.abs(
     vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, narrowGapAnchors).deficit', pathContext) - 35
 ) < 1e-9, '局部空白不足时只能补足缺少的空间');
+assert.ok(Math.abs(
+    vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, crossingGapAnchors).deficit', pathContext)
+        - (localBottomCandidate.requiredSpace + 10)
+) < 1e-9, '普通卡片跨过成员边界时，应把侵入深度计入所需占位');
 assert.equal(
     vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, []).deficit', pathContext),
     0,
@@ -284,46 +289,52 @@ assert.deepEqual(
     '左侧总结成员的坐标应以画布实际原点和缩放为准，不受过期 state.view 影响',
 );
 
-const selectedCard = {};
-const selectedUnit = {
-    classList: { contains: name => name === 'child-unit' },
-    contains: item => item === selectedCard,
-    rect: { left: 0, top: 0, right: 100, bottom: 100 },
-};
+const selectedCard = { dataset: { nodeId: 'selected' } };
 const obstacleUnit = {
-    classList: { contains: name => name === 'child-unit' },
     contains: () => false,
-    rect: { left: 0, top: 120, right: 100, bottom: 200 },
 };
-const layoutContainer = {
-    children: [selectedUnit, obstacleUnit],
-    contains: item => item === selectedCard,
+const obstacleCard = {
+    dataset: { nodeId: 'obstacle' },
+    getClientRects: () => [{}],
+    closest: selector => selector === '.child-unit' ? obstacleUnit : null,
+    rect: { left: 0, top: 120, right: 100, bottom: 200 },
 };
 const layoutAnchorContext = vm.createContext({
     document: {
         getElementById: id => id === 'card-selected' ? selectedCard : null,
-        querySelectorAll: selector => selector === '.children-container' ? [layoutContainer] : [],
+        querySelectorAll: selector => selector === '.node-card' ? [selectedCard, obstacleCard] : [],
     },
     getMindMapCanvasRect: element => element.rect,
 });
 vm.runInContext(layoutAnchorSource, layoutAnchorContext);
 layoutAnchorContext.selectionBounds = { top: 0, bottom: 100 };
 layoutAnchorContext.obstacleUnit = obstacleUnit;
+layoutAnchorContext.layoutCandidate = {
+    collisionRect: { left: -20, top: 100, right: 120, bottom: 300 },
+};
 assert.equal(
-    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds)[0].anchor === obstacleUnit", layoutAnchorContext),
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, layoutCandidate)[0].anchor === obstacleUnit", layoutAnchorContext),
     true,
     '总结位于成员下方时，应把占位加到最近的下方非成员兄弟之前',
 );
 assert.equal(
-    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds)[0].direction", layoutAnchorContext),
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, layoutCandidate)[0].direction", layoutAnchorContext),
     'before',
     '下方障碍卡片应被布局占位向下推开',
 );
-layoutAnchorContext.unrelatedFootprint = { left: 200, right: 300 };
+obstacleCard.rect = { left: 0, top: 90, right: 100, bottom: 200 };
 assert.equal(
-    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, unrelatedFootprint).length", layoutAnchorContext),
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, layoutCandidate)[0].distance", layoutAnchorContext),
+    -10,
+    '展开后的普通卡片跨过成员下边界时，必须保留负间距而不能当作无障碍',
+);
+layoutAnchorContext.unrelatedCandidate = {
+    collisionRect: { left: 200, top: 100, right: 300, bottom: 300 },
+};
+assert.equal(
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, unrelatedCandidate).length", layoutAnchorContext),
     0,
-    '水平方向不与总结卡片相交的分支不应触发额外留白',
+    '水平方向不与总结卡片相交的普通卡片不应触发额外留白',
 );
 
 const cleanupContext = vm.createContext({

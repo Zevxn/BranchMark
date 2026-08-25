@@ -2079,7 +2079,7 @@ const MINDMAP_RELATION_DIRECTIONS = new Set(['none', 'forward', 'reverse']);
 const MINDMAP_RELATION_LINE_STYLES = new Set(['dashed', 'solid']);
 const MINDMAP_RELATION_ROUTING_PADDING = 18;
 const MINDMAP_RELATION_SOURCE_CLEARANCE = 28;
-const MINDMAP_RELATION_TARGET_APPROACH = 48;
+const MINDMAP_RELATION_TARGET_APPROACH = 32;    // 最后一次转弯阈值
 const MINDMAP_RELATION_ARROW_SIZE = 12;
 const MINDMAP_RELATION_FOLD_BUTTON_PADDING = 6;
 const MINDMAP_RELATION_OBSTACLE_EDGE_PENALTY = 36;
@@ -3839,10 +3839,20 @@ function getMindMapSummaryHorizontalCandidate(bounds, placement, editorSize, lab
         left: Math.min(bounds.left - 8, editorRect.left) - MINDMAP_SUMMARY_COLLISION_GAP,
         right: Math.max(bounds.right + 8, editorRect.right) + MINDMAP_SUMMARY_COLLISION_GAP
     };
+    const collisionRect = {
+        left: footprint.left,
+        right: footprint.right,
+        top: placement === 'top'
+            ? editorRect.top - MINDMAP_SUMMARY_COLLISION_GAP
+            : bounds.bottom,
+        bottom: placement === 'top'
+            ? bounds.top
+            : editorRect.bottom + MINDMAP_SUMMARY_COLLISION_GAP
+    };
     const requiredSpace = placement === 'top'
         ? bounds.top - editorRect.top + MINDMAP_SUMMARY_COLLISION_GAP
         : editorRect.bottom - bounds.bottom + MINDMAP_SUMMARY_COLLISION_GAP;
-    return { braceY, labelY, editorRect, footprint, requiredSpace };
+    return { braceY, labelY, editorRect, footprint, collisionRect, requiredSpace };
 }
 
 function getMindMapSummaryCollisionOffset(candidate, placement, occupiedRects) {
@@ -3876,7 +3886,7 @@ function getMindMapSummaryLayoutDeficit(requiredSpace, anchors) {
     if (!anchors || anchors.length === 0) {
         return { availableSpace: Number.POSITIVE_INFINITY, deficit: 0 };
     }
-    const availableSpace = Math.max(0, Math.min(...anchors.map(anchor => anchor.distance)));
+    const availableSpace = Math.min(...anchors.map(anchor => anchor.distance));
     return {
         availableSpace,
         deficit: Math.max(0, requiredSpace - availableSpace)
@@ -4164,39 +4174,48 @@ function clearMindMapSummaryLayoutSpaces() {
     return previousSpaces;
 }
 
-function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, footprint = null) {
-    const cards = Array.from(new Set(nodeIds || []))
+function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = null) {
+    const selectedIds = new Set(nodeIds || []);
+    const selectedCards = Array.from(selectedIds)
         .map(nodeId => document.getElementById(`card-${nodeId}`))
         .filter(Boolean);
-    if (cards.length === 0) return [];
+    if (selectedCards.length === 0 || !candidate?.collisionRect) return [];
 
-    const boundaryCandidates = [];
-    document.querySelectorAll('.children-container').forEach(container => {
-        if (!cards.some(card => container.contains(card))) return;
-        Array.from(container.children).forEach(unit => {
-            if (!unit.classList.contains('child-unit')) return;
-            if (cards.some(card => unit.contains(card))) return;
-            const rect = getMindMapCanvasRect(unit);
-            if (footprint && (rect.right <= footprint.left || rect.left >= footprint.right)) return;
-            const distance = placement === 'top'
-                ? bounds.top - rect.bottom
-                : rect.top - bounds.bottom;
-            if (distance < -0.5) return;
-            boundaryCandidates.push({
-                anchor: unit,
+    const obstaclesByAnchor = new Map();
+    document.querySelectorAll('.node-card').forEach(card => {
+        if (selectedIds.has(card.dataset.nodeId) || card.getClientRects().length === 0) return;
+        const rect = getMindMapCanvasRect(card);
+        const collisionRect = candidate.collisionRect;
+        const intersects = rect.left < collisionRect.right
+            && rect.right > collisionRect.left
+            && rect.top < collisionRect.bottom
+            && rect.bottom > collisionRect.top;
+        if (!intersects) return;
+
+        const closestUnit = card.closest('.child-unit');
+        const anchor = closestUnit && !selectedCards.some(selectedCard => closestUnit.contains(selectedCard))
+            ? closestUnit
+            : null;
+        const distance = placement === 'top'
+            ? bounds.top - rect.bottom
+            : rect.top - bounds.bottom;
+        const key = anchor || card;
+        const existing = obstaclesByAnchor.get(key);
+        if (!existing || distance < existing.distance) {
+            obstaclesByAnchor.set(key, {
+                anchor,
+                obstacle: card,
                 direction: placement === 'top' ? 'after' : 'before',
                 distance
             });
-        });
+        }
     });
-    if (boundaryCandidates.length > 0) {
-        const nearestDistance = Math.min(...boundaryCandidates.map(candidate => candidate.distance));
-        const nearestCandidates = boundaryCandidates.filter(candidate => candidate.distance <= nearestDistance + 0.5);
-        return nearestCandidates.filter(candidate => !nearestCandidates.some(other =>
-            other !== candidate && candidate.anchor.contains(other.anchor)
+    return Array.from(obstaclesByAnchor.values()).filter(candidate => !candidate.anchor
+        || !Array.from(obstaclesByAnchor.values()).some(other =>
+            other !== candidate
+            && other.anchor
+            && candidate.anchor.contains(other.anchor)
         ));
-    }
-    return [];
 }
 
 function getMindMapSummaryEditorCanvasSize(summaryId) {
@@ -4259,7 +4278,7 @@ function prepareMindMapSummaryLayout(summaries) {
                 summary.nodeIds,
                 placement,
                 geometry.bounds,
-                candidate.footprint
+                candidate
             );
             const layoutSpace = getMindMapSummaryLayoutDeficit(candidate.requiredSpace, anchors);
             return {
@@ -4289,9 +4308,12 @@ function prepareMindMapSummaryLayout(summaries) {
         occupiedSummaryRects.push(chosen.candidate.editorRect);
 
         if (chosen.deficit <= 0) return;
-        chosen.anchors.forEach(({ anchor, direction }) => {
+        chosen.anchors.forEach(({ anchor, direction, distance }) => {
+            if (!anchor) return;
+            const deficit = Math.max(0, chosen.candidate.requiredSpace - distance);
+            if (deficit <= 0) return;
             const request = spacingRequests.get(anchor) || { before: 0, after: 0 };
-            request[direction] = Math.max(request[direction], Math.ceil(chosen.deficit));
+            request[direction] = Math.max(request[direction], Math.ceil(deficit));
             spacingRequests.set(anchor, request);
         });
     });
