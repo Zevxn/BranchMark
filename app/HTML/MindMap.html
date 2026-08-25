@@ -636,6 +636,107 @@
             font-variant-numeric: tabular-nums;
         }
         .node-stats-divider { opacity: 0.42; }
+        .mindmap-tabs {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 900;
+            height: 40px;
+            display: flex;
+            align-items: stretch;
+            padding: 0 8px;
+            box-sizing: border-box;
+            color: var(--text-color-secondary);
+            background: color-mix(in srgb, var(--toolbar-bg) 96%, transparent);
+            border-top: 1px solid var(--toolbar-border);
+            box-shadow: 0 -2px 10px var(--shadow-color);
+            backdrop-filter: blur(10px);
+        }
+        .mindmap-tab-list {
+            min-width: 0;
+            display: flex;
+            align-items: stretch;
+            gap: 2px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-width: none;
+        }
+        .mindmap-tab-list::-webkit-scrollbar { display: none; }
+        .mindmap-tab {
+            position: relative;
+            min-width: 96px;
+            max-width: 220px;
+            height: 100%;
+            padding: 0 18px;
+            overflow: visible;
+            color: var(--text-color-secondary);
+            background: transparent;
+            border: 0;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font: inherit;
+            user-select: none;
+        }
+        .mindmap-tab:hover { color: var(--text-color); background: var(--btn-hover); }
+        .mindmap-tab.active {
+            color: var(--primary);
+            background: color-mix(in srgb, var(--primary) 10%, transparent);
+            border-bottom-color: var(--primary);
+        }
+        .mindmap-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
+        .mindmap-tab-label {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .mindmap-tab.dragging { opacity: 0.35; }
+        .mindmap-tab.drop-before::before,
+        .mindmap-tab.drop-after::after {
+            content: '';
+            position: absolute;
+            top: 5px;
+            bottom: 5px;
+            width: 2px;
+            background: var(--primary);
+            border-radius: 2px;
+            pointer-events: none;
+        }
+        .mindmap-tab.drop-before::before { left: 0; }
+        .mindmap-tab.drop-after::after { right: 0; }
+        .mindmap-tab-add {
+            flex: 0 0 42px;
+            width: 42px;
+            height: 100%;
+            display: grid;
+            place-items: center;
+            margin-left: 4px;
+            color: var(--text-color-secondary);
+            background: transparent;
+            border: 0;
+            border-left: 1px solid var(--toolbar-border);
+            cursor: pointer;
+            font-size: 18px;
+        }
+        .mindmap-tab-add:hover { color: var(--primary); background: var(--btn-hover); }
+        .mindmap-tab-menu .menu-item.disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .mindmap-tabs ~ .node-stats { bottom: 52px; }
+        .mindmap-tab-modal-content {
+            width: min(420px, calc(100vw - 32px));
+            min-width: 0;
+        }
+        .mindmap-tab-modal-error {
+            min-height: 20px;
+            margin-top: 6px;
+            color: #ef4444;
+            font-size: 13px;
+            line-height: 20px;
+        }
         .relation-layer {
             position: absolute;
             top: 0;
@@ -966,7 +1067,7 @@
         }
 
         /* === Dock-卡片坞 ============================================================================== */
-        .card-dock-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 600; display: none; flex-direction: column; align-items: center; width: fit-content; max-width: 80%; transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); }
+        .card-dock-container { position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%); z-index: 600; display: none; flex-direction: column; align-items: center; width: fit-content; max-width: 80%; transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); }
         .card-dock-container.collapsed { transform: translate(-50%, 100%); }
         .dock-handle { width: 60px; height: 20px; background: var(--toolbar-bg); border: 1px solid var(--toolbar-border); border-bottom: none; border-radius: 12px 12px 0 0; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 -2px 10px var(--shadow-color); color: var(--text-color-secondary); transition: all 0.2s; flex-shrink: 0; }
         .dock-handle:hover { background: var(--btn-hover); color: var(--primary); }
@@ -1968,6 +2069,54 @@
             <i id="ghostIcon" class="ri-drag-move-line"></i>
             <span id="ghostTitle">Title</span>
             <span id="ghostCount" class="ghost-count" style="display:none;"></span>
+        </div>
+    </div>
+
+    <nav class="mindmap-tabs" id="mindMapTabs" aria-label="导图页面">
+        <div class="mindmap-tab-list" id="mindMapTabList" role="tablist"></div>
+        <button class="mindmap-tab-add" id="btn-add-mindmap-tab" type="button" title="新建页面" aria-label="新建页面">
+            <i class="ri-add-line" aria-hidden="true"></i>
+        </button>
+    </nav>
+
+    <div class="context-menu mindmap-tab-menu" id="mindMapTabMenu">
+        <div class="menu-item" data-tab-action="rename"><i class="ri-edit-line"></i> 重命名页面</div>
+        <div class="menu-item" data-tab-action="duplicate"><i class="ri-file-copy-line"></i> 复制页面</div>
+        <div class="menu-divider"></div>
+        <div class="menu-item" data-tab-action="delete" style="color:#ff4d4f"><i class="ri-delete-bin-line" style="color:#ff4d4f"></i> 删除页面</div>
+    </div>
+
+    <div class="mymodal" id="mindMapTabRenameModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="mindMapTabRenameTitle">
+        <div class="modal-content mindmap-tab-modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="mindMapTabRenameTitle">重命名页面</h3>
+            </div>
+            <div class="bookmark-modal-body">
+                <div class="form-group">
+                    <label for="mindMapTabRenameInput">页面名称</label>
+                    <input type="text" id="mindMapTabRenameInput" maxlength="80" autocomplete="off">
+                    <div class="mindmap-tab-modal-error" id="mindMapTabRenameError" role="alert"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelMindMapTabRename" type="button">取消</button>
+                <button class="btn btn-primary" id="confirmMindMapTabRename" type="button">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="mymodal" id="mindMapTabDeleteModal" role="alertdialog" aria-modal="true" aria-hidden="true" aria-labelledby="mindMapTabDeleteTitle" aria-describedby="mindMapTabDeleteText">
+        <div class="modal-content mindmap-tab-modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="mindMapTabDeleteTitle">确认删除</h3>
+            </div>
+            <div class="bookmark-modal-body">
+                <p id="mindMapTabDeleteText"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelMindMapTabDelete" type="button">取消</button>
+                <button class="btn btn-danger" id="confirmMindMapTabDelete" type="button">删除</button>
+            </div>
         </div>
     </div>
 
