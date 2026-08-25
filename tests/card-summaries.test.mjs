@@ -29,6 +29,14 @@ assert.match(html, /\.node-card\.simple,\s*\.summary-editor\.simple\s*\{\s*min-h
     '普通便利贴与总结便利贴应复用一致的最小高度');
 assert.match(html, /\.summary-editor\.simple \.summary-card-body\s*\{\s*display:\s*none/,
     '便利贴模式应隐藏正文并仅展示总结标题');
+assert.match(html, /\.summary-editor\.horizontal\.placement-top\s*\{\s*transform:\s*translate\(-50%,\s*-100%\)/,
+    '横向总结在上方时应以底边居中对齐大括号');
+assert.match(html, /\.summary-editor\.horizontal\.placement-bottom\s*\{\s*transform:\s*translate\(-50%,\s*0\)/,
+    '横向总结在下方时应以顶边居中对齐大括号');
+assert.match(html, /\.child-unit\.summary-space-before\s*\{\s*margin-top:\s*var\(--summary-space-before/,
+    '导图中部的横向总结应能在分支前预留真实布局空间');
+assert.match(html, /\.child-unit\.summary-space-after\s*\{\s*margin-bottom:\s*var\(--summary-space-after/,
+    '导图中部的横向总结应能在分支后预留真实布局空间');
 assert.match(html, /\.card-floating-tools\s*\{[\s\S]*?opacity:\s*0/,
     '总结框与普通卡片应复用默认隐藏的悬浮工具栏');
 assert.match(html, /\.summary-brace\s*\{[\s\S]*?vector-effect:\s*non-scaling-stroke/,
@@ -90,6 +98,18 @@ assert.match(mindMap, /applyColorToMindMapSelection[\s\S]*?summary\.color\s*=\s*
     '通用颜色入口应同时支持普通卡片和总结卡片');
 assert.match(mindMap, /scheduleRenderMindMapRelations\(\);\s*scheduleRenderMindMapSummaries\(\);/,
     '卡片布局更新时应同时刷新关系线和总结标注');
+assert.match(mindMap, /parentChildCount\s*>\s*siblingCount\s*\?\s*'horizontal'\s*:\s*'vertical'/,
+    '只有选中卡片的直接父子关系多于兄弟配对时才使用横向总结');
+assert.match(mindMap, /function prepareMindMapSummaryLayout\(summaries\)[\s\S]*?getMindMapSummaryLayoutDeficit\(candidate\.requiredSpace, anchors\)[\s\S]*?spacingRequests/,
+    '横向总结应先比较局部空白与实际所需空间，只对不足部分申请布局占位');
+assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, footprint = null\)[\s\S]*?boundaryCandidates[\s\S]*?direction:\s*placement === 'top' \? 'after' : 'before'/,
+    '总结应把占位插入成员与最近非成员兄弟之间，不应整体移动共同子树');
+assert.match(mindMap, /function getMindMapSummaryHorizontalBraceY\(bounds, placement\)[\s\S]*?bounds\.top - MINDMAP_SUMMARY_BRACE_OFFSET[\s\S]*?bounds\.bottom \+ MINDMAP_SUMMARY_BRACE_OFFSET/,
+    '横向总结大括号必须贴近成员卡片，不能移到整张导图之外');
+assert.match(mindMap, /occupiedSummaryRects[\s\S]*?getMindMapSummaryCollisionOffset[\s\S]*?labelOffset \+= collisionOffset/,
+    '多个总结卡片应使用实际矩形错位，避免彼此覆盖');
+assert.match(mindMap, /canvasLayer\?\.getBoundingClientRect\(\)[\s\S]*?rect\.left - canvasLeft[\s\S]*?rect\.top - canvasTop/,
+    '卡片坐标应根据画布实际 DOM 变换反算，避免左侧总结使用过期视图偏移');
 
 const selectionSource = mindMap.slice(
     mindMap.indexOf('function getMindMapNodeBranchSide'),
@@ -99,18 +119,37 @@ const pathSource = mindMap.slice(
     mindMap.indexOf('function getMindMapSummaryBracePath'),
     mindMap.indexOf('function getMindMapSummaryGeometry'),
 );
+const canvasRectSource = mindMap.slice(
+    mindMap.indexOf('function getMindMapCanvasRect'),
+    mindMap.indexOf('function expandMindMapRelationObstacle'),
+);
+const layoutAnchorSource = mindMap.slice(
+    mindMap.indexOf('function getMindMapSummaryLayoutAnchors'),
+    mindMap.indexOf('function getMindMapSummaryEditorCanvasSize'),
+);
 const cleanupSource = mindMap.slice(
     mindMap.indexOf('function removeMindMapSummariesForNodes'),
     mindMap.indexOf('function hasDuplicateMindMapSummary'),
 );
 assert.ok(selectionSource.startsWith('function getMindMapNodeBranchSide'), '应能提取同侧选择校验函数');
 assert.ok(pathSource.startsWith('function getMindMapSummaryBracePath'), '应能提取大括号路径函数');
+assert.ok(canvasRectSource.startsWith('function getMindMapCanvasRect'), '应能提取画布坐标换算函数');
+assert.ok(layoutAnchorSource.startsWith('function getMindMapSummaryLayoutAnchors'), '应能提取总结布局占位锚点函数');
 assert.ok(cleanupSource.startsWith('function removeMindMapSummariesForNodes'), '应能提取总结成员清理函数');
 
 const selectionContext = vm.createContext({
     state: { data: { id: 'root' }, selectedIds: new Set() },
     findNode: (_root, id) => id === 'missing' ? null : { id },
     isDescendantOfLeft: id => id.startsWith('left-'),
+    findParent: (_root, id) => ({
+        'left-parent': { id: 'root' },
+        'left-child-a': { id: 'left-parent' },
+        'left-child-b': { id: 'left-parent' },
+        'left-grandchild': { id: 'left-child-a' },
+        'left-sibling-a': { id: 'left-shared-parent' },
+        'left-sibling-b': { id: 'left-shared-parent' },
+        'left-sibling-c': { id: 'left-shared-parent' },
+    })[id] || null,
 });
 vm.runInContext(`const MINDMAP_SUMMARY_MIN_NODES = 2; ${selectionSource}`, selectionContext);
 selectionContext.sameSide = new Set(['left-a', 'left-b', 'left-c']);
@@ -125,15 +164,167 @@ assert.equal(vm.runInContext('getMindMapSummarySelection(crossSide)', selectionC
     '跨侧选择必须被拒绝');
 assert.equal(vm.runInContext('getMindMapSummarySelection(withRoot)', selectionContext), null,
     '根卡片不能参与同侧总结');
+selectionContext.parentDominant = ['left-parent', 'left-child-a', 'left-grandchild'];
+selectionContext.siblingDominant = ['left-sibling-a', 'left-sibling-b', 'left-sibling-c'];
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext('getMindMapSummaryRelationProfile(parentDominant)', selectionContext))),
+    { parentChildCount: 2, siblingCount: 0, orientation: 'horizontal' },
+    '连续父子关系占优时应选择横向总结',
+);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext('getMindMapSummaryRelationProfile(siblingDominant)', selectionContext))),
+    { parentChildCount: 0, siblingCount: 3, orientation: 'vertical' },
+    '兄弟关系占优时应保留纵向总结',
+);
 
 const pathContext = vm.createContext({});
-vm.runInContext(pathSource, pathContext);
+vm.runInContext(`
+    const MINDMAP_SUMMARY_BRACE_OFFSET = 18;
+    const MINDMAP_SUMMARY_LABEL_GAP = 22;
+    const MINDMAP_SUMMARY_COLLISION_GAP = 14;
+    const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
+    const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
+    ${pathSource}
+`, pathContext);
 pathContext.bounds = { left: 100, top: 50, right: 300, bottom: 250 };
 const rightPath = vm.runInContext("getMindMapSummaryBracePath(bounds, 'right')", pathContext);
 const leftPath = vm.runInContext("getMindMapSummaryBracePath(bounds, 'left')", pathContext);
 assert.match(rightPath, /^M 318 42 C /, '右侧总结的大括号应从卡片包围盒右边开始');
 assert.match(leftPath, /^M 82 42 C /, '左侧总结的大括号应镜像放在卡片包围盒左边');
 assert.notEqual(rightPath, leftPath, '左右大括号路径不能使用相同方向');
+const topPath = vm.runInContext("getMindMapSummaryHorizontalBracePath(bounds, 'top')", pathContext);
+const bottomPath = vm.runInContext("getMindMapSummaryHorizontalBracePath(bounds, 'bottom')", pathContext);
+assert.match(topPath, /^M 92 32 C /, '上方横向大括号应从卡片包围盒左上方开始');
+assert.match(bottomPath, /^M 92 268 C /, '下方横向大括号应从卡片包围盒左下方开始');
+pathContext.rootRect = { top: 100, height: 100 };
+pathContext.topBounds = { top: 0, bottom: 80 };
+pathContext.bottomBounds = { top: 220, bottom: 300 };
+pathContext.middleBounds = { top: 100, bottom: 220 };
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext('getMindMapSummaryHorizontalPlacement(topBounds, rootRect)', pathContext))),
+    { placement: 'top', region: 'top' },
+    '成员全部位于根卡片上方时，总结应放在上方',
+);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext('getMindMapSummaryHorizontalPlacement(bottomBounds, rootRect)', pathContext))),
+    { placement: 'bottom', region: 'bottom' },
+    '成员全部位于根卡片下方时，总结应放在下方',
+);
+assert.equal(vm.runInContext('getMindMapSummaryHorizontalPlacement(middleBounds, rootRect).region', pathContext), 'middle',
+    '成员区域跨过根卡片中心线时应进入自动留位模式');
+assert.equal(
+    vm.runInContext("getMindMapSummaryHorizontalBraceY(bounds, 'top')", pathContext),
+    32,
+    '上方总结大括号应贴近所选卡片的上边缘',
+);
+assert.equal(
+    vm.runInContext("getMindMapSummaryHorizontalBraceY(bounds, 'bottom')", pathContext),
+    268,
+    '下方总结大括号应贴近所选卡片的下边缘',
+);
+pathContext.editorSize = { width: 140, height: 80 };
+const localBottomCandidate = vm.runInContext(
+    "getMindMapSummaryHorizontalCandidate(bounds, 'bottom', editorSize)",
+    pathContext,
+);
+pathContext.localBottomCandidate = localBottomCandidate;
+assert.equal(localBottomCandidate.braceY, 268,
+    '局部候选位置应继续以所选卡片下边缘为基准');
+assert.ok(localBottomCandidate.editorRect.top > pathContext.bounds.bottom,
+    '下方总结编辑框应位于大括号外侧');
+assert.ok(localBottomCandidate.requiredSpace > localBottomCandidate.editorRect.bottom - pathContext.bounds.bottom,
+    '所需空间应包含总结卡片外侧的安全间距');
+pathContext.wideGapAnchors = [{ distance: localBottomCandidate.requiredSpace + 40 }];
+pathContext.narrowGapAnchors = [{ distance: localBottomCandidate.requiredSpace - 35 }];
+assert.equal(
+    vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, wideGapAnchors).deficit', pathContext),
+    0,
+    '局部空白足够时不应改动导图布局',
+);
+assert.ok(Math.abs(
+    vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, narrowGapAnchors).deficit', pathContext) - 35
+) < 1e-9, '局部空白不足时只能补足缺少的空间');
+assert.equal(
+    vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, []).deficit', pathContext),
+    0,
+    '指定方向没有相邻卡片时应直接使用自由空间',
+);
+pathContext.preferredEvaluation = { placement: 'top', deficit: 90 };
+pathContext.freeAlternateEvaluation = { placement: 'bottom', deficit: 0 };
+assert.equal(
+    vm.runInContext("chooseMindMapSummaryHorizontalLayout('top', preferredEvaluation, freeAlternateEvaluation).placement", pathContext),
+    'bottom',
+    '首选方向空间不足而另一侧有空白时，应直接利用另一侧而不是重排',
+);
+pathContext.tighterTopEvaluation = { placement: 'top', deficit: 30 };
+pathContext.tighterBottomEvaluation = { placement: 'bottom', deficit: 70 };
+assert.equal(
+    vm.runInContext("chooseMindMapSummaryHorizontalLayout('bottom', tighterTopEvaluation, tighterBottomEvaluation).placement", pathContext),
+    'top',
+    '上下均不足时，应选择需要调整空白更少的一侧',
+);
+
+const canvasElement = {
+    offsetWidth: 400,
+    offsetHeight: 300,
+    getBoundingClientRect: () => ({ left: 100, top: 200, width: 800, height: 600 }),
+};
+const canvasContext = vm.createContext({
+    state: { view: { tx: -999, ty: -999, scale: 3 } },
+    document: { getElementById: id => id === 'canvas-layer' ? canvasElement : null },
+});
+vm.runInContext(canvasRectSource, canvasContext);
+canvasContext.cardElement = {
+    dataset: { nodeId: 'left-card' },
+    getBoundingClientRect: () => ({ left: 140, top: 260, width: 200, height: 100 }),
+};
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext('getMindMapCanvasRect(cardElement)', canvasContext))),
+    { id: 'left-card', left: 20, top: 30, right: 120, bottom: 80, width: 100, height: 50 },
+    '左侧总结成员的坐标应以画布实际原点和缩放为准，不受过期 state.view 影响',
+);
+
+const selectedCard = {};
+const selectedUnit = {
+    classList: { contains: name => name === 'child-unit' },
+    contains: item => item === selectedCard,
+    rect: { left: 0, top: 0, right: 100, bottom: 100 },
+};
+const obstacleUnit = {
+    classList: { contains: name => name === 'child-unit' },
+    contains: () => false,
+    rect: { left: 0, top: 120, right: 100, bottom: 200 },
+};
+const layoutContainer = {
+    children: [selectedUnit, obstacleUnit],
+    contains: item => item === selectedCard,
+};
+const layoutAnchorContext = vm.createContext({
+    document: {
+        getElementById: id => id === 'card-selected' ? selectedCard : null,
+        querySelectorAll: selector => selector === '.children-container' ? [layoutContainer] : [],
+    },
+    getMindMapCanvasRect: element => element.rect,
+});
+vm.runInContext(layoutAnchorSource, layoutAnchorContext);
+layoutAnchorContext.selectionBounds = { top: 0, bottom: 100 };
+layoutAnchorContext.obstacleUnit = obstacleUnit;
+assert.equal(
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds)[0].anchor === obstacleUnit", layoutAnchorContext),
+    true,
+    '总结位于成员下方时，应把占位加到最近的下方非成员兄弟之前',
+);
+assert.equal(
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds)[0].direction", layoutAnchorContext),
+    'before',
+    '下方障碍卡片应被布局占位向下推开',
+);
+layoutAnchorContext.unrelatedFootprint = { left: 200, right: 300 };
+assert.equal(
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, unrelatedFootprint).length", layoutAnchorContext),
+    0,
+    '水平方向不与总结卡片相交的分支不应触发额外留白',
+);
 
 const cleanupContext = vm.createContext({
     state: {

@@ -2559,11 +2559,21 @@ function getMindMapRelationPath(
 
 function getMindMapCanvasRect(element, view = state.view) {
     const rect = element.getBoundingClientRect();
-    const scale = view.scale || 1;
-    const left = (rect.left - view.tx) / scale;
-    const top = (rect.top - view.ty) / scale;
-    const width = rect.width / scale;
-    const height = rect.height / scale;
+    const canvasLayer = document.getElementById('canvas-layer');
+    const canvasRect = canvasLayer?.getBoundingClientRect();
+    const fallbackScale = view.scale || 1;
+    const scaleX = canvasLayer?.offsetWidth && canvasRect?.width
+        ? canvasRect.width / canvasLayer.offsetWidth
+        : fallbackScale;
+    const scaleY = canvasLayer?.offsetHeight && canvasRect?.height
+        ? canvasRect.height / canvasLayer.offsetHeight
+        : fallbackScale;
+    const canvasLeft = canvasRect?.left ?? view.tx;
+    const canvasTop = canvasRect?.top ?? view.ty;
+    const left = (rect.left - canvasLeft) / scaleX;
+    const top = (rect.top - canvasTop) / scaleY;
+    const width = rect.width / scaleX;
+    const height = rect.height / scaleY;
     return {
         id: element.dataset.nodeId,
         left,
@@ -3664,6 +3674,11 @@ function appendMindMapRelationsToCanvas(canvasNodes, canvasEdges) {
 const MINDMAP_SUMMARY_SVG_NS = 'http://www.w3.org/2000/svg';
 const MINDMAP_SUMMARY_MIN_NODES = 2;
 const MINDMAP_SUMMARY_TEXT_LIMIT = 2000;
+const MINDMAP_SUMMARY_BRACE_OFFSET = 18;
+const MINDMAP_SUMMARY_LABEL_GAP = 22;
+const MINDMAP_SUMMARY_COLLISION_GAP = 14;
+const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
+const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
 let summaryRenderFrame = null;
 
 function getMindMapSummaries() {
@@ -3708,6 +3723,32 @@ function getMindMapSummarySelection(nodeIds = state.selectedIds) {
     return { nodeIds: ids, side: Array.from(sides)[0] };
 }
 
+function getMindMapSummaryRelationProfile(nodeIds) {
+    const ids = Array.from(new Set(nodeIds || []));
+    const selectedIds = new Set(ids);
+    const siblingsByParent = new Map();
+    let parentChildCount = 0;
+
+    ids.forEach(nodeId => {
+        const parent = findParent(state.data, nodeId);
+        if (!parent) return;
+        if (selectedIds.has(parent.id)) parentChildCount++;
+        const siblings = siblingsByParent.get(parent.id) || [];
+        siblings.push(nodeId);
+        siblingsByParent.set(parent.id, siblings);
+    });
+
+    let siblingCount = 0;
+    siblingsByParent.forEach(siblings => {
+        siblingCount += siblings.length * (siblings.length - 1) / 2;
+    });
+    return {
+        parentChildCount,
+        siblingCount,
+        orientation: parentChildCount > siblingCount ? 'horizontal' : 'vertical'
+    };
+}
+
 function getMindMapSummaryBracePath(bounds, side) {
     const direction = side === 'left' ? -1 : 1;
     const x = side === 'left' ? bounds.left - 18 : bounds.right + 18;
@@ -3732,7 +3773,117 @@ function getMindMapSummaryBracePath(bounds, side) {
     ].join(' ');
 }
 
-function getMindMapSummaryGeometry(summary) {
+function getMindMapSummaryHorizontalBracePath(bounds, placement, braceY = null) {
+    const direction = placement === 'top' ? -1 : 1;
+    const y = Number.isFinite(braceY)
+        ? braceY
+        : (placement === 'top'
+            ? bounds.top - MINDMAP_SUMMARY_BRACE_OFFSET
+            : bounds.bottom + MINDMAP_SUMMARY_BRACE_OFFSET);
+    const left = bounds.left - 8;
+    const right = bounds.right + 8;
+    const middle = (left + right) / 2;
+    const width = Math.max(80, right - left);
+    const shoulder = Math.min(22, width * 0.18);
+    const depth = Math.min(18, Math.max(12, width * 0.08));
+    const outerY = y + direction * depth;
+    const tipY = y + direction * depth * 1.55;
+    const round = value => Math.round(value * 10) / 10;
+
+    return [
+        `M ${round(left)} ${round(y)}`,
+        `C ${round(left)} ${round(outerY)}, ${round(left + 4)} ${round(outerY)}, ${round(left + shoulder)} ${round(outerY)}`,
+        `L ${round(middle - shoulder)} ${round(outerY)}`,
+        `C ${round(middle - 5)} ${round(outerY)}, ${round(middle - 4)} ${round(tipY)}, ${round(middle)} ${round(tipY)}`,
+        `C ${round(middle + 4)} ${round(tipY)}, ${round(middle + 5)} ${round(outerY)}, ${round(middle + shoulder)} ${round(outerY)}`,
+        `L ${round(right - shoulder)} ${round(outerY)}`,
+        `C ${round(right - 4)} ${round(outerY)}, ${round(right)} ${round(outerY)}, ${round(right)} ${round(y)}`
+    ].join(' ');
+}
+
+function getMindMapSummaryHorizontalPlacement(bounds, rootRect) {
+    const rootCenterY = rootRect
+        ? rootRect.top + rootRect.height / 2
+        : (bounds.top + bounds.bottom) / 2;
+    if (bounds.bottom <= rootCenterY) return { placement: 'top', region: 'top' };
+    if (bounds.top >= rootCenterY) return { placement: 'bottom', region: 'bottom' };
+    const selectionCenterY = (bounds.top + bounds.bottom) / 2;
+    return {
+        placement: selectionCenterY <= rootCenterY ? 'top' : 'bottom',
+        region: 'middle'
+    };
+}
+
+function getMindMapSummaryHorizontalBraceY(bounds, placement) {
+    return placement === 'top'
+        ? bounds.top - MINDMAP_SUMMARY_BRACE_OFFSET
+        : bounds.bottom + MINDMAP_SUMMARY_BRACE_OFFSET;
+}
+
+function getMindMapSummaryHorizontalCandidate(bounds, placement, editorSize, labelOffset = 0) {
+    const width = Math.max(80, bounds.right - bounds.left + 16);
+    const depth = Math.min(18, Math.max(12, width * 0.08));
+    const direction = placement === 'top' ? -1 : 1;
+    const braceY = getMindMapSummaryHorizontalBraceY(bounds, placement);
+    const labelY = braceY + direction * (depth * 1.55 + MINDMAP_SUMMARY_LABEL_GAP + labelOffset);
+    const centerX = (bounds.left + bounds.right) / 2;
+    const editorWidth = Math.max(120, editorSize?.width || MINDMAP_SUMMARY_ESTIMATED_WIDTH);
+    const editorHeight = Math.max(60, editorSize?.height || MINDMAP_SUMMARY_ESTIMATED_HEIGHT);
+    const editorRect = {
+        left: centerX - editorWidth / 2,
+        right: centerX + editorWidth / 2,
+        top: placement === 'top' ? labelY - editorHeight : labelY,
+        bottom: placement === 'top' ? labelY : labelY + editorHeight
+    };
+    const footprint = {
+        left: Math.min(bounds.left - 8, editorRect.left) - MINDMAP_SUMMARY_COLLISION_GAP,
+        right: Math.max(bounds.right + 8, editorRect.right) + MINDMAP_SUMMARY_COLLISION_GAP
+    };
+    const requiredSpace = placement === 'top'
+        ? bounds.top - editorRect.top + MINDMAP_SUMMARY_COLLISION_GAP
+        : editorRect.bottom - bounds.bottom + MINDMAP_SUMMARY_COLLISION_GAP;
+    return { braceY, labelY, editorRect, footprint, requiredSpace };
+}
+
+function getMindMapSummaryCollisionOffset(candidate, placement, occupiedRects) {
+    let offset = 0;
+    (occupiedRects || []).forEach(rect => {
+        const overlapsHorizontally = candidate.editorRect.left < rect.right + MINDMAP_SUMMARY_COLLISION_GAP
+            && candidate.editorRect.right > rect.left - MINDMAP_SUMMARY_COLLISION_GAP;
+        if (!overlapsHorizontally) return;
+        if (placement === 'top') {
+            if (candidate.editorRect.top < rect.bottom + MINDMAP_SUMMARY_COLLISION_GAP
+                && candidate.editorRect.bottom > rect.top - MINDMAP_SUMMARY_COLLISION_GAP) {
+                offset = Math.max(offset, candidate.editorRect.bottom - rect.top + MINDMAP_SUMMARY_COLLISION_GAP);
+            }
+        } else if (candidate.editorRect.top < rect.bottom + MINDMAP_SUMMARY_COLLISION_GAP
+            && candidate.editorRect.bottom > rect.top - MINDMAP_SUMMARY_COLLISION_GAP) {
+            offset = Math.max(offset, rect.bottom - candidate.editorRect.top + MINDMAP_SUMMARY_COLLISION_GAP);
+        }
+    });
+    return offset;
+}
+
+function chooseMindMapSummaryHorizontalLayout(preferredPlacement, topEvaluation, bottomEvaluation) {
+    const preferred = preferredPlacement === 'top' ? topEvaluation : bottomEvaluation;
+    const alternate = preferredPlacement === 'top' ? bottomEvaluation : topEvaluation;
+    if (preferred.deficit <= 0) return preferred;
+    if (alternate.deficit <= 0) return alternate;
+    return alternate.deficit < preferred.deficit ? alternate : preferred;
+}
+
+function getMindMapSummaryLayoutDeficit(requiredSpace, anchors) {
+    if (!anchors || anchors.length === 0) {
+        return { availableSpace: Number.POSITIVE_INFINITY, deficit: 0 };
+    }
+    const availableSpace = Math.max(0, Math.min(...anchors.map(anchor => anchor.distance)));
+    return {
+        availableSpace,
+        deficit: Math.max(0, requiredSpace - availableSpace)
+    };
+}
+
+function getMindMapSummaryGeometry(summary, layoutPlan = null) {
     const selection = getMindMapSummarySelection(summary?.nodeIds || []);
     if (!selection) return null;
     const cardRects = selection.nodeIds
@@ -3747,15 +3898,47 @@ function getMindMapSummaryGeometry(summary) {
         right: Math.max(...cardRects.map(rect => rect.right)),
         bottom: Math.max(...cardRects.map(rect => rect.bottom))
     };
+    const orientation = layoutPlan?.orientation
+        || getMindMapSummaryRelationProfile(selection.nodeIds).orientation;
+    if (orientation === 'horizontal') {
+        const rootCard = document.getElementById(`card-${state.data.id}`);
+        const rootRect = rootCard ? getMindMapCanvasRect(rootCard) : null;
+        const placementState = getMindMapSummaryHorizontalPlacement(bounds, rootRect);
+        const placement = layoutPlan?.placement || placementState.placement;
+        const region = layoutPlan?.region || 'local';
+        const width = Math.max(80, bounds.right - bounds.left + 16);
+        const depth = Math.min(18, Math.max(12, width * 0.08));
+        const braceY = Number.isFinite(layoutPlan?.braceY)
+            ? layoutPlan.braceY
+            : getMindMapSummaryHorizontalBraceY(bounds, placement);
+        const direction = placement === 'top' ? -1 : 1;
+        const labelOffset = layoutPlan?.labelOffset || 0;
+        return {
+            bounds,
+            side: selection.side,
+            orientation,
+            placement,
+            region,
+            braceY,
+            path: getMindMapSummaryHorizontalBracePath(bounds, placement, braceY),
+            labelX: (bounds.left + bounds.right) / 2,
+            labelY: braceY + direction * (depth * 1.55 + MINDMAP_SUMMARY_LABEL_GAP + labelOffset)
+        };
+    }
     const direction = selection.side === 'left' ? -1 : 1;
-    const braceX = selection.side === 'left' ? bounds.left - 18 : bounds.right + 18;
+    const braceX = selection.side === 'left'
+        ? bounds.left - MINDMAP_SUMMARY_BRACE_OFFSET
+        : bounds.right + MINDMAP_SUMMARY_BRACE_OFFSET;
     const height = Math.max(80, bounds.bottom - bounds.top + 16);
     const depth = Math.min(18, Math.max(12, height * 0.08));
     return {
         bounds,
         side: selection.side,
+        orientation,
+        placement: selection.side,
+        region: 'side',
         path: getMindMapSummaryBracePath(bounds, selection.side),
-        labelX: braceX + direction * (depth * 1.55 + 22),
+        labelX: braceX + direction * (depth * 1.55 + MINDMAP_SUMMARY_LABEL_GAP),
         labelY: (bounds.top + bounds.bottom) / 2
     };
 }
@@ -3966,6 +4149,178 @@ function updateMindMapSummarySelectionAction() {
     action.style.top = `${Math.round(actionTop)}px`;
 }
 
+function clearMindMapSummaryLayoutSpaces() {
+    const spacedUnits = document.querySelectorAll('.child-unit.summary-space-before, .child-unit.summary-space-after');
+    const previousSpaces = new Map();
+    spacedUnits.forEach(unit => {
+        previousSpaces.set(unit, {
+            before: Number.parseFloat(unit.style.getPropertyValue('--summary-space-before')) || 0,
+            after: Number.parseFloat(unit.style.getPropertyValue('--summary-space-after')) || 0
+        });
+        unit.classList.remove('summary-space-before', 'summary-space-after');
+        unit.style.removeProperty('--summary-space-before');
+        unit.style.removeProperty('--summary-space-after');
+    });
+    return previousSpaces;
+}
+
+function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, footprint = null) {
+    const cards = Array.from(new Set(nodeIds || []))
+        .map(nodeId => document.getElementById(`card-${nodeId}`))
+        .filter(Boolean);
+    if (cards.length === 0) return [];
+
+    const boundaryCandidates = [];
+    document.querySelectorAll('.children-container').forEach(container => {
+        if (!cards.some(card => container.contains(card))) return;
+        Array.from(container.children).forEach(unit => {
+            if (!unit.classList.contains('child-unit')) return;
+            if (cards.some(card => unit.contains(card))) return;
+            const rect = getMindMapCanvasRect(unit);
+            if (footprint && (rect.right <= footprint.left || rect.left >= footprint.right)) return;
+            const distance = placement === 'top'
+                ? bounds.top - rect.bottom
+                : rect.top - bounds.bottom;
+            if (distance < -0.5) return;
+            boundaryCandidates.push({
+                anchor: unit,
+                direction: placement === 'top' ? 'after' : 'before',
+                distance
+            });
+        });
+    });
+    if (boundaryCandidates.length > 0) {
+        const nearestDistance = Math.min(...boundaryCandidates.map(candidate => candidate.distance));
+        const nearestCandidates = boundaryCandidates.filter(candidate => candidate.distance <= nearestDistance + 0.5);
+        return nearestCandidates.filter(candidate => !nearestCandidates.some(other =>
+            other !== candidate && candidate.anchor.contains(other.anchor)
+        ));
+    }
+    return [];
+}
+
+function getMindMapSummaryEditorCanvasSize(summaryId) {
+    const editor = document.querySelector(`.summary-editor[data-summary-id="${summaryId}"]`);
+    if (!editor || editor.getClientRects().length === 0) {
+        return {
+            width: MINDMAP_SUMMARY_ESTIMATED_WIDTH,
+            height: MINDMAP_SUMMARY_ESTIMATED_HEIGHT
+        };
+    }
+    const rect = getMindMapCanvasRect(editor);
+    return {
+        width: Math.max(120, rect.width),
+        height: Math.max(60, rect.height)
+    };
+}
+
+function prepareMindMapSummaryLayout(summaries) {
+    const previousSpaces = clearMindMapSummaryLayoutSpaces();
+    const plans = new Map();
+    const spacingRequests = new Map();
+    const occupiedSummaryRects = [];
+
+    summaries.forEach(summary => {
+        if (getMindMapSummaryRelationProfile(summary.nodeIds).orientation !== 'vertical') return;
+        const editor = document.querySelector(`.summary-editor[data-summary-id="${summary.id}"]`);
+        if (editor && editor.getClientRects().length > 0) {
+            occupiedSummaryRects.push(getMindMapCanvasRect(editor));
+        }
+    });
+
+    summaries.forEach(summary => {
+        const geometry = getMindMapSummaryGeometry(summary);
+        if (!geometry || geometry.orientation !== 'horizontal') return;
+        const editorSize = getMindMapSummaryEditorCanvasSize(summary.id);
+        const evaluatePlacement = placement => {
+            let labelOffset = 0;
+            let candidate = getMindMapSummaryHorizontalCandidate(
+                geometry.bounds,
+                placement,
+                editorSize,
+                labelOffset
+            );
+            for (let index = 0; index <= occupiedSummaryRects.length; index++) {
+                const collisionOffset = getMindMapSummaryCollisionOffset(
+                    candidate,
+                    placement,
+                    occupiedSummaryRects
+                );
+                if (collisionOffset <= 0) break;
+                labelOffset += collisionOffset;
+                candidate = getMindMapSummaryHorizontalCandidate(
+                    geometry.bounds,
+                    placement,
+                    editorSize,
+                    labelOffset
+                );
+            }
+            const anchors = getMindMapSummaryLayoutAnchors(
+                summary.nodeIds,
+                placement,
+                geometry.bounds,
+                candidate.footprint
+            );
+            const layoutSpace = getMindMapSummaryLayoutDeficit(candidate.requiredSpace, anchors);
+            return {
+                orientation: 'horizontal',
+                placement,
+                region: 'local',
+                labelOffset,
+                candidate,
+                anchors,
+                availableSpace: layoutSpace.availableSpace,
+                deficit: layoutSpace.deficit
+            };
+        };
+        const topEvaluation = evaluatePlacement('top');
+        const bottomEvaluation = evaluatePlacement('bottom');
+        const chosen = chooseMindMapSummaryHorizontalLayout(
+            geometry.placement,
+            topEvaluation,
+            bottomEvaluation
+        );
+        plans.set(summary.id, {
+            orientation: 'horizontal',
+            placement: chosen.placement,
+            region: 'local',
+            labelOffset: chosen.labelOffset
+        });
+        occupiedSummaryRects.push(chosen.candidate.editorRect);
+
+        if (chosen.deficit <= 0) return;
+        chosen.anchors.forEach(({ anchor, direction }) => {
+            const request = spacingRequests.get(anchor) || { before: 0, after: 0 };
+            request[direction] = Math.max(request[direction], Math.ceil(chosen.deficit));
+            spacingRequests.set(anchor, request);
+        });
+    });
+
+    spacingRequests.forEach((request, anchor) => {
+        if (request.before > 0) {
+            anchor.style.setProperty('--summary-space-before', `${request.before}px`);
+            anchor.classList.add('summary-space-before');
+        }
+        if (request.after > 0) {
+            anchor.style.setProperty('--summary-space-after', `${request.after}px`);
+            anchor.classList.add('summary-space-after');
+        }
+    });
+
+    const layoutChanged = previousSpaces.size !== spacingRequests.size
+        || Array.from(new Set([...previousSpaces.keys(), ...spacingRequests.keys()])).some(anchor => {
+            const previous = previousSpaces.get(anchor) || { before: 0, after: 0 };
+            const next = spacingRequests.get(anchor) || { before: 0, after: 0 };
+            return previous.before !== next.before || previous.after !== next.after;
+        });
+    if (layoutChanged) {
+        stabilizeRoot();
+        scheduleRenderMindMapRelations();
+        scheduleRenderMindMapSummaries();
+    }
+    return plans;
+}
+
 function renderMindMapSummaries() {
     summaryRenderFrame = null;
     const braceLayer = $('#summary-brace-layer');
@@ -3979,8 +4334,10 @@ function renderMindMapSummaries() {
     }
     updateMindMapSummaryMemberHighlights();
     const visibleSummaryIds = new Set();
+    const layoutPlans = prepareMindMapSummaryLayout(summaries);
+    let shouldRemeasureLayout = false;
     summaries.forEach(summary => {
-        const geometry = getMindMapSummaryGeometry(summary);
+        const geometry = getMindMapSummaryGeometry(summary, layoutPlans.get(summary.id));
         if (!geometry) return;
         visibleSummaryIds.add(summary.id);
 
@@ -3999,7 +4356,10 @@ function renderMindMapSummaries() {
             editor = createMindMapSummaryEditor(summary.id);
             labelLayer.appendChild(editor);
         }
-        editor.classList.toggle('left-side', geometry.side === 'left');
+        editor.classList.toggle('left-side', geometry.orientation === 'vertical' && geometry.side === 'left');
+        editor.classList.toggle('horizontal', geometry.orientation === 'horizontal');
+        editor.classList.toggle('placement-top', geometry.orientation === 'horizontal' && geometry.placement === 'top');
+        editor.classList.toggle('placement-bottom', geometry.orientation === 'horizontal' && geometry.placement === 'bottom');
         editor.classList.toggle('active', summary.id === state.selectedSummaryId);
         editor.classList.toggle('simple', Boolean(summary.isSimple));
         editor.style.left = `${geometry.labelX}px`;
@@ -4035,6 +4395,7 @@ function renderMindMapSummaries() {
             body.innerHTML = renderMarkdown(summaryContent);
             body.dataset.summaryContent = summaryContent;
             processRichContent(body);
+            if (geometry.orientation === 'horizontal') shouldRemeasureLayout = true;
         }
     });
 
@@ -4043,6 +4404,7 @@ function renderMindMapSummaries() {
     });
     updateMindMapSummarySelectionAction();
     updateToolbar();
+    if (shouldRemeasureLayout) scheduleRenderMindMapSummaries();
 }
 
 function scheduleRenderMindMapSummaries() {
