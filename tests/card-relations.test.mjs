@@ -9,6 +9,8 @@ const [html, mindMap] = await Promise.all([
 
 assert.match(html, /id=["']btn-add-relation["'][^>]*disabled/,
     '工具栏应提供默认禁用的建立关联按钮');
+assert.match(html, /data-action=["']add-relation["'][^>]*style=["'][^"']*display\s*:\s*none/,
+    '右键菜单应提供默认隐藏的添加关联入口');
 assert.match(html, /<svg[^>]*id=["']relation-layer["']/,
     '画布变换层中应包含 SVG 关联线图层');
 assert.match(html, /\.relation-hit\s*\{[^}]*pointer-events:\s*stroke/s,
@@ -32,6 +34,14 @@ assert.match(mindMap, /relations:\s*\[\]/,
     '新建思维导图应初始化关联数据集合');
 assert.match(mindMap, /state\.selectedIds\.size\s*!==\s*2/,
     '只有恰好选择两张卡片时才能建立关联');
+assert.match(mindMap, /const canAddRelation\s*=\s*state\.selectedIds\.size\s*===\s*2;[\s\S]*?addRelationItem\.style\.display\s*=\s*canAddRelation\s*\?\s*''\s*:\s*'none'/,
+    '右键菜单仅应在恰好选中两张卡片时显示添加关联入口');
+assert.match(mindMap, /\$\('#btn-add-relation'\)\.onclick\s*=\s*event\s*=>\s*addRelationBetweenSelectedCards\(\{[\s\S]*?x:\s*event\.clientX,[\s\S]*?y:\s*event\.clientY[\s\S]*?\}\)/,
+    '工具栏建立关联时应传递鼠标坐标');
+assert.match(mindMap, /if \(action === 'add-relation'\)\s*\{[\s\S]*?addRelationBetweenSelectedCards\(\{\s*x:\s*e\.clientX,\s*y:\s*e\.clientY\s*\}\);[\s\S]*?contextMenu\.classList\.remove\('active'\);[\s\S]*?return;/,
+    '右键菜单应传递鼠标坐标、复用现有的添加关联逻辑并在执行后关闭');
+assert.match(mindMap, /function addRelationBetweenSelectedCards\(clientPoint\s*=\s*null\)[\s\S]*?openMindMapRelationEditor\(relation\.id,\s*clientPoint\)/,
+    '首次建立关联后，关联编辑框应定位到触发鼠标附近');
 assert.match(mindMap, /isDuplicateMindMapRelation\(sourceId, targetId\)/,
     '无向关联应阻止反向重复连接');
 assert.match(mindMap, /ensureMindMapRelations\(\)\.push\(relation\)[\s\S]*?recordHistory\(\)/,

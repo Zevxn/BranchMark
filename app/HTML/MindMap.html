@@ -1537,6 +1537,12 @@
         .menu-item.has-submenu:hover .submenu {     /* 关键：悬停显示子菜单 */
             display: block;
         }
+        .context-menu.submenu-opens-left .submenu {
+            left: auto;
+            right: 100%;
+            margin-left: 0;
+            margin-right: 4px;
+        }
         .submenu::before {      /* 这就像一座桥，连接了父菜单和子菜单，填补了中间的缝隙 */
             content: '';
             position: absolute;
@@ -1551,6 +1557,10 @@
             
             background: transparent; 
             z-index: -1; 
+        }
+        .context-menu.submenu-opens-left .submenu::before {
+            left: auto;
+            right: -20px;
         }
         .color-grid {
             display: grid;
@@ -1986,6 +1996,9 @@
         </div>
         <div class="menu-item" data-action="delete" style="color:#ff4d4f" >
             <i class="ri-delete-bin-line"  style="color:#ff4d4f"></i> 删除节点
+        </div>
+        <div class="menu-item" data-action="add-relation" style="display:none">
+            <i class="ri-links-line"></i> 添加关联
         </div>
         <div class="menu-divider"></div>
 

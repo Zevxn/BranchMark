@@ -674,7 +674,10 @@ function initializeMapToolbar() {
             focusMindMapNodeTopic(newNode.id);
         } 
     };
-    $('#btn-add-relation').onclick = addRelationBetweenSelectedCards;
+    $('#btn-add-relation').onclick = event => addRelationBetweenSelectedCards({
+        x: event.clientX,
+        y: event.clientY
+    });
     $('#btn-add-summary').onclick = addSummaryForSelectedCards;
     $('#btn-delete').onclick=()=>{ 
         syncCurrentInput(); 
@@ -819,6 +822,60 @@ function initializeMapToolbar() {
 // =============================================================================
 // #region 右键菜单
 // =============================================================================
+function getMindMapContextSubmenuSize(submenu) {
+    if (!submenu) return { width: 0, height: 0 };
+    const previousDisplay = submenu.style.display;
+    const previousVisibility = submenu.style.visibility;
+    submenu.style.display = 'block';
+    submenu.style.visibility = 'hidden';
+    const { width, height } = submenu.getBoundingClientRect();
+    submenu.style.display = previousDisplay;
+    submenu.style.visibility = previousVisibility;
+    return { width, height };
+}
+
+function positionMindMapContextMenu(menu, clientX, clientY) {
+    const viewportMargin = 8;
+    const submenu = menu.querySelector('.menu-item.has-submenu > .submenu');
+    menu.classList.remove('submenu-opens-left');
+    if (submenu) {
+        submenu.style.top = '';
+        submenu.style.bottom = '';
+    }
+    menu.classList.add('active');
+
+    const menuWidth = menu.offsetWidth;
+    const menuHeight = menu.offsetHeight;
+    const x = Math.min(
+        Math.max(Number.isFinite(clientX) ? clientX : viewportMargin, viewportMargin),
+        Math.max(viewportMargin, window.innerWidth - menuWidth - viewportMargin)
+    );
+    const y = Math.min(
+        Math.max(Number.isFinite(clientY) ? clientY : viewportMargin, viewportMargin),
+        Math.max(viewportMargin, window.innerHeight - menuHeight - viewportMargin)
+    );
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    if (!submenu) return;
+    const { width: submenuWidth, height: submenuHeight } = getMindMapContextSubmenuSize(submenu);
+    const menuRect = menu.getBoundingClientRect();
+    const opensRight = menuRect.right + 4 + submenuWidth <= window.innerWidth - viewportMargin;
+    const opensLeft = menuRect.left - 4 - submenuWidth >= viewportMargin;
+    if (!opensRight && (opensLeft || menuRect.left > window.innerWidth - menuRect.right)) {
+        menu.classList.add('submenu-opens-left');
+    }
+
+    const parentRect = submenu.parentElement.getBoundingClientRect();
+    const preferredTop = parentRect.top - 40;
+    const top = Math.min(
+        Math.max(preferredTop, viewportMargin),
+        Math.max(viewportMargin, window.innerHeight - submenuHeight - viewportMargin)
+    );
+    submenu.style.top = `${top - parentRect.top}px`;
+    submenu.style.bottom = 'auto';
+}
+
 function initializeMapContextMenu() {
     const contextMenu = document.getElementById('contextMenu');
     
@@ -831,6 +888,7 @@ function initializeMapContextMenu() {
         const collapseItem=contextMenu.querySelector('.menu-item[data-action="collapse"]');
         const toStandardItem=contextMenu.querySelector('.menu-item[data-action="to-standard"]');
         const toSimpleItem=contextMenu.querySelector('.menu-item[data-action="to-simple"]');
+        const addRelationItem=contextMenu.querySelector('.menu-item[data-action="add-relation"]');
         const card = e.target.closest('.node-card');
         const node = findNode(state.data, card.dataset.nodeId);
         const isCompactCollapsed = isTemporarilyCollapsed(node);
@@ -839,40 +897,33 @@ function initializeMapContextMenu() {
             contextMenu.classList.remove('active');
             return;
         }
-        const menuWidth = 140;
-        let menuHeight = 410;
         if (node.isSimple){     // 便利贴模式
             toStandardItem.style.display='block';
             toSimpleItem.style.display='none';
             expandItem.style.display='none';
             collapseItem.style.display='none';
-            menuHeight=287;
         }else if (isCompactCollapsed){ // 临时精简视图不允许暗中修改持久折叠状态
             toStandardItem.style.display='none';
             toSimpleItem.style.display='none';
             expandItem.style.display='none';
             collapseItem.style.display='none';
-            menuHeight=247;
         }else{                  // 标准卡片模式
             if (node.contentCollapsed){ // 折叠状态
                 toStandardItem.style.display='none';
                 toSimpleItem.style.display='none';
                 collapseItem.style.display='none';
                 expandItem.style.display=card.classList.contains('has-content')?'block':'none';
-                menuHeight=card.classList.contains('has-content')?287:247;
             }else{      // 展开状态
                 if (card.classList.contains('topic-empty')){
                     toStandardItem.style.display='none';
                     toSimpleItem.style.display='none';
                     expandItem.style.display='none';
                     collapseItem.style.display='none';
-                    menuHeight=247;
                 }else{
                     toStandardItem.style.display='none';
                     toSimpleItem.style.display='block';
                     expandItem.style.display='none';
                     collapseItem.style.display=card.classList.contains('has-content')?'block':'none';
-                    menuHeight=card.classList.contains('has-content')?319:287;
                 }
                 
             }
@@ -888,17 +939,10 @@ function initializeMapContextMenu() {
             updateSelection();
         }
 
-        // 位置计算
-        let x = e.clientX;
-        let y = e.clientY;
-
-
-        if (x + menuWidth > window.innerWidth) x -= menuWidth;
-        if (y + menuHeight > window.innerHeight) y -= menuHeight;
-
-        contextMenu.style.left = x + 'px';
-        contextMenu.style.top = y + 'px';
-        contextMenu.classList.add('active');
+        // 右击双选中的任一卡片时保留双选，并提供与工具栏一致的关联入口。
+        const canAddRelation = state.selectedIds.size === 2;
+        addRelationItem.style.display = canAddRelation ? '' : 'none';
+        positionMindMapContextMenu(contextMenu, e.clientX, e.clientY);
     });
 
     // 2. 菜单动作处理
@@ -931,6 +975,11 @@ function initializeMapContextMenu() {
         }
         if (action === 'paste') {
             pasteNodesToSelection();
+            contextMenu.classList.remove('active');
+            return;
+        }
+        if (action === 'add-relation') {
+            addRelationBetweenSelectedCards({ x: e.clientX, y: e.clientY });
             contextMenu.classList.remove('active');
             return;
         }
@@ -1054,14 +1103,7 @@ function initializeEditorContextMenu() {
         savedTextSnapshot = textarea.value;
         textarea.focus({ preventScroll: true });
 
-        let x = e.clientX, y = e.clientY;
-        const w = 180, h = 283; 
-        if (x + w > window.innerWidth) x -= w;
-        if (y + h > window.innerHeight) y -= h;
-
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.classList.add('active');
+        positionMindMapContextMenu(menu, e.clientX, e.clientY);
     });
 
     // --- 2. 辅助：执行动作 ---
@@ -2417,7 +2459,7 @@ function isDuplicateMindMapRelation(sourceId, targetId) {
     );
 }
 
-function addRelationBetweenSelectedCards() {
+function addRelationBetweenSelectedCards(clientPoint = null) {
     if (state.selectedIds.size !== 2) return;
     const [sourceId, targetId] = Array.from(state.selectedIds);
     if (sourceId === targetId || !findNode(state.data, sourceId) || !findNode(state.data, targetId)) return;
@@ -2443,7 +2485,7 @@ function addRelationBetweenSelectedCards() {
     updateSelection();
     syncMindMapRelationNavigationButtons();
     scheduleRenderMindMapRelations();
-    openMindMapRelationEditor(relation.id);
+    openMindMapRelationEditor(relation.id, clientPoint);
     if (typeof showTopToast === 'function') showTopToast('🔗 已建立卡片关联');
 }
 
