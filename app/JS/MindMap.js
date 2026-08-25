@@ -1373,6 +1373,9 @@ function initializeMapClickEvents() {
     document.addEventListener('click', (e) => {
         const t = e.target;
         if(!t.closest('#btn-color') && !t.closest('.color-popup')) $('#colorPopup').classList.remove('show');
+        if (!t.closest('[data-action="navigate-relation"]') && !t.closest('#relationNavigationMenu')) {
+            closeMindMapRelationNavigationMenu();
+        }
         const foldBtn = t.closest('.fold-btn');
         if(foldBtn) {
             const action = foldBtn.dataset.action;
@@ -1390,6 +1393,12 @@ function initializeMapClickEvents() {
                 mapSearchState.revealedNodeIds.delete(n.id);
                 n.folded = !n.folded; recordHistory(); updateChildrenDOM(n.id); return;
             }
+        }
+        const relationNavigationTrigger = t.closest('[data-action="navigate-relation"]');
+        if(relationNavigationTrigger) {
+            const card = relationNavigationTrigger.closest('.node-card');
+            if (card) openMindMapRelationNavigationMenu(card.dataset.nodeId, relationNavigationTrigger);
+            return;
         }
         if(t.dataset.action === 'toggle-simple') {
             syncCurrentInput();
@@ -2117,6 +2126,143 @@ function getMindMapRelationLabel(relation) {
     return String(relation?.label || '').slice(0, 80);
 }
 
+function getMindMapRelatedCardItems(nodeId) {
+    return getMindMapRelations().flatMap(relation => {
+        let targetId = null;
+        if (relation.sourceId === nodeId) targetId = relation.targetId;
+        else if (relation.targetId === nodeId) targetId = relation.sourceId;
+        if (!targetId) return [];
+        const targetNode = findNode(state.data, targetId);
+        if (!targetNode) return [];
+        const topic = String(targetNode.topic || '').replace(/\s+/g, ' ').trim();
+        return [{
+            relationId: relation.id,
+            targetId,
+            topic: topic || '未命名卡片',
+            label: getMindMapRelationLabel(relation).trim()
+        }];
+    });
+}
+
+function getMindMapNodePath(nodeId) {
+    const path = [];
+    let current = findNode(state.data, nodeId);
+    while (current) {
+        path.unshift(current);
+        if (current.id === state.data.id) return path;
+        current = findParent(state.data, current.id);
+    }
+    return [];
+}
+
+function closeMindMapRelationNavigationMenu() {
+    const menu = $('#relationNavigationMenu');
+    if (!menu) return;
+    menu.classList.remove('active');
+    menu.setAttribute('aria-hidden', 'true');
+    menu.dataset.sourceNodeId = '';
+}
+
+function positionMindMapRelationNavigationMenu(anchor) {
+    const menu = $('#relationNavigationMenu');
+    if (!menu || !anchor) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const margin = 10;
+    const width = menu.offsetWidth || 300;
+    const height = menu.offsetHeight || 240;
+    let left = anchorRect.left + anchorRect.width / 2 - width / 2;
+    let top = anchorRect.bottom + 8;
+    left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+    if (top + height > window.innerHeight - margin) {
+        top = Math.max(margin, anchorRect.top - height - 8);
+    }
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+}
+
+function openMindMapRelationNavigationMenu(nodeId, anchor) {
+    const menu = $('#relationNavigationMenu');
+    const list = $('#relationNavigationList');
+    const count = $('#relationNavigationCount');
+    if (!menu || !list || !count) return;
+    const items = getMindMapRelatedCardItems(nodeId);
+    if (items.length === 0) {
+        closeMindMapRelationNavigationMenu();
+        return;
+    }
+
+    list.replaceChildren();
+    items.forEach(item => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'relation-navigation-item';
+        button.dataset.targetNodeId = item.targetId;
+        button.setAttribute('role', 'menuitem');
+
+        const title = document.createElement('span');
+        title.className = 'relation-navigation-item-title';
+        title.textContent = item.topic;
+        button.appendChild(title);
+
+        const details = [];
+        if (item.label) details.push(item.label);
+        if (!document.getElementById(`card-${item.targetId}`)) details.push('当前已折叠');
+        if (details.length > 0) {
+            const meta = document.createElement('span');
+            meta.className = 'relation-navigation-item-meta';
+            meta.textContent = details.join(' · ');
+            button.appendChild(meta);
+        }
+        list.appendChild(button);
+    });
+
+    count.textContent = String(items.length);
+    menu.dataset.sourceNodeId = nodeId;
+    menu.classList.add('active');
+    menu.setAttribute('aria-hidden', 'false');
+    positionMindMapRelationNavigationMenu(anchor);
+}
+
+function syncMindMapRelationNavigationButtons() {
+    document.querySelectorAll('[data-action="navigate-relation"]').forEach(button => {
+        const nodeId = button.closest('.node-card')?.dataset.nodeId;
+        const count = nodeId ? getMindMapRelatedCardItems(nodeId).length : 0;
+        button.hidden = count === 0;
+        button.title = count > 0 ? `查看关联卡片（${count}）` : '查看关联卡片';
+    });
+}
+
+function jumpToMindMapRelatedCard(targetId) {
+    const targetNode = findNode(state.data, targetId);
+    if (!targetNode) return;
+    closeMindMapRelationNavigationMenu();
+
+    if (!document.getElementById(`card-${targetId}`)) {
+        const path = getMindMapNodePath(targetId);
+        if (path.length === 0) return;
+        clearMapSearchReveal();
+        path.slice(1, -1).forEach(node => mapSearchState.revealedNodeIds.add(node.id));
+        const rootChild = path[1];
+        if (rootChild) {
+            mapSearchState.revealedRootDirections.add(rootChild.dir === 'left' ? 'left' : 'right');
+        }
+        renderTree();
+    }
+
+    clearSelectedMindMapRelation();
+    clearSelectedMindMapSummary();
+    state.selectedIds.clear();
+    state.selectedIds.add(targetId);
+    updateSelection();
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        const card = document.getElementById(`card-${targetId}`);
+        if (!card) return;
+        centerMapNodeInVisibleArea(card);
+        pulseMapSearchTarget(card);
+    }));
+}
+
 function getMindMapNodeLabel(nodeId) {
     const node = findNode(state.data, nodeId);
     const label = String(node?.topic || '').replace(/\s+/g, ' ').trim();
@@ -2256,7 +2402,12 @@ function removeMindMapRelationsForNodes(nodeIds) {
         state.selectedRelationId = null;
         closeMindMapRelationEditor();
     }
-    return state.data.relations.length !== previousLength;
+    const changed = state.data.relations.length !== previousLength;
+    if (changed) {
+        closeMindMapRelationNavigationMenu();
+        syncMindMapRelationNavigationButtons();
+    }
+    return changed;
 }
 
 function isDuplicateMindMapRelation(sourceId, targetId) {
@@ -2290,6 +2441,7 @@ function addRelationBetweenSelectedCards() {
     state.selectedIds.clear();
     recordHistory();
     updateSelection();
+    syncMindMapRelationNavigationButtons();
     scheduleRenderMindMapRelations();
     openMindMapRelationEditor(relation.id);
     if (typeof showTopToast === 'function') showTopToast('🔗 已建立卡片关联');
@@ -2304,6 +2456,8 @@ function deleteSelectedMindMapRelation() {
     state.selectedSummaryId = null;
     closeMindMapRelationEditor();
     if (state.data.relations.length !== previousLength) {
+        closeMindMapRelationNavigationMenu();
+        syncMindMapRelationNavigationButtons();
         recordHistory();
         if (typeof showTopToast === 'function') showTopToast('🗑️ 已删除卡片关联');
     }
@@ -2592,7 +2746,8 @@ function getMindMapRelationSideCandidates(
     sourceReservedSides = new Set(),
     targetReservedSides = new Set(),
     sourcePortContext = null,
-    targetPortContext = null
+    targetPortContext = null,
+    terminalObstacles = []
 ) {
     const sides = ['left', 'right', 'top', 'bottom'];
     const sourceCenter = { x: sourceRect.left + sourceRect.width / 2, y: sourceRect.top + sourceRect.height / 2 };
@@ -2601,6 +2756,8 @@ function getMindMapRelationSideCandidates(
     const dy = targetCenter.y - sourceCenter.y;
     const distance = Math.max(1, Math.hypot(dx, dy));
     const sidePairCandidates = [];
+    const sourceTerminalObstacles = terminalObstacles.filter(obstacle => obstacle.id !== sourceRect.id);
+    const targetTerminalObstacles = terminalObstacles.filter(obstacle => obstacle.id !== targetRect.id);
 
     sides.forEach(sourceSide => {
         sides.forEach(targetSide => {
@@ -2610,14 +2767,22 @@ function getMindMapRelationSideCandidates(
                 targetRect,
                 MINDMAP_RELATION_SOURCE_CLEARANCE,
                 sourcePortContext
-            );
+            ).filter(candidate => isMindMapRelationSegmentClear(
+                candidate.port,
+                candidate.routePoint,
+                sourceTerminalObstacles
+            ));
             const targetPorts = getMindMapRelationPortCandidates(
                 targetRect,
                 targetSide,
                 sourceRect,
                 MINDMAP_RELATION_TARGET_APPROACH,
                 targetPortContext
-            );
+            ).filter(candidate => isMindMapRelationSegmentClear(
+                candidate.port,
+                candidate.routePoint,
+                targetTerminalObstacles
+            ));
             const sourceVector = getMindMapRelationSideVector(sourceSide);
             const targetVector = getMindMapRelationSideVector(targetSide);
             const sourceAlignment = (sourceVector.x * dx + sourceVector.y * dy) / distance;
@@ -3068,7 +3233,8 @@ function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegment
         getMindMapRelationReservedSides(sourceRect.id),
         getMindMapRelationReservedSides(targetRect.id),
         getMindMapRelationPortContext(sourceRect.id),
-        getMindMapRelationPortContext(targetRect.id)
+        getMindMapRelationPortContext(targetRect.id),
+        obstacles
     );
     const centerDistance = Math.hypot(
         (targetRect.left + targetRect.width / 2) - (sourceRect.left + sourceRect.width / 2),
@@ -3374,7 +3540,9 @@ function scheduleRenderMindMapRelations() {
 function initializeMindMapRelations() {
     const layer = $('#relation-layer');
     const panel = $('#relationEditor');
-    if (!layer || !panel) return;
+    const navigationMenu = $('#relationNavigationMenu');
+    const navigationList = $('#relationNavigationList');
+    if (!layer || !panel || !navigationMenu || !navigationList) return;
     layer.addEventListener('mousedown', event => {
         if (event.button !== 0) return;
         const hitPath = event.target.closest('.relation-hit');
@@ -3384,6 +3552,18 @@ function initializeMindMapRelations() {
         selectMindMapRelation(hitPath.dataset.relationId, { x: event.clientX, y: event.clientY });
     });
     panel.addEventListener('mousedown', event => event.stopPropagation());
+    navigationMenu.addEventListener('mousedown', event => event.stopPropagation());
+    navigationList.addEventListener('click', event => {
+        const item = event.target.closest('[data-target-node-id]');
+        if (item) jumpToMindMapRelatedCard(item.dataset.targetNodeId);
+    });
+    $('#btn-relation-navigation-close').addEventListener('click', closeMindMapRelationNavigationMenu);
+    document.addEventListener('wheel', event => {
+        if (!event.target.closest('#relationNavigationMenu')) closeMindMapRelationNavigationMenu();
+    }, { passive: true });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeMindMapRelationNavigationMenu();
+    });
     $('#btn-relation-editor-close').addEventListener('click', clearSelectedMindMapRelation);
     $('#btn-delete-relation').addEventListener('click', deleteSelectedMindMapRelation);
 
@@ -3432,6 +3612,7 @@ function initializeMindMapRelations() {
         }
     });
     scheduleRenderMindMapRelations();
+    syncMindMapRelationNavigationButtons();
 }
 
 function getCanvasRelationSides(sourceNode, targetNode) {
@@ -4722,6 +4903,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
     const areChildrenVisible = !node.folded || isMapNodeTemporarilyExpanded(node.id);
     const isCompactCollapsed = isTemporarilyCollapsed(node);
     const isContentCollapsed = Boolean(node.contentCollapsed || isCompactCollapsed);
+    const relationCount = getMindMapRelatedCardItems(node.id).length;
     // const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''}`;
     const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''} ${isTopicEmpty?'topic-empty':''}`;
     // --- 尺寸样式 ---
@@ -4817,6 +4999,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
                 </div>
             </div>
             <div class="header-tools card-floating-tools">
+                <button class="tool-icon relation-navigation-trigger" type="button" data-action="navigate-relation" title="查看关联卡片（${relationCount}）" aria-label="查看关联卡片" ${relationCount > 0 ? '' : 'hidden'}><i class="ri-links-line" aria-hidden="true"></i></button>
                 ${!isRoot ? `<i class="tool-icon ${toggleIcon}" data-action="toggle-simple" title="${toggleTitle}"></i>` : ''}
                 ${hasContent && !isContentCollapsed && !isSimple ? `<i class="ri-aspect-ratio-line tool-icon" data-action="auto-height" title="自适应尺寸"></i>` : ''}
                 ${hasContent && !isSimple && !isCompactCollapsed ? `<i class="tool-icon ${node.contentCollapsed?'ri-arrow-down-s-line':'ri-arrow-up-s-line'}" data-action="toggle-content"></i>` : ''}
@@ -4829,6 +5012,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
     </div>`;
 }
 function renderTree() {
+    closeMindMapRelationNavigationMenu();
     saveGlobalScrolls();
     const root = state.data;
     const leftKids = (root.children || []).filter(c => c.dir === 'left');

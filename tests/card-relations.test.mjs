@@ -17,6 +17,8 @@ assert.match(html, /\.relation-group\.selected \.relation-line/,
     '选中的关联线应有明确视觉状态');
 assert.match(html, /id=["']relationEditor["'][\s\S]*?id=["']relationLabelInput["']/,
     '点击关联后应提供可编辑标签的紧凑面板');
+assert.match(html, /id=["']relationNavigationMenu["'][\s\S]*?id=["']relationNavigationList["']/,
+    '卡片工具栏应提供可选择目标的关联卡片列表');
 assert.equal((html.match(/data-relation-direction=/g) || []).length, 3,
     '关联编辑器应支持无向、A 到 B、B 到 A 三种方向');
 assert.equal((html.match(/data-relation-style=/g) || []).length, 2,
@@ -42,6 +44,20 @@ assert.match(mindMap, /marker\.setAttribute\('markerUnits', 'userSpaceOnUse'\)/,
     '箭头应使用固定画布尺寸，不能随关联线宽度放大');
 assert.match(mindMap, /labelElement\.textContent\s*=\s*label/,
     '关联标签应通过 textContent 安全写入 SVG');
+assert.match(mindMap, /data-action="navigate-relation"[\s\S]*?relationCount > 0 \? '' : 'hidden'/,
+    '只有存在关联的卡片才应显示关联跳转入口');
+assert.match(mindMap, /title\.textContent\s*=\s*item\.topic[\s\S]*?meta\.textContent\s*=\s*details\.join/,
+    '关联列表应安全显示目标卡片标题、关联标签和折叠状态');
+const relationJumpSource = mindMap.slice(
+    mindMap.indexOf('function jumpToMindMapRelatedCard'),
+    mindMap.indexOf('function getMindMapNodeLabel'),
+);
+assert.match(relationJumpSource, /clearMapSearchReveal\(\)[\s\S]*?revealedNodeIds\.add[\s\S]*?revealedRootDirections\.add[\s\S]*?renderTree\(\)/,
+    '跳转到折叠卡片时应只临时展开完整祖先路径');
+assert.doesNotMatch(relationJumpSource, /\.folded\s*=/,
+    '关联跳转不得修改卡片持久化折叠状态');
+assert.match(relationJumpSource, /state\.selectedIds\.add\(targetId\)[\s\S]*?centerMapNodeInVisibleArea\(card\)[\s\S]*?pulseMapSearchTarget\(card\)/,
+    '关联跳转后应选中、居中并高亮目标卡片');
 assert.match(mindMap, /updateSelectedMindMapRelation\('direction'/,
     '方向编辑应更新关联数据并进入历史记录');
 assert.match(mindMap, /function findMindMapOrthogonalRoute\(/,
@@ -89,6 +105,60 @@ assert.ok(pathSource.startsWith('function getMindMapRelationPath'), '应能提�
 assert.ok(sideSource.startsWith('function getCanvasRelationSides'), '应能提取 Canvas 连接侧计算函数');
 assert.ok(appendSource.startsWith('function appendMindMapRelationsToCanvas'), '应能提取 Canvas 关联导出函数');
 assert.ok(routingSource.startsWith('function expandMindMapRelationObstacle'), '应能提取关联避障路由函数');
+
+const relatedItemsSource = mindMap.slice(
+    mindMap.indexOf('function getMindMapRelatedCardItems'),
+    mindMap.indexOf('function getMindMapNodePath'),
+);
+const nodePathSource = mindMap.slice(
+    mindMap.indexOf('function getMindMapNodePath'),
+    mindMap.indexOf('function closeMindMapRelationNavigationMenu'),
+);
+const navigationContext = vm.createContext({
+    state: {
+        data: {
+            id: 'root', topic: '根节点', children: [{
+                id: 'a', topic: '卡片 A', children: [{ id: 'c', topic: '卡片 C' }]
+            }, { id: 'b', topic: '卡片 B' }]
+        }
+    },
+    getMindMapRelations: () => [
+        { id: 'r1', sourceId: 'a', targetId: 'b', label: '依赖' },
+        { id: 'r2', sourceId: 'c', targetId: 'a', label: '' },
+        { id: 'stale', sourceId: 'a', targetId: 'missing', label: '无效' },
+    ],
+    getMindMapRelationLabel: relation => String(relation.label || ''),
+});
+navigationContext.findNode = function findNode(root, id) {
+    if (!root) return null;
+    if (root.id === id) return root;
+    for (const child of root.children || []) {
+        const found = navigationContext.findNode(child, id);
+        if (found) return found;
+    }
+    return null;
+};
+navigationContext.findParent = function findParent(root, id) {
+    for (const child of root.children || []) {
+        if (child.id === id) return root;
+        const found = navigationContext.findParent(child, id);
+        if (found) return found;
+    }
+    return null;
+};
+vm.runInContext(`${relatedItemsSource}\n${nodePathSource}`, navigationContext);
+const relatedFromA = vm.runInContext("getMindMapRelatedCardItems('a')", navigationContext);
+assert.deepEqual(JSON.parse(JSON.stringify(relatedFromA.map(item => ({
+    targetId: item.targetId, topic: item.topic, label: item.label
+})))), [
+    { targetId: 'b', topic: '卡片 B', label: '依赖' },
+    { targetId: 'c', topic: '卡片 C', label: '' },
+], '列表应同时包含当前卡片作为起点或终点的有效关联');
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext("getMindMapNodePath('c').map(node => node.id)", navigationContext))),
+    ['root', 'a', 'c'],
+    '折叠目标应能计算从根节点到目标的完整路径',
+);
 
 const context = vm.createContext({});
 vm.runInContext(`${pathSource}\n${sideSource}`, context);
@@ -564,5 +634,57 @@ assert.equal(leafEndpointRoute.targetSide, 'right',
     '无子节点卡片的右侧仍应可作为关联线终点侧');
 assert.equal(leafEndpointRoute.points.at(-1).y, 115.5,
     '无子节点卡片的最终关联线必须落在右侧中心');
+
+routingContext.foldTargetRect = {
+    id: 'fold-target', left: 0, right: 160, top: 100, bottom: 300, width: 160, height: 200
+};
+routingContext.foldSourceRect = {
+    id: 'fold-source', left: 300, right: 460, top: 150, bottom: 250, width: 160, height: 100
+};
+routingContext.foldCenterObstacle = vm.runInContext(`
+    expandMindMapRelationObstacle({
+        id: 'fold-button:fold-target:0', left: 166, right: 182, top: 192, bottom: 208
+    }, MINDMAP_RELATION_FOLD_BUTTON_PADDING)
+`, routingContext);
+routingContext.foldTerminalObstacles = vm.runInContext(`[
+    expandMindMapRelationObstacle(foldTargetRect),
+    expandMindMapRelationObstacle(foldSourceRect),
+    foldCenterObstacle
+]`, routingContext);
+const unobstructedFoldCandidates = vm.runInContext(`
+    getMindMapRelationSideCandidates(
+        foldSourceRect,
+        foldTargetRect,
+        new Set(['right', 'top', 'bottom']),
+        new Set(['left', 'top', 'bottom']),
+        null,
+        { branchSide: 'right', hasChildren: true, childSides: [] },
+        foldTerminalObstacles
+    ).filter(candidate => candidate.sourceSide === 'left' && candidate.targetSide === 'right')
+`, routingContext);
+assert.equal(unobstructedFoldCandidates.some(candidate => candidate.targetPort.port.y === 200), false,
+    '折叠按钮占用右侧中心时，中心端点应在精确寻路前被淘汰');
+assert.ok(unobstructedFoldCandidates.some(candidate => candidate.targetPort.port.y === 150 || candidate.targetPort.port.y === 250),
+    '中心端点被折叠按钮占用后，未被遮挡的四分位端点仍应参与候选');
+
+vm.runInContext(`
+    getMindMapRelationReservedSides = nodeId => nodeId === 'fold-source'
+        ? new Set(['right', 'top', 'bottom'])
+        : new Set(['left', 'top', 'bottom']);
+    getMindMapRelationPortContext = nodeId => nodeId === 'fold-target'
+        ? { branchSide: 'right', hasChildren: true, childSides: [] }
+        : null;
+`, routingContext);
+const foldSafeEndpointRoute = vm.runInContext(`
+    routeMindMapRelation(foldSourceRect, foldTargetRect, foldTerminalObstacles, [])
+`, routingContext);
+assert.ok(foldSafeEndpointRoute, '折叠按钮挡住中心端点时仍应找到其他合法路线');
+assert.notEqual(foldSafeEndpointRoute.points.at(-1).y, 200,
+    '完整关联线不得从折叠按钮所在的中心端点进入');
+routingContext.foldSafeEndpointRoute = foldSafeEndpointRoute;
+assert.equal(vm.runInContext(`
+    getMindMapRelationSegments(foldSafeEndpointRoute.points)
+        .every(segment => isMindMapRelationSegmentClear(segment.from, segment.to, [foldCenterObstacle]))
+`, routingContext), true, '包含最后进场段的完整关联线都应避开折叠按钮');
 
 console.log('卡片关联校验通过：编辑、正交避障、分流防重叠、缓存与 Canvas 导出逻辑完整。');
