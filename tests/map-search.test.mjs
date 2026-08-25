@@ -23,8 +23,49 @@ for (const id of [
 
 assert.match(mindMap, /e\.key\.toLowerCase\(\) === 'f'[\s\S]*?openMapSearch\(\{ prefillFromClipboard: true \}\)/,
     'Ctrl+F 应打开思维导图搜索，而不是浏览器页面查找');
-assert.match(mindMap, /function openMapSearch\(\{ prefillFromClipboard = false \} = \{\}\)[\s\S]*?input\.focus\(\);\s*input\.select\(\)/,
-    '搜索打开后应立即聚焦并选中搜索输入框');
+assert.match(mindMap, /function focusMapSearchInput\(input\)[\s\S]*?input\.focus\(\{ preventScroll: true \}\);\s*input\.select\(\)[\s\S]*?requestAnimationFrame\(applyFocus\)[\s\S]*?document\.activeElement !== input[\s\S]*?180/,
+    '搜索输入框应立即聚焦，并在 WebView2 完成可见过渡后验证实际焦点');
+assert.match(mindMap, /function openMapSearch\(\{ prefillFromClipboard = false \} = \{\}\)[\s\S]*?focusMapSearchInput\(input\)/,
+    '打开搜索面板时应统一调用可靠的输入框聚焦逻辑');
+const focusSource = mindMap.slice(
+    mindMap.indexOf('function cancelMapSearchPendingFocus'),
+    mindMap.indexOf('function openMapSearch'),
+);
+const pendingFocusFrames = [];
+const pendingFocusTimers = [];
+const focusCalls = [];
+const focusDocument = { activeElement: null };
+const focusContext = vm.createContext({
+    document: focusDocument,
+    mapSearchState: { focusRequestId: 0, focusTimer: null },
+    isMapSearchOpen: () => true,
+    requestAnimationFrame: callback => pendingFocusFrames.push(callback),
+    setTimeout: callback => {
+        pendingFocusTimers.push(callback);
+        return pendingFocusTimers.length;
+    },
+    clearTimeout() {},
+});
+vm.runInContext(`${focusSource}\nglobalThis.focusSearch = focusMapSearchInput;`, focusContext);
+const focusInput = {
+    isConnected: true,
+    focus: options => {
+        focusCalls.push(options);
+        focusDocument.activeElement = focusInput;
+    },
+    select() {},
+};
+focusContext.focusSearch(focusInput);
+assert.equal(focusCalls.length, 1, '打开面板时应立即尝试聚焦搜索框');
+assert.equal(pendingFocusFrames.length, 1, '应安排下一渲染帧的 WebView2 聚焦确认');
+pendingFocusFrames.shift()();
+assert.equal(focusCalls.length, 2, '下一渲染帧应再次聚焦搜索框');
+assert.deepEqual({ ...focusCalls[1] }, { preventScroll: true }, '聚焦搜索框不应改变画布滚动位置');
+focusDocument.activeElement = null;
+pendingFocusTimers.shift()();
+assert.equal(focusCalls.length, 3, '可见过渡完成后若焦点丢失，应再次聚焦搜索框');
+assert.match(mindMap, /document\.addEventListener\('mousedown',[\s\S]*?cancelMapSearchPendingFocus\(\)[\s\S]*?true\);/,
+    '用户主动点击其他位置时应取消延迟聚焦，避免搜索框抢回焦点');
 assert.match(mindMap, /navigator\.clipboard\.readText\(\)[\s\S]*?requestId === mapSearchState\.clipboardRequestId[\s\S]*?input\.value === initialValue/,
     '短剪贴板文本只能在请求仍有效且用户尚未输入时自动填充');
 assert.match(mindMap, /async function readMapSearchClipboardText\(\)[\s\S]*?navigator\.clipboard\.readText[\s\S]*?navigator\.clipboard\.read\(\)/,

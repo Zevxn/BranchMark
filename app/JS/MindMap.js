@@ -266,7 +266,9 @@ const mapSearchState = {
     revealedNodeIds: new Set(),
     revealedRootDirections: new Set(),
     pulseTimer: null,
-    clipboardRequestId: 0
+    clipboardRequestId: 0,
+    focusRequestId: 0,
+    focusTimer: null
 };
 const MAP_SEARCH_CLIPBOARD_MAX_CHARS = 15;
 const CARD_BG='95%';
@@ -624,6 +626,68 @@ function duplicateMindMapTab(tabId) {
     persistMindMapWorkbookSession(false);
     saveStorage();
     scrollActiveMindMapTabIntoView();
+}
+
+function getMindMapSubtreeSourceSide(root, nodeId) {
+    if (!root || root.id === nodeId) return null;
+    const rootChild = (root.children || []).find(child => findNode(child, nodeId));
+    return rootChild?.dir === 'left' ? 'left' : 'right';
+}
+
+function buildMindMapTabDataFromNode(root, nodeId) {
+    const sourceNode = root ? findNode(root, nodeId) : null;
+    if (!sourceNode) return null;
+
+    const data = cloneMindMapValue(sourceNode);
+    const subtreeIds = collectMindMapNodeIds(data);
+    const sourceSide = getMindMapSubtreeSourceSide(root, nodeId);
+    data.relations = (root.relations || [])
+        .filter(relation => subtreeIds.has(relation.sourceId) && subtreeIds.has(relation.targetId))
+        .map(cloneMindMapValue);
+    data.summaries = (root.summaries || [])
+        .filter(summary => Array.isArray(summary.nodeIds)
+            && summary.nodeIds.length >= MINDMAP_SUMMARY_MIN_NODES
+            && summary.nodeIds.every(id => subtreeIds.has(id)))
+        .map(summary => {
+            const clonedSummary = cloneMindMapValue(summary);
+            if (sourceSide) clonedSummary.side = sourceSide;
+            return clonedSummary;
+        });
+
+    delete data.dir;
+    data.folded = false;
+    data.foldedLeft = false;
+    data.foldedRight = false;
+    if (sourceSide) {
+        (data.children || []).forEach(child => {
+            child.dir = sourceSide;
+        });
+    }
+    return data;
+}
+
+function createMindMapTabFromSelectedNode() {
+    if (state.selectedIds.size !== 1) {
+        if (typeof showTopToast === 'function') showTopToast('⚠️ 请选择一张卡片');
+        return false;
+    }
+
+    const nodeId = Array.from(state.selectedIds)[0];
+    commitCurrentMindMapTabEdits();
+    const sourceNode = findNode(state.data, nodeId);
+    const data = buildMindMapTabDataFromNode(state.data, nodeId);
+    if (!sourceNode || !data) return false;
+
+    const baseName = String(sourceNode.topic || '').trim().slice(0, 80) || '未命名页面';
+    const tab = createMindMapTab(getUniqueMindMapTabName(baseName), { data });
+    mindMapWorkbook.tabs.push(tab);
+    mindMapWorkbook.activeTabId = tab.id;
+    loadActiveMindMapTab({ resetHistory: true });
+    persistMindMapWorkbookSession(false);
+    saveStorage();
+    scrollActiveMindMapTabIntoView();
+    if (typeof showTopToast === 'function') showTopToast('✅ 已从所选节点创建新页面');
+    return true;
 }
 
 function deleteMindMapTab(tabId) {
@@ -1396,6 +1460,7 @@ function initializeMapContextMenu() {
         const toStandardItem=contextMenu.querySelector('.menu-item[data-action="to-standard"]');
         const toSimpleItem=contextMenu.querySelector('.menu-item[data-action="to-simple"]');
         const addRelationItem=contextMenu.querySelector('.menu-item[data-action="add-relation"]');
+        const createTabItem=contextMenu.querySelector('.menu-item[data-action="create-tab-from-node"]');
         const card = e.target.closest('.node-card');
         const node = findNode(state.data, card.dataset.nodeId);
         const isCompactCollapsed = isTemporarilyCollapsed(node);
@@ -1449,6 +1514,7 @@ function initializeMapContextMenu() {
         // 右击双选中的任一卡片时保留双选，并提供与工具栏一致的关联入口。
         const canAddRelation = state.selectedIds.size === 2;
         addRelationItem.style.display = canAddRelation ? '' : 'none';
+        createTabItem.style.display = state.selectedIds.size === 1 ? '' : 'none';
         positionMindMapContextMenu(contextMenu, e.clientX, e.clientY);
     });
 
@@ -1487,6 +1553,11 @@ function initializeMapContextMenu() {
         }
         if (action === 'add-relation') {
             addRelationBetweenSelectedCards({ x: e.clientX, y: e.clientY });
+            contextMenu.classList.remove('active');
+            return;
+        }
+        if (action === 'create-tab-from-node') {
+            createMindMapTabFromSelectedNode();
             contextMenu.classList.remove('active');
             return;
         }
@@ -5355,6 +5426,30 @@ async function applyMapSearchClipboardQuery(input, initialValue, requestId) {
     }
 }
 
+function cancelMapSearchPendingFocus() {
+    mapSearchState.focusRequestId += 1;
+    if (mapSearchState.focusTimer) clearTimeout(mapSearchState.focusTimer);
+    mapSearchState.focusTimer = null;
+}
+
+function focusMapSearchInput(input) {
+    if (!input) return;
+    cancelMapSearchPendingFocus();
+    const requestId = mapSearchState.focusRequestId;
+    const applyFocus = () => {
+        if (requestId !== mapSearchState.focusRequestId || !input.isConnected || !isMapSearchOpen()) return;
+        input.focus({ preventScroll: true });
+        input.select();
+    };
+    applyFocus();
+    // 先覆盖普通浏览器的下一帧布局，再覆盖 WebView2 完成 visibility 过渡后的焦点时序。
+    requestAnimationFrame(applyFocus);
+    mapSearchState.focusTimer = setTimeout(() => {
+        mapSearchState.focusTimer = null;
+        if (document.activeElement !== input) applyFocus();
+    }, 180);
+}
+
 function openMapSearch({ prefillFromClipboard = false } = {}) {
     const panel = $('#mapSearchPanel');
     const input = $('#mapSearchInput');
@@ -5364,8 +5459,7 @@ function openMapSearch({ prefillFromClipboard = false } = {}) {
     panel.classList.add('active');
     panel.setAttribute('aria-hidden', 'false');
     executeMapSearch(input.value);
-    input.focus();
-    input.select();
+    focusMapSearchInput(input);
     if (prefillFromClipboard) {
         void applyMapSearchClipboardQuery(input, initialValue, requestId);
     }
@@ -5374,6 +5468,7 @@ function openMapSearch({ prefillFromClipboard = false } = {}) {
 function closeMapSearch() {
     const panel = $('#mapSearchPanel');
     if (!panel) return;
+    cancelMapSearchPendingFocus();
     mapSearchState.clipboardRequestId += 1;
     if (panel.contains(document.activeElement)) document.activeElement.blur();
     panel.classList.remove('active');
@@ -5478,6 +5573,10 @@ function initializeMapSearch() {
     $('#btn-search-close').onclick = closeMapSearch;
     $('#btn-search-prev').onclick = () => navigateMapSearch(-1);
     $('#btn-search-next').onclick = () => navigateMapSearch(1);
+    document.addEventListener('mousedown', event => {
+        if (!isMapSearchOpen() || event.target === input || event.target.closest('#btn-search')) return;
+        cancelMapSearchPendingFocus();
+    }, true);
     $('#btn-search-visible').onclick = () => {
         mapSearchState.visibleOnly = !mapSearchState.visibleOnly;
         syncMapSearchScopeButton();
@@ -6861,6 +6960,38 @@ function pasteMindMapNodesToSelection(nodesToPaste) {
 /**
  * 执行粘贴逻辑 (修复版：正确统计粘贴总数)
  */
+function parseMindMapPlainText(value) {
+    const text = String(value ?? '').replace(/\r\n?/g, '\n');
+    if (!text.trim()) return null;
+
+    const firstLineBreak = text.indexOf('\n');
+    const firstLine = firstLineBreak < 0 ? text : text.slice(0, firstLineBreak);
+    const content = firstLineBreak < 0 ? '' : text.slice(firstLineBreak + 1);
+    const headingMatch = firstLine.match(/^#{1,6}[ \t]+(.+)$/);
+
+    return {
+        text,
+        firstLine,
+        topic: headingMatch
+            ? headingMatch[1].replace(/\*\*/g, '').trim()
+            : firstLine.trim(),
+        content,
+        isMarkdownHeading: Boolean(headingMatch)
+    };
+}
+
+function createMindMapNodeFromPlainText(value) {
+    const parsed = parseMindMapPlainText(value);
+    if (!parsed) return null;
+
+    return {
+        topic: parsed.topic,
+        content: parsed.content,
+        widthMode: 'auto',
+        heightMode: 'auto'
+    };
+}
+
 async function pasteNodesToSelection() {
     let nodesToPaste = [];
     let isMindMapData = false;
@@ -6896,13 +7027,8 @@ async function pasteNodesToSelection() {
                         showTopToast('⚠️ 无法识别节点数据');
                         return;
                     }
-                    nodesToPaste = [{
-                        id: generateNodeId(),
-                        topic: text.length > 20 ? text.substring(0, 20) + '...' : text,
-                        content: text,
-                        widthMode: 'auto',
-                        heightMode: 'auto'
-                    }];
+                    const plainTextNode = createMindMapNodeFromPlainText(text);
+                    nodesToPaste = plainTextNode ? [plainTextNode] : [];
                 }
             }
         }
@@ -7389,54 +7515,24 @@ function initializeNativeDragDrop() {
 }
 /**
  * 提取 Markdown 标题：
- * 1. 识别首行是否为 "# " 开头
- * 2. 去掉开头的 "# "
+ * 1. 识别首行是否为 1～6 个 "#" 加空白开头
+ * 2. 去掉开头的 Markdown 标题标记
  * 3. 如果标题两边包含 "**"，也一并去掉
  * @param {string} text - 输入的字符串
  * @returns {Array<string>} - [处理后的标题, 剩余内容]
  */
 function extractMarkdownHeader(text) {
-    if (!text) return ["", ""];
-
-    // 1. 定位第一行
-    const newlineIndex = text.indexOf('\n');
-    const endOfFirstLine = newlineIndex === -1 ? text.length : newlineIndex;
-
-    // 获取第一行并去掉可能的 Windows 回车符 \r
-    let firstLine = text.substring(0, endOfFirstLine);
-    if (firstLine.endsWith('\r')) {
-        firstLine = firstLine.slice(0, -1);
-    }
+    const parsed = parseMindMapPlainText(text);
+    if (!parsed) return ["", ""];
 
     const formulaPattern = /\$.*\$/;
-
-    if (formulaPattern.test(firstLine)) {
-        return ["", text];
+    if (formulaPattern.test(parsed.firstLine)) {
+        return ["", parsed.text];
     }
 
-    // 2. 正则：匹配行首 # 加空格
-    const headerPattern = /^#+ /;
-
-    if (headerPattern.test(firstLine)) {
-        // 【步骤 A】：去掉开头的 # 和空格
-        let cleanTitle = firstLine.replace(headerPattern, '');
-
-        // 【步骤 B】：去掉所有的加粗符号 **
-        if (cleanTitle.includes('**')) {
-            cleanTitle = cleanTitle.replace(/\*\*/g, '');
-        }
-        
-        // 去除两端空格
-        cleanTitle = cleanTitle.trim();
-
-        // 准备剩余内容
-        const restStartIndex = newlineIndex === -1 ? text.length : newlineIndex + 1;
-        const restContent = text.substring(restStartIndex);
-
-        return [cleanTitle, restContent];
-    } else {
-        return ["", text];
-    }
+    return parsed.isMarkdownHeading
+        ? [parsed.topic, parsed.content]
+        : ["", parsed.text];
 }
 
 // ==========================================

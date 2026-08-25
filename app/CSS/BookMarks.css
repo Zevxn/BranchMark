@@ -472,7 +472,7 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
 .modal-content {
-    background: var(--bg-popup); border-radius: 20px; padding: 30px;
+    background: var(--bg-popup); border-radius: 10px; padding: 30px;
     min-width: 420px; max-width: 90vw; border: 1px solid var(--border-color);
     box-shadow: var(--shadow-md);
 }

@@ -3,12 +3,22 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 const source = await readFile('app/JS/MindMap.js', 'utf8');
+const plainTextParserStart = source.indexOf('function parseMindMapPlainText');
+const plainTextParserEnd = source.indexOf('function createMindMapNodeFromPlainText', plainTextParserStart);
 const helperStart = source.indexOf('function isMarkdownFile');
 const helperEnd = source.indexOf('function initializeNativeDragDrop', helperStart);
+const markdownHeaderStart = source.indexOf('function extractMarkdownHeader');
+const markdownHeaderEnd = source.indexOf('// ==========================================', markdownHeaderStart);
 
+assert.ok(plainTextParserStart >= 0 && plainTextParserEnd > plainTextParserStart,
+    '应能定位粘贴与拖放共用的文本解析函数');
 assert.ok(helperStart >= 0 && helperEnd > helperStart, '应能定位 Markdown 文件拖放辅助函数');
+assert.ok(markdownHeaderStart >= 0 && markdownHeaderEnd > markdownHeaderStart,
+    '应能定位 Markdown 标题提取函数');
 
+const plainTextParserSource = source.slice(plainTextParserStart, plainTextParserEnd);
 const helperSource = source.slice(helperStart, helperEnd);
+const markdownHeaderSource = source.slice(markdownHeaderStart, markdownHeaderEnd);
 const context = vm.createContext({});
 vm.runInContext(`
     ${helperSource}
@@ -100,7 +110,13 @@ const integrationContext = vm.createContext({
     showTopToast: () => {},
 });
 
-vm.runInContext(`${helperSource}\n${initializeSource}\ninitializeNativeDragDrop();`, integrationContext);
+vm.runInContext(`
+    ${plainTextParserSource}
+    ${helperSource}
+    ${initializeSource}
+    ${markdownHeaderSource}
+    initializeNativeDragDrop();
+`, integrationContext);
 await listeners.drop({
     preventDefault() {},
     clientX: 280,
@@ -117,5 +133,26 @@ assert.equal(targetNode.children[0].topic, '拖入节点');
 assert.equal(targetNode.children[0].content, '## Markdown 内容');
 assert.equal(historyCount, 1, '一次文件拖放应只记录一次历史');
 assert.equal(updatedParentId, 'target', '创建节点后应局部刷新目标节点的子树');
+
+targetNode.children = [];
+historyCount = 0;
+updatedParentId = null;
+await listeners.drop({
+    preventDefault() {},
+    clientX: 280,
+    clientY: 200,
+    target: { closest: selector => selector === '.node-card' ? targetCard : null },
+    dataTransfer: {
+        files: [],
+        getData: type => type === 'text/plain' ? '## **拖放标题**\r\n拖放正文' : '',
+    },
+});
+
+assert.equal(targetNode.children.length, 1, '拖放纯文本应创建一个节点');
+assert.equal(targetNode.children[0].topic, '拖放标题',
+    '拖放文本应与粘贴文本使用相同的 Markdown 标题解析规则');
+assert.equal(targetNode.children[0].content, '拖放正文');
+assert.equal(historyCount, 1, '一次纯文本拖放应只记录一次历史');
+assert.equal(updatedParentId, 'target');
 
 console.log('Markdown 文件拖放校验通过：文件名映射标题，完整文件内容映射卡片正文。');

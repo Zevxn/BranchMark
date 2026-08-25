@@ -65,6 +65,8 @@ assert.match(html, /id=["']mindMapTabList["'][^>]*role=["']tablist["']/,
     '页面底部应提供可访问的 Tab 列表');
 assert.match(html, /id=["']btn-add-mindmap-tab["']/,
     'Tab 栏应提供新建页面按钮');
+assert.match(html, /data-action=["']create-tab-from-node["'][^>]*style=["']display:none["']/,
+    '节点右键菜单应提供默认隐藏的“从此节点新建页面”入口');
 assert.equal((html.match(/data-tab-action=/g) || []).length, 3,
     'Tab 右键菜单应提供重命名、复制和删除操作');
 assert.match(html, /id=["']mindMapTabRenameModal["'][^>]*role=["']dialog["']/,
@@ -87,11 +89,84 @@ assert.match(mindMap, /function getMindMapWorkbookSnapshot\([\s\S]*?tabs:\s*mind
     '持久化应保存整个工作簿而非仅保存活动页面');
 assert.match(mindMap, /function reorderMindMapTab\(/,
     '基础版本应支持拖动调整页面顺序');
+assert.match(mindMap, /createTabItem\.style\.display\s*=\s*state\.selectedIds\.size === 1 \? '' : 'none'/,
+    '从节点新建页面的入口只能在单选时显示');
+assert.match(mindMap, /if \(action === 'create-tab-from-node'\)[\s\S]*?createMindMapTabFromSelectedNode\(\)/,
+    '节点右键菜单应调用子树新建页面逻辑');
 assert.match(mindMap, /function setMindMapTabDropIndicator[\s\S]*?classList\.contains\(className\)[\s\S]*?return/,
     '拖动停留在同一插入位置时不得反复移除并添加指示器');
 assert.match(html, /\.mindmap-tab\.drop-after::after\s*\{\s*right:\s*0;\s*\}/,
     '最右侧插入线应位于 Tab 内部，避免反复改变横向滚动宽度');
+assert.match(html, /\.mindmap-tab-list\s*\{[\s\S]*?gap:\s*0;/,
+    '相邻 Tab 的激活态和悬停态之间不应保留背景断层');
+assert.match(html, /\.mindmap-tab-add\s*\{[\s\S]*?margin-left:\s*0;/,
+    '最右侧 Tab 的高亮背景应紧贴新增按钮分隔线');
 assert.match(mindMap, /if \(skipNextGlobalScrollCapture\)[\s\S]*?else saveGlobalScrolls\(\)/,
     '切页首次渲染不得把旧页面 DOM 的滚动位置写入新页面');
+
+const subtreeSource = mindMap.slice(
+    mindMap.indexOf('function getMindMapSubtreeSourceSide'),
+    mindMap.indexOf('function createMindMapTabFromSelectedNode'),
+);
+function findTestNode(root, id) {
+    if (root.id === id) return root;
+    for (const child of root.children || []) {
+        const found = findTestNode(child, id);
+        if (found) return found;
+    }
+    return null;
+}
+function collectTestNodeIds(node, target = new Set()) {
+    if (!node) return target;
+    target.add(node.id);
+    (node.children || []).forEach(child => collectTestNodeIds(child, target));
+    return target;
+}
+const subtreeContext = vm.createContext({
+    MINDMAP_SUMMARY_MIN_NODES: 2,
+    cloneMindMapValue: value => JSON.parse(JSON.stringify(value)),
+    findNode: findTestNode,
+    collectMindMapNodeIds: collectTestNodeIds,
+});
+vm.runInContext(`${subtreeSource}\nglobalThis.buildSubtree = buildMindMapTabDataFromNode;`, subtreeContext);
+const sourceTree = {
+    id: 'root',
+    topic: '总图',
+    children: [
+        {
+            id: 'branch',
+            topic: '分支',
+            dir: 'left',
+            isSimple: true,
+            folded: true,
+            children: [
+                { id: 'inside_a', topic: 'A', children: [] },
+                { id: 'inside_b', topic: 'B', children: [] },
+            ],
+        },
+        { id: 'outside', topic: '外部', dir: 'right', children: [] },
+    ],
+    relations: [
+        { id: 'internal_relation', sourceId: 'inside_a', targetId: 'inside_b' },
+        { id: 'external_relation', sourceId: 'branch', targetId: 'outside' },
+    ],
+    summaries: [
+        { id: 'internal_summary', nodeIds: ['inside_a', 'inside_b'], side: 'left' },
+        { id: 'external_summary', nodeIds: ['inside_a', 'outside'], side: 'left' },
+    ],
+};
+const sourceTreeBefore = JSON.stringify(sourceTree);
+const subtree = JSON.parse(JSON.stringify(subtreeContext.buildSubtree(sourceTree, 'branch')));
+assert.equal(subtree.id, 'branch', '所选节点应成为新页面根节点');
+assert.equal('dir' in subtree, false, '新根节点不应保留原分支方向字段');
+assert.equal(subtree.isSimple, true, '复制子树时应保留所选节点的卡片样式数据');
+assert.equal(subtree.folded, false, '新页面应默认展开所选节点的后代');
+assert.deepEqual(subtree.children.map(child => child.dir), ['left', 'left'],
+    '左侧来源子树应在新页面中保持左向布局');
+assert.deepEqual(subtree.relations.map(relation => relation.id), ['internal_relation'],
+    '新页面只应保留子树内部关联');
+assert.deepEqual(subtree.summaries.map(summary => summary.id), ['internal_summary'],
+    '新页面只应保留成员全部位于子树内的总结');
+assert.equal(JSON.stringify(sourceTree), sourceTreeBefore, '创建页面不得修改来源导图');
 
 console.log('多页面 Tab 校验通过：旧数据迁移、页面状态隔离、基础交互与工作簿持久化逻辑完整。');

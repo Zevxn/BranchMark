@@ -66,8 +66,30 @@ vm.runInContext(`
     ${clipboardSource}
     globalThis.getMindMapClipboardNodes = getMindMapClipboardNodes;
     globalThis.pasteMindMapNodesToSelection = pasteMindMapNodesToSelection;
+    globalThis.createMindMapNodeFromPlainText = createMindMapNodeFromPlainText;
     globalThis.pasteNodesToSelection = pasteNodesToSelection;
 `, context);
+
+const singleLineNode = context.createMindMapNodeFromPlainText('这是一段超过二十个字符但不应该再被截断的单行文本');
+assert.equal(singleLineNode.topic, '这是一段超过二十个字符但不应该再被截断的单行文本',
+    '单行文本应完整写入标题');
+assert.equal(singleLineNode.content, '', '单行文本不应重复写入正文');
+
+const multiLineNode = context.createMindMapNodeFromPlainText('第一行标题\r\n第二行正文\r\n第三行正文');
+assert.equal(multiLineNode.topic, '第一行标题', '多行文本第一行应作为标题');
+assert.equal(multiLineNode.content, '第二行正文\n第三行正文',
+    '多行文本剩余内容应作为正文并统一换行符');
+
+const markdownHeadingNode = context.createMindMapNodeFromPlainText('### **项目计划**\r\n这是正文');
+assert.equal(markdownHeadingNode.topic, '项目计划',
+    '粘贴 Markdown 标题时应去掉井号、空格和加粗标记');
+assert.equal(markdownHeadingNode.content, '这是正文',
+    'Markdown 标题后的内容应继续作为正文');
+
+const compactHashNode = context.createMindMapNodeFromPlainText('#不是标准标题\n正文');
+assert.equal(compactHashNode.topic, '#不是标准标题',
+    '井号后没有空白时不应识别为 Markdown 标题');
+assert.equal(context.createMindMapNodeFromPlainText('   '), null, '纯空白文本不应创建空卡片');
 
 const pureNodes = context.getMindMapClipboardNodes(pureData);
 assert.equal(pureNodes.length, 1, '纯 data 根节点应转换为一棵待粘贴子树');
@@ -97,5 +119,13 @@ assert.equal('foldedLeft' in pastedRoot, false, '整图折叠状态不应成为�
 assert.equal(historyCount, 1, '粘贴子树应记录历史');
 assert.equal(updatedParentId, 'target', '应只刷新粘贴目标的子树');
 assert.match(toast, /已粘贴 2 个节点/, '提示应包含递归节点数量');
+
+root.children[0].children = [];
+context.state.selectedIds = new Set(['target']);
+context.navigator.clipboard.readText = async () => '单行粘贴文本';
+await context.pasteNodesToSelection();
+assert.equal(root.children[0].children[0].topic, '单行粘贴文本');
+assert.equal(root.children[0].children[0].content, '',
+    '画布粘贴单行文本创建的卡片不应同时生成重复正文');
 
 console.log('mind map JSON paste tests passed');
