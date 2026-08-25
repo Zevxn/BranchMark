@@ -29,6 +29,12 @@ assert.match(html, /\.node-card\.simple,\s*\.summary-editor\.simple\s*\{\s*min-h
     '普通便利贴与总结便利贴应复用一致的最小高度');
 assert.match(html, /\.summary-editor\.simple \.summary-card-body\s*\{\s*display:\s*none/,
     '便利贴模式应隐藏正文并仅展示总结标题');
+assert.match(html, /\.summary-editor\.topic-empty \.summary-card-header\s*\{\s*display:\s*none/,
+    '总结标题为空时应彻底隐藏标题栏');
+assert.match(html, /\.summary-editor\.topic-empty\.has-content \.summary-card-body\s*\{[\s\S]*?border-radius:\s*6px/,
+    '无标题总结的正文应直接接管卡片顶部圆角');
+assert.doesNotMatch(html, /\.summary-editor\.topic-empty::before/,
+    '总结标题为空时不应生成普通卡片使用的幽灵拖动手柄');
 assert.match(html, /\.summary-editor\.horizontal\.placement-top\s*\{\s*transform:\s*translate\(-50%,\s*-100%\)/,
     '横向总结在上方时应以底边居中对齐大括号');
 assert.match(html, /\.summary-editor\.horizontal\.placement-bottom\s*\{\s*transform:\s*translate\(-50%,\s*0\)/,
@@ -80,6 +86,12 @@ assert.match(mindMap, /function setMindMapSummaryContent\(summary, content\)[\s\
     '保存总结 Markdown 时应迁移到与普通卡片一致的 content 字段');
 assert.match(mindMap, /topic\.addEventListener\('input'[\s\S]*?summary\.topic\s*=/,
     '总结标题应独立保存，并供便利贴模式展示');
+assert.match(mindMap, /entityKind === 'summary' \? \(node\.topic \?\? '总结'\)/,
+    '公共编辑器应保留总结的显式空标题，只对缺失字段使用默认标题');
+assert.match(mindMap, /const summaryTopic = String\(summary\.topic \?\? '总结'\)[\s\S]*?document\.activeElement !== topic[\s\S]*?classList\.toggle\('topic-empty', isTopicEmpty\)/,
+    '总结渲染应在非编辑状态根据空标题切换隐藏样式');
+assert.match(mindMap, /topic\.addEventListener\('blur'[\s\S]*?recordHistory\(\);[\s\S]*?scheduleRenderMindMapSummaries\(\)/,
+    '清空总结标题并失焦后应立即重新测量和渲染卡片');
 assert.match(mindMap, /beginMindMapResize\(event, summary, 'summary', editor\)/,
     '总结卡片应复用卡片尺寸调整状态机');
 assert.match(mindMap, /editor\.addEventListener\('dblclick'[\s\S]*?if \(handle\) autoFitMindMapEntity\(summary, 'summary', handle\.dataset\.resize\);[\s\S]*?openMindMapEditor\(summary\)/,
@@ -108,6 +120,10 @@ assert.match(mindMap, /function getMindMapSummaryHorizontalBraceY\(bounds, place
     '横向总结大括号必须贴近成员卡片，不能移到整张导图之外');
 assert.match(mindMap, /occupiedSummaryRects[\s\S]*?getMindMapSummaryCollisionOffset[\s\S]*?labelOffset \+= collisionOffset/,
     '多个总结卡片应使用实际矩形错位，避免彼此覆盖');
+assert.match(mindMap, /function chooseMindMapSummaryAutoOrientation[\s\S]*?MINDMAP_SUMMARY_ORIENTATION_SWITCH_PENALTY[\s\S]*?MINDMAP_SUMMARY_ORIENTATION_HYSTERESIS/,
+    '纵向与横向总结应按避障代价自动择优，并使用迟滞避免频繁切换');
+assert.match(mindMap, /function prepareMindMapSummaryLayout\(summaries\)[\s\S]*?getMindMapSummaryVerticalEvaluation[\s\S]*?chooseMindMapSummaryAutoOrientation[\s\S]*?braceX:\s*chosen\.candidate\.braceX/,
+    '纵向总结应先计算最小横移距离，必要时自动切换为横版');
 assert.match(mindMap, /canvasLayer\?\.getBoundingClientRect\(\)[\s\S]*?rect\.left - canvasLeft[\s\S]*?rect\.top - canvasTop/,
     '卡片坐标应根据画布实际 DOM 变换反算，避免左侧总结使用过期视图偏移');
 
@@ -184,13 +200,17 @@ vm.runInContext(`
     const MINDMAP_SUMMARY_COLLISION_GAP = 14;
     const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
     const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
+    const MINDMAP_SUMMARY_ORIENTATION_SWITCH_PENALTY = 48;
+    const MINDMAP_SUMMARY_ORIENTATION_HYSTERESIS = 24;
     ${pathSource}
 `, pathContext);
 pathContext.bounds = { left: 100, top: 50, right: 300, bottom: 250 };
 const rightPath = vm.runInContext("getMindMapSummaryBracePath(bounds, 'right')", pathContext);
 const leftPath = vm.runInContext("getMindMapSummaryBracePath(bounds, 'left')", pathContext);
+const shiftedRightPath = vm.runInContext("getMindMapSummaryBracePath(bounds, 'right', 500)", pathContext);
 assert.match(rightPath, /^M 318 42 C /, '右侧总结的大括号应从卡片包围盒右边开始');
 assert.match(leftPath, /^M 82 42 C /, '左侧总结的大括号应镜像放在卡片包围盒左边');
+assert.match(shiftedRightPath, /^M 500 42 C /, '纵向避障后大括号路径应使用计算得到的水平位置');
 assert.notEqual(rightPath, leftPath, '左右大括号路径不能使用相同方向');
 const topPath = vm.runInContext("getMindMapSummaryHorizontalBracePath(bounds, 'top')", pathContext);
 const bottomPath = vm.runInContext("getMindMapSummaryHorizontalBracePath(bounds, 'bottom')", pathContext);
@@ -221,6 +241,50 @@ assert.equal(
     vm.runInContext("getMindMapSummaryHorizontalBraceY(bounds, 'bottom')", pathContext),
     268,
     '下方总结大括号应贴近所选卡片的下边缘',
+);
+pathContext.verticalEditorSize = { width: 140, height: 80 };
+const rightVerticalCandidate = vm.runInContext(
+    "getMindMapSummaryVerticalCandidate(bounds, 'right', verticalEditorSize)",
+    pathContext,
+);
+assert.equal(rightVerticalCandidate.braceX, 318,
+    '无障碍时右侧纵向大括号应保持贴近成员卡片');
+assert.ok(rightVerticalCandidate.editorRect.left > rightVerticalCandidate.braceX,
+    '右侧纵向总结卡片应位于大括号外侧');
+const verticalObstacleCard = {
+    dataset: { nodeId: 'vertical-obstacle' },
+    getClientRects: () => [{}],
+    rect: { left: 280, top: 40, right: 450, bottom: 300 },
+};
+pathContext.document = { querySelectorAll: selector => selector === '.node-card' ? [verticalObstacleCard] : [] };
+pathContext.getMindMapCanvasRect = card => card.rect;
+pathContext.verticalNodeIds = [];
+const shiftedVerticalEvaluation = vm.runInContext(
+    "getMindMapSummaryVerticalEvaluation(bounds, 'right', verticalEditorSize, verticalNodeIds)",
+    pathContext,
+);
+assert.ok(shiftedVerticalEvaluation.cost > 0,
+    '纵向大括号与普通卡片重叠时应计算向外移动距离');
+assert.ok(shiftedVerticalEvaluation.candidate.collisionRect.left >= verticalObstacleCard.rect.right,
+    '移动后的纵向大括号和总结卡片应整体越过障碍卡片');
+pathContext.smallVerticalEvaluation = { orientation: 'vertical', cost: 20 };
+pathContext.largeVerticalEvaluation = { orientation: 'vertical', cost: 300 };
+pathContext.freeHorizontalEvaluation = { orientation: 'horizontal', deficit: 0 };
+assert.equal(
+    vm.runInContext('chooseMindMapSummaryAutoOrientation(smallVerticalEvaluation, freeHorizontalEvaluation).orientation', pathContext),
+    'vertical',
+    '纵向只需小幅移动时应保留兄弟关系的纵向表现',
+);
+assert.equal(
+    vm.runInContext('chooseMindMapSummaryAutoOrientation(largeVerticalEvaluation, freeHorizontalEvaluation).orientation', pathContext),
+    'horizontal',
+    '纵向需要跨越宽卡片时应自动切换为横版',
+);
+pathContext.nearThresholdVerticalEvaluation = { orientation: 'vertical', cost: 60 };
+assert.equal(
+    vm.runInContext("chooseMindMapSummaryAutoOrientation(nearThresholdVerticalEvaluation, freeHorizontalEvaluation, 'vertical').orientation", pathContext),
+    'vertical',
+    '接近切换阈值时应保持上一方向，避免折叠展开导致反复跳变',
 );
 pathContext.editorSize = { width: 140, height: 80 };
 const localBottomCandidate = vm.runInContext(

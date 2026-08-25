@@ -1354,7 +1354,7 @@ function openMindMapEditor(node, readOnly = false, focusSource = false) {
     state.isReadOnly = readOnly;
     $('#editorModal').classList.add('active');
     $('#modalWin').className = readOnly ? 'modal-win narrow' : 'modal-win';
-    $('#modalTopicInput').value = entityKind === 'summary' ? (node.topic || '总结') : (node.topic || '');
+    $('#modalTopicInput').value = entityKind === 'summary' ? (node.topic ?? '总结') : (node.topic || '');
     $('#modalTopicInput').disabled = readOnly;
     const sourceEditor = $('#editorTextarea');
     const content = entityKind === 'summary' ? getMindMapSummaryContent(node) : (node.content || '');
@@ -3679,7 +3679,10 @@ const MINDMAP_SUMMARY_LABEL_GAP = 22;
 const MINDMAP_SUMMARY_COLLISION_GAP = 14;
 const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
 const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
+const MINDMAP_SUMMARY_ORIENTATION_SWITCH_PENALTY = 48;
+const MINDMAP_SUMMARY_ORIENTATION_HYSTERESIS = 24;
 let summaryRenderFrame = null;
+const summaryOrientationCache = new Map();
 
 function getMindMapSummaries() {
     return Array.isArray(state.data?.summaries) ? state.data.summaries : [];
@@ -3749,9 +3752,11 @@ function getMindMapSummaryRelationProfile(nodeIds) {
     };
 }
 
-function getMindMapSummaryBracePath(bounds, side) {
+function getMindMapSummaryBracePath(bounds, side, braceX = null) {
     const direction = side === 'left' ? -1 : 1;
-    const x = side === 'left' ? bounds.left - 18 : bounds.right + 18;
+    const x = Number.isFinite(braceX)
+        ? braceX
+        : (side === 'left' ? bounds.left - MINDMAP_SUMMARY_BRACE_OFFSET : bounds.right + MINDMAP_SUMMARY_BRACE_OFFSET);
     const top = bounds.top - 8;
     const bottom = bounds.bottom + 8;
     const middle = (top + bottom) / 2;
@@ -3855,6 +3860,73 @@ function getMindMapSummaryHorizontalCandidate(bounds, placement, editorSize, lab
     return { braceY, labelY, editorRect, footprint, collisionRect, requiredSpace };
 }
 
+function getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffset = 0) {
+    const direction = side === 'left' ? -1 : 1;
+    const baseBraceX = side === 'left'
+        ? bounds.left - MINDMAP_SUMMARY_BRACE_OFFSET
+        : bounds.right + MINDMAP_SUMMARY_BRACE_OFFSET;
+    const braceX = baseBraceX + direction * braceOffset;
+    const height = Math.max(80, bounds.bottom - bounds.top + 16);
+    const depth = Math.min(18, Math.max(12, height * 0.08));
+    const labelX = braceX + direction * (depth * 1.55 + MINDMAP_SUMMARY_LABEL_GAP);
+    const labelY = (bounds.top + bounds.bottom) / 2;
+    const editorWidth = Math.max(120, editorSize?.width || MINDMAP_SUMMARY_ESTIMATED_WIDTH);
+    const editorHeight = Math.max(60, editorSize?.height || MINDMAP_SUMMARY_ESTIMATED_HEIGHT);
+    const editorRect = {
+        left: side === 'left' ? labelX - editorWidth : labelX,
+        right: side === 'left' ? labelX : labelX + editorWidth,
+        top: labelY - editorHeight / 2,
+        bottom: labelY + editorHeight / 2
+    };
+    const braceOuterX = braceX + direction * depth * 1.55;
+    const collisionRect = {
+        left: Math.min(braceX, braceOuterX, editorRect.left) - MINDMAP_SUMMARY_COLLISION_GAP,
+        right: Math.max(braceX, braceOuterX, editorRect.right) + MINDMAP_SUMMARY_COLLISION_GAP,
+        top: Math.min(bounds.top - 8, editorRect.top) - MINDMAP_SUMMARY_COLLISION_GAP,
+        bottom: Math.max(bounds.bottom + 8, editorRect.bottom) + MINDMAP_SUMMARY_COLLISION_GAP
+    };
+    return { braceX, labelX, labelY, editorRect, collisionRect, braceOffset };
+}
+
+function getMindMapSummaryVisibleObstacleRects(nodeIds) {
+    const selectedIds = new Set(nodeIds || []);
+    return Array.from(document.querySelectorAll('.node-card'))
+        .filter(card => !selectedIds.has(card.dataset.nodeId) && card.getClientRects().length > 0)
+        .map(card => getMindMapCanvasRect(card));
+}
+
+function getMindMapSummaryVerticalEvaluation(bounds, side, editorSize, nodeIds, occupiedRects = []) {
+    const obstacles = [
+        ...getMindMapSummaryVisibleObstacleRects(nodeIds),
+        ...(occupiedRects || [])
+    ];
+    let braceOffset = 0;
+    let candidate = getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffset);
+    for (let index = 0; index <= obstacles.length; index++) {
+        let outwardShift = 0;
+        obstacles.forEach(rect => {
+            const intersects = rect.left < candidate.collisionRect.right
+                && rect.right > candidate.collisionRect.left
+                && rect.top < candidate.collisionRect.bottom
+                && rect.bottom > candidate.collisionRect.top;
+            if (!intersects) return;
+            outwardShift = Math.max(outwardShift, side === 'left'
+                ? candidate.collisionRect.right - rect.left
+                : rect.right - candidate.collisionRect.left);
+        });
+        if (outwardShift <= 0) break;
+        braceOffset += outwardShift;
+        candidate = getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffset);
+    }
+    return {
+        orientation: 'vertical',
+        placement: side,
+        region: 'side',
+        candidate,
+        cost: braceOffset
+    };
+}
+
 function getMindMapSummaryCollisionOffset(candidate, placement, occupiedRects) {
     let offset = 0;
     (occupiedRects || []).forEach(rect => {
@@ -3880,6 +3952,20 @@ function chooseMindMapSummaryHorizontalLayout(preferredPlacement, topEvaluation,
     if (preferred.deficit <= 0) return preferred;
     if (alternate.deficit <= 0) return alternate;
     return alternate.deficit < preferred.deficit ? alternate : preferred;
+}
+
+function chooseMindMapSummaryAutoOrientation(verticalEvaluation, horizontalEvaluation, previousOrientation = null) {
+    const verticalCost = verticalEvaluation.cost;
+    const horizontalCost = horizontalEvaluation.deficit + MINDMAP_SUMMARY_ORIENTATION_SWITCH_PENALTY;
+    if (previousOrientation === 'vertical'
+        && verticalCost <= horizontalCost + MINDMAP_SUMMARY_ORIENTATION_HYSTERESIS) {
+        return verticalEvaluation;
+    }
+    if (previousOrientation === 'horizontal'
+        && horizontalCost <= verticalCost + MINDMAP_SUMMARY_ORIENTATION_HYSTERESIS) {
+        return horizontalEvaluation;
+    }
+    return verticalCost <= horizontalCost ? verticalEvaluation : horizontalEvaluation;
 }
 
 function getMindMapSummaryLayoutDeficit(requiredSpace, anchors) {
@@ -3936,9 +4022,11 @@ function getMindMapSummaryGeometry(summary, layoutPlan = null) {
         };
     }
     const direction = selection.side === 'left' ? -1 : 1;
-    const braceX = selection.side === 'left'
-        ? bounds.left - MINDMAP_SUMMARY_BRACE_OFFSET
-        : bounds.right + MINDMAP_SUMMARY_BRACE_OFFSET;
+    const braceX = Number.isFinite(layoutPlan?.braceX)
+        ? layoutPlan.braceX
+        : (selection.side === 'left'
+            ? bounds.left - MINDMAP_SUMMARY_BRACE_OFFSET
+            : bounds.right + MINDMAP_SUMMARY_BRACE_OFFSET);
     const height = Math.max(80, bounds.bottom - bounds.top + 16);
     const depth = Math.min(18, Math.max(12, height * 0.08));
     return {
@@ -3947,7 +4035,7 @@ function getMindMapSummaryGeometry(summary, layoutPlan = null) {
         orientation,
         placement: selection.side,
         region: 'side',
-        path: getMindMapSummaryBracePath(bounds, selection.side),
+        path: getMindMapSummaryBracePath(bounds, selection.side, braceX),
         labelX: braceX + direction * (depth * 1.55 + MINDMAP_SUMMARY_LABEL_GAP),
         labelY: (bounds.top + bounds.bottom) / 2
     };
@@ -4106,7 +4194,10 @@ function createMindMapSummaryEditor(summaryId) {
         const summary = getMindMapSummaryById(editor.dataset.summaryId);
         if (summary) summary.topic = topic.innerText.slice(0, 200);
     });
-    topic.addEventListener('blur', recordHistory);
+    topic.addEventListener('blur', () => {
+        recordHistory();
+        scheduleRenderMindMapSummaries();
+    });
     topic.addEventListener('keydown', event => {
         event.stopPropagation();
         if (event.key === 'Escape' || ((event.ctrlKey || event.metaKey) && event.key === 'Enter')) {
@@ -4238,18 +4329,14 @@ function prepareMindMapSummaryLayout(summaries) {
     const plans = new Map();
     const spacingRequests = new Map();
     const occupiedSummaryRects = [];
-
-    summaries.forEach(summary => {
-        if (getMindMapSummaryRelationProfile(summary.nodeIds).orientation !== 'vertical') return;
-        const editor = document.querySelector(`.summary-editor[data-summary-id="${summary.id}"]`);
-        if (editor && editor.getClientRects().length > 0) {
-            occupiedSummaryRects.push(getMindMapCanvasRect(editor));
-        }
+    const activeSummaryIds = new Set(summaries.map(summary => summary.id));
+    Array.from(summaryOrientationCache.keys()).forEach(summaryId => {
+        if (!activeSummaryIds.has(summaryId)) summaryOrientationCache.delete(summaryId);
     });
 
     summaries.forEach(summary => {
         const geometry = getMindMapSummaryGeometry(summary);
-        if (!geometry || geometry.orientation !== 'horizontal') return;
+        if (!geometry) return;
         const editorSize = getMindMapSummaryEditorCanvasSize(summary.id);
         const evaluatePlacement = placement => {
             let labelOffset = 0;
@@ -4294,11 +4381,43 @@ function prepareMindMapSummaryLayout(summaries) {
         };
         const topEvaluation = evaluatePlacement('top');
         const bottomEvaluation = evaluatePlacement('bottom');
-        const chosen = chooseMindMapSummaryHorizontalLayout(
-            geometry.placement,
+        const rootCard = document.getElementById(`card-${state.data.id}`);
+        const rootRect = rootCard ? getMindMapCanvasRect(rootCard) : null;
+        const preferredHorizontalPlacement = geometry.orientation === 'horizontal'
+            ? geometry.placement
+            : getMindMapSummaryHorizontalPlacement(geometry.bounds, rootRect).placement;
+        const horizontalEvaluation = chooseMindMapSummaryHorizontalLayout(
+            preferredHorizontalPlacement,
             topEvaluation,
             bottomEvaluation
         );
+        let chosen = horizontalEvaluation;
+        if (geometry.orientation === 'vertical') {
+            const verticalEvaluation = getMindMapSummaryVerticalEvaluation(
+                geometry.bounds,
+                geometry.side,
+                editorSize,
+                summary.nodeIds,
+                occupiedSummaryRects
+            );
+            chosen = chooseMindMapSummaryAutoOrientation(
+                verticalEvaluation,
+                horizontalEvaluation,
+                summaryOrientationCache.get(summary.id) || null
+            );
+        }
+        summaryOrientationCache.set(summary.id, chosen.orientation);
+
+        if (chosen.orientation === 'vertical') {
+            plans.set(summary.id, {
+                orientation: 'vertical',
+                placement: geometry.side,
+                region: 'side',
+                braceX: chosen.candidate.braceX
+            });
+            occupiedSummaryRects.push(chosen.candidate.editorRect);
+            return;
+        }
         plans.set(summary.id, {
             orientation: 'horizontal',
             placement: chosen.placement,
@@ -4409,8 +4528,14 @@ function renderMindMapSummaries() {
         body.style.height = !isSimple && summary.heightMode === 'manual' && summary.bodyHeight
             ? `${summary.bodyHeight}px`
             : '';
-        const summaryTopic = String(summary.topic || '总结').slice(0, 200);
+        const summaryTopic = String(summary.topic ?? '总结').slice(0, 200);
         if (document.activeElement !== topic && topic.innerText !== summaryTopic) topic.textContent = summaryTopic;
+        const wasTopicEmpty = editor.classList.contains('topic-empty');
+        const isTopicEmpty = document.activeElement !== topic && !summaryTopic.trim();
+        editor.classList.toggle('topic-empty', isTopicEmpty);
+        if (wasTopicEmpty !== isTopicEmpty && geometry.orientation === 'horizontal') {
+            shouldRemeasureLayout = true;
+        }
         const summaryContent = getMindMapSummaryContent(summary);
         editor.classList.toggle('has-content', Boolean(summaryContent));
         if (body.dataset.summaryContent !== summaryContent) {
