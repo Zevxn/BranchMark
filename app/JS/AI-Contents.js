@@ -163,6 +163,24 @@ async function verifyPermission(handle, readWrite = false) {
     return await handle.requestPermission(options) === 'granted';
 }
 
+async function selectAndPersistObsidianHandle(actionLabel) {
+    try {
+        const directoryHandle = await window.showDirectoryPicker({
+            id: 'obsidian-vault',
+            mode: 'readwrite',
+            startIn: 'documents',
+        });
+        await writeFileHandle(OBSIDIAN_HANDLE_KEY, directoryHandle);
+        return directoryHandle;
+    } catch (error) {
+        if (error?.name !== 'AbortError') {
+            console.warn(`[Export] ${actionLabel}失败:`, error);
+            showTopToast(getI18nText('toast.dir_fail'));
+        }
+        return null;
+    }
+}
+
 async function getObsidianHandle() {
     if (typeof window.showDirectoryPicker !== 'function') return null;
 
@@ -175,21 +193,7 @@ async function getObsidianHandle() {
         }
     }
 
-    try {
-        directoryHandle = await window.showDirectoryPicker({
-            id: 'obsidian-vault',
-            mode: 'readwrite',
-            startIn: 'documents',
-        });
-        await writeFileHandle(OBSIDIAN_HANDLE_KEY, directoryHandle);
-        return directoryHandle;
-    } catch (error) {
-        if (error?.name !== 'AbortError') {
-            console.warn('[Export] 选择保存目录失败:', error);
-            showTopToast(getI18nText('toast.dir_fail'));
-        }
-        return null;
-    }
+    return selectAndPersistObsidianHandle('选择保存目录');
 }
 
 async function resetObsidianPath() {
@@ -206,22 +210,7 @@ async function changeObsidianPath() {
         showTopToast(getI18nText('toast.dir_fail'));
         return null;
     }
-
-    try {
-        const directoryHandle = await window.showDirectoryPicker({
-            id: 'obsidian-vault',
-            mode: 'readwrite',
-            startIn: 'documents',
-        });
-        await writeFileHandle(OBSIDIAN_HANDLE_KEY, directoryHandle);
-        return directoryHandle;
-    } catch (error) {
-        if (error?.name !== 'AbortError') {
-            console.warn('[Export] 切换保存目录失败:', error);
-            showTopToast(getI18nText('toast.dir_fail'));
-        }
-        return null;
-    }
+    return selectAndPersistObsidianHandle('切换保存目录');
 }
 
 async function saveFileDirectly(filename, content) {

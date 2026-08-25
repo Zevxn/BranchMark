@@ -7588,6 +7588,20 @@ function rgbToHex (rgb, saturation = 4) {
     
     return "#" + rHex + gHex + bHex;
 };
+
+async function writeMindMapCanvasExport(canvasData, fileName) {
+    const jsonString = JSON.stringify(canvasData, null, 2);
+    const isSaved = await saveFileDirectly(fileName, jsonString);
+    if (isSaved) {
+        showTopToast(`✅ 导图已保存到 Obsidian: ${fileName}`);
+        return true;
+    }
+
+    downloadFile(jsonString, fileName, 'application/json');
+    showTopToast(`✅ 已下载文件 (API 不可用或被拒绝)`);
+    return false;
+}
+
 async function exportToCanvas() {
     const nodes = [];
     const edges = [];
@@ -7701,16 +7715,7 @@ async function exportToCanvas() {
         edges: edges
     };
     const fileName = `${getMindMapExportBaseName()}.canvas`;
-    const jsonString = JSON.stringify(canvasData, null, 2);
-    
-    const isSaved = await saveFileDirectly(fileName, jsonString, 'application/json');
-    if (isSaved) {
-        showTopToast(`✅ 导图已保存到 Obsidian: ${fileName}`);
-    } else {
-        // 6. 降级方案：普通下载
-        downloadFile(jsonString, fileName, 'application/json');
-        showTopToast(`✅ 已下载文件 (API 不可用或被拒绝)`);
-    }
+    await writeMindMapCanvasExport(canvasData, fileName);
 }
 
 
@@ -7873,14 +7878,5 @@ async function exportToVerticalCanvas() {
     // 5. 导出文件
     const canvasData = { nodes, edges };
     const fileName=`${getMindMapExportBaseName()}_Vertical.canvas`;
-    const jsonString = JSON.stringify(canvasData, null, 2);
-
-    const isSaved = await saveFileDirectly(fileName, jsonString, 'application/json');
-    if (isSaved) {
-        showTopToast(`✅ 导图已保存到 Obsidian: ${fileName}`);
-    } else {
-        // 6. 降级方案：普通下载
-        downloadFile(jsonString, fileName, 'application/json');
-        showTopToast(`✅ 已下载文件 (API 不可用或被拒绝)`);
-    }
+    await writeMindMapCanvasExport(canvasData, fileName);
 }
