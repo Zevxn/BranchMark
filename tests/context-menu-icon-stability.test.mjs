@@ -25,7 +25,7 @@ assert.match(mindMap, /function positionMindMapContextMenu\(menu, clientX, clien
     '右键菜单应使用实际渲染尺寸定位，不能依赖固定宽高估算');
 assert.match(mindMap, /opensRight[\s\S]*?submenu-opens-left/,
     '右键菜单应根据右侧空间决定子菜单展开方向');
-assert.match(mindMap, /window\.innerHeight - submenuHeight - viewportMargin[\s\S]*?submenu\.style\.top/,
-    '子菜单纵向位置应限制在可见视口内');
+assert.match(mindMap, /viewportBottom - submenuHeight[\s\S]*?submenu\.style\.top/,
+    '子菜单纵向位置应限制在 Tab 栏上方的可见区域内');
 
 console.log('右键菜单文字稳定性校验通过：保留淡入和 hover 效果，移除父级缩放位移。');

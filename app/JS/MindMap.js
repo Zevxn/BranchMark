@@ -272,6 +272,17 @@ const mapSearchState = {
 };
 const MAP_SEARCH_CLIPBOARD_MAX_CHARS = 15;
 const CARD_BG='95%';
+const MINDMAP_CONTENT_PREVIEW_GAP = 12;
+const MINDMAP_CONTENT_PREVIEW_MARGIN = 12;
+const MINDMAP_CONTENT_PREVIEW_ARROW_INSET = 8;
+const MINDMAP_CONTENT_PREVIEW_MIN_HEIGHT = 52;
+const MINDMAP_CONTENT_PREVIEW_MIN_WIDTH = 120;
+const mindMapContentPreviewState = {
+    card: null,
+    el: null,
+    showTimer: null,
+    hideTimer: null,
+};
 let isUndoRedo = false;
 let saveTimer = null;
 let skipNextGlobalScrollCapture = false;
@@ -959,6 +970,7 @@ document.addEventListener('DOMContentLoaded', () => {
  ==============================================================================================*/
     initializeMapClickEvents(); // 初始化点击事件
     initializeMapMouseEvents(); // 初始化鼠标事件
+    initializeMindMapContentPreview(); // 折叠/便利贴卡片的悬停正文预览
     initializeMapContextMenu(); // 初始化右键菜单
     initializeNativeDragDrop(); // 初始化原生拖拽
     initializeEditorToolbar();  // 初始化md编辑器
@@ -1059,6 +1071,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 是否有文本被选中 (关键修复：防止复制文字时触发节点复制)
         const hasSelection = window.getSelection() && window.getSelection().toString().length > 0;
+
+        // 预览气泡内的文字应完整保留浏览器原生快捷键（尤其是复制与全选）。
+        if (activeEl?.closest?.('.card-content-preview')) return;
 
         // 搜索定位优先于浏览器页面查找，但编辑器打开时仍保留编辑器自身行为。
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !isModalActive) {
@@ -1393,6 +1408,22 @@ function initializeMapToolbar() {
 // =============================================================================
 // #region 右键菜单
 // =============================================================================
+function getMindMapOverlayViewportBottom(viewportHeight, tabTop, margin = 0) {
+    const viewportBottom = Math.max(margin, viewportHeight - margin);
+    if (!Number.isFinite(tabTop) || tabTop <= 0 || tabTop >= viewportHeight) return viewportBottom;
+    return Math.max(margin, Math.min(viewportBottom, tabTop - margin));
+}
+
+function getMindMapUsableViewportBottom(margin = 0) {
+    const tabBar = document.getElementById('mindMapTabs');
+    const tabRect = tabBar?.getClientRects().length ? tabBar.getBoundingClientRect() : null;
+    return getMindMapOverlayViewportBottom(
+        window.innerHeight,
+        tabRect?.top,
+        margin,
+    );
+}
+
 function getMindMapContextSubmenuSize(submenu) {
     if (!submenu) return { width: 0, height: 0 };
     const previousDisplay = submenu.style.display;
@@ -1407,15 +1438,25 @@ function getMindMapContextSubmenuSize(submenu) {
 
 function positionMindMapContextMenu(menu, clientX, clientY) {
     const viewportMargin = 8;
+    const viewportBottom = getMindMapUsableViewportBottom(viewportMargin);
     const submenu = menu.querySelector('.menu-item.has-submenu > .submenu');
     menu.classList.remove('submenu-opens-left');
+    menu.style.removeProperty('max-height');
+    menu.style.removeProperty('overflow-y');
     if (submenu) {
         submenu.style.top = '';
         submenu.style.bottom = '';
+        submenu.style.removeProperty('max-height');
+        submenu.style.removeProperty('overflow-y');
     }
     menu.classList.add('active');
 
     const menuWidth = menu.offsetWidth;
+    const availableMenuHeight = Math.max(0, viewportBottom - viewportMargin);
+    if (menu.offsetHeight > availableMenuHeight) {
+        menu.style.setProperty('max-height', `${availableMenuHeight}px`);
+        menu.style.setProperty('overflow-y', 'auto', 'important');
+    }
     const menuHeight = menu.offsetHeight;
     const x = Math.min(
         Math.max(Number.isFinite(clientX) ? clientX : viewportMargin, viewportMargin),
@@ -1423,13 +1464,18 @@ function positionMindMapContextMenu(menu, clientX, clientY) {
     );
     const y = Math.min(
         Math.max(Number.isFinite(clientY) ? clientY : viewportMargin, viewportMargin),
-        Math.max(viewportMargin, window.innerHeight - menuHeight - viewportMargin)
+        Math.max(viewportMargin, viewportBottom - menuHeight)
     );
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
 
     if (!submenu) return;
-    const { width: submenuWidth, height: submenuHeight } = getMindMapContextSubmenuSize(submenu);
+    let { width: submenuWidth, height: submenuHeight } = getMindMapContextSubmenuSize(submenu);
+    if (submenuHeight > availableMenuHeight) {
+        submenu.style.setProperty('max-height', `${availableMenuHeight}px`);
+        submenu.style.setProperty('overflow-y', 'auto');
+        submenuHeight = availableMenuHeight;
+    }
     const menuRect = menu.getBoundingClientRect();
     const opensRight = menuRect.right + 4 + submenuWidth <= window.innerWidth - viewportMargin;
     const opensLeft = menuRect.left - 4 - submenuWidth >= viewportMargin;
@@ -1441,7 +1487,7 @@ function positionMindMapContextMenu(menu, clientX, clientY) {
     const preferredTop = parentRect.top - 40;
     const top = Math.min(
         Math.max(preferredTop, viewportMargin),
-        Math.max(viewportMargin, window.innerHeight - submenuHeight - viewportMargin)
+        Math.max(viewportMargin, viewportBottom - submenuHeight)
     );
     submenu.style.top = `${top - parentRect.top}px`;
     submenu.style.bottom = 'auto';
@@ -2161,6 +2207,325 @@ function initializeMapClickEvents() {
 // =============================================================================
 // #region 鼠标事件监听初始化
 // =============================================================================
+function clampMindMapContentPreview(value, min, max) {
+    return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+function getMindMapRectOverlapArea(first, second) {
+    const width = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
+    const height = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
+    return width * height;
+}
+
+function getMindMapContentPreviewArrowOffset(placement, cardRect, previewRect) {
+    const target = placement === 'bottom'
+        ? cardRect.left + cardRect.width / 2 - previewRect.left
+        : cardRect.top + cardRect.height / 2 - previewRect.top;
+    const edgeLength = placement === 'bottom' ? previewRect.width : previewRect.height;
+    // 只有箭头若越过气泡边缘才退到安全边距；其余情况下始终精确落在卡片中心投影处。
+    return clampMindMapContentPreview(
+        target,
+        MINDMAP_CONTENT_PREVIEW_ARROW_INSET,
+        edgeLength - MINDMAP_CONTENT_PREVIEW_ARROW_INSET,
+    );
+}
+
+function getMindMapContentPreviewAvailableContentHeight(placement, previewRect, contentRect, viewport) {
+    const availableOuterHeight = placement === 'bottom'
+        ? Math.max(0, viewport.bottom - previewRect.top)
+        : Math.max(0, viewport.bottom - viewport.top);
+    const outerChromeHeight = Math.max(0, previewRect.height - contentRect.height);
+    return Math.max(0, availableOuterHeight - outerChromeHeight);
+}
+
+function getMindMapContentPreviewPlacement(cardRect, previewRect, viewport, occupiedRects = []) {
+    const previewWidth = previewRect.width;
+    const previewHeight = previewRect.height;
+    const cardCenterX = cardRect.left + cardRect.width / 2;
+    const cardCenterY = cardRect.top + cardRect.height / 2;
+    const viewportHeight = Math.max(0, viewport.bottom - viewport.top);
+    const sideHeight = Math.min(
+        previewHeight,
+        Math.max(MINDMAP_CONTENT_PREVIEW_MIN_HEIGHT, viewportHeight),
+    );
+    const buildSideCandidate = (placement, availableWidth) => {
+        const sideWidth = Math.min(previewWidth, Math.max(0, availableWidth));
+        const horizontalFits = sideWidth >= MINDMAP_CONTENT_PREVIEW_MIN_WIDTH;
+        const left = placement === 'right'
+            ? cardRect.right + MINDMAP_CONTENT_PREVIEW_GAP
+            : cardRect.left - MINDMAP_CONTENT_PREVIEW_GAP - sideWidth;
+        const top = clampMindMapContentPreview(
+            cardCenterY - sideHeight / 2,
+            viewport.top,
+            viewport.bottom - sideHeight,
+        );
+        const rect = {
+            left,
+            top,
+            right: left + sideWidth,
+            bottom: top + sideHeight,
+        };
+        const overlap = occupiedRects.reduce((total, occupied) => total + getMindMapRectOverlapArea(rect, occupied), 0);
+        return {
+            placement,
+            left,
+            top,
+            maxHeight: sideHeight,
+            maxWidth: sideWidth,
+            horizontalFits,
+            fullyVisible: horizontalFits && rect.top >= viewport.top && rect.bottom <= viewport.bottom,
+            overlap,
+        };
+    };
+
+    const bottomTop = cardRect.bottom + MINDMAP_CONTENT_PREVIEW_GAP;
+    const bottomAvailableHeight = Math.max(0, viewport.bottom - bottomTop);
+    const bottomHeight = Math.min(
+        previewHeight,
+        Math.max(MINDMAP_CONTENT_PREVIEW_MIN_HEIGHT, bottomAvailableHeight),
+    );
+    const bottomLeft = clampMindMapContentPreview(
+        cardCenterX - previewWidth / 2,
+        viewport.left,
+        viewport.right - previewWidth,
+    );
+    const bottomRect = {
+        left: bottomLeft,
+        top: bottomTop,
+        right: bottomLeft + previewWidth,
+        bottom: bottomTop + bottomHeight,
+    };
+    const bottomCandidate = {
+        placement: 'bottom',
+        left: bottomLeft,
+        top: bottomTop,
+        maxHeight: bottomHeight,
+        maxWidth: previewWidth,
+        horizontalFits: true,
+        fullyVisible: bottomRect.bottom <= viewport.bottom,
+        overlap: occupiedRects.reduce(
+            (total, occupied) => total + getMindMapRectOverlapArea(bottomRect, occupied),
+            0,
+        ),
+    };
+    const rightAvailableWidth = viewport.right - cardRect.right - MINDMAP_CONTENT_PREVIEW_GAP;
+    const leftAvailableWidth = cardRect.left - MINDMAP_CONTENT_PREVIEW_GAP - viewport.left;
+    const candidates = [
+        buildSideCandidate('right', rightAvailableWidth),
+        buildSideCandidate('left', leftAvailableWidth),
+        bottomCandidate,
+    ];
+    const horizontalCandidates = candidates.filter(
+        candidate => candidate.placement !== 'bottom' && candidate.horizontalFits,
+    );
+    // 上方由工具栏占用：有可用的左右空间时从三处选最少遮挡文字的位置；左右都放不下时固定落到下方。
+    const eligibleCandidates = horizontalCandidates.length > 0
+        ? [...horizontalCandidates, bottomCandidate]
+        : [bottomCandidate];
+    const selected = eligibleCandidates.reduce((best, candidate) => {
+        if (!best) return candidate;
+        if (candidate.fullyVisible !== best.fullyVisible) return candidate.fullyVisible ? candidate : best;
+        return candidate.overlap < best.overlap ? candidate : best;
+    }, null);
+    const arrowOffset = getMindMapContentPreviewArrowOffset(selected.placement, cardRect, {
+        left: selected.left,
+        top: selected.top,
+        width: selected.maxWidth,
+        height: selected.maxHeight,
+    });
+
+    return { ...selected, arrowOffset };
+}
+
+function clearMindMapContentPreviewTimer(name) {
+    if (mindMapContentPreviewState[name]) {
+        clearTimeout(mindMapContentPreviewState[name]);
+        mindMapContentPreviewState[name] = null;
+    }
+}
+
+function hideMindMapContentPreview() {
+    clearMindMapContentPreviewTimer('showTimer');
+    clearMindMapContentPreviewTimer('hideTimer');
+    mindMapContentPreviewState.el?.remove();
+    mindMapContentPreviewState.el = null;
+    mindMapContentPreviewState.card = null;
+}
+
+function scheduleMindMapContentPreviewHide() {
+    clearMindMapContentPreviewTimer('showTimer');
+    clearMindMapContentPreviewTimer('hideTimer');
+    mindMapContentPreviewState.hideTimer = setTimeout(() => {
+        const card = mindMapContentPreviewState.card;
+        const preview = mindMapContentPreviewState.el;
+        if (card?.matches(':hover') || preview?.matches(':hover')) return;
+        hideMindMapContentPreview();
+    }, 260);
+}
+
+function getMindMapContentPreviewViewport() {
+    const toolbarRect = document.querySelector('.toolbar')?.getBoundingClientRect();
+    const toolbarBottom = toolbarRect && toolbarRect.bottom > 0 ? toolbarRect.bottom + MINDMAP_CONTENT_PREVIEW_MARGIN : 0;
+    return {
+        left: MINDMAP_CONTENT_PREVIEW_MARGIN,
+        top: Math.max(MINDMAP_CONTENT_PREVIEW_MARGIN, toolbarBottom),
+        right: window.innerWidth - MINDMAP_CONTENT_PREVIEW_MARGIN,
+        bottom: getMindMapUsableViewportBottom(MINDMAP_CONTENT_PREVIEW_MARGIN),
+    };
+}
+
+function getMindMapContentPreviewOccupiedRects(sourceCard) {
+    return Array.from(document.querySelectorAll('.node-card, .summary-editor, .card-dock-container, .toolbar, .mindmap-tabs, .map-search-panel'))
+        .filter(element => element !== sourceCard && element.getClientRects().length > 0)
+        .map(element => element.getBoundingClientRect())
+        .filter(rect => rect.width > 0 && rect.height > 0);
+}
+
+function fitMindMapContentPreviewToViewport(preview, previewContent, card, placement, viewport) {
+    if (!preview?.isConnected || !previewContent || !card?.isConnected) return;
+
+    // 使用真实排版尺寸扣除外框厚度，避免“正文高度刚好、外框仍越界”。
+    for (let pass = 0; pass < 2; pass += 1) {
+        const previewRect = preview.getBoundingClientRect();
+        const contentRect = previewContent.getBoundingClientRect();
+        const availableContentHeight = getMindMapContentPreviewAvailableContentHeight(
+            placement.placement,
+            previewRect,
+            contentRect,
+            viewport,
+        );
+        const maxContentHeight = Math.min(placement.maxHeight, availableContentHeight);
+        previewContent.style.minHeight = `${Math.min(MINDMAP_CONTENT_PREVIEW_MIN_HEIGHT, maxContentHeight)}px`;
+        previewContent.style.maxHeight = `${maxContentHeight}px`;
+
+        const resizedRect = preview.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+        const desiredLeft = placement.placement === 'right'
+            ? cardRect.right + MINDMAP_CONTENT_PREVIEW_GAP
+            : placement.placement === 'left'
+                ? cardRect.left - MINDMAP_CONTENT_PREVIEW_GAP - resizedRect.width
+                : cardRect.left + cardRect.width / 2 - resizedRect.width / 2;
+        const correctedLeft = clampMindMapContentPreview(
+            desiredLeft,
+            viewport.left,
+            viewport.right - resizedRect.width,
+        );
+        preview.style.left = `${correctedLeft}px`;
+        if (placement.placement !== 'bottom') {
+            const cardCenterY = cardRect.top + cardRect.height / 2;
+            preview.style.top = `${clampMindMapContentPreview(
+                cardCenterY - resizedRect.height / 2,
+                viewport.top,
+                viewport.bottom - resizedRect.height,
+            )}px`;
+        }
+    }
+
+    const actualArrowOffset = getMindMapContentPreviewArrowOffset(
+        placement.placement,
+        card.getBoundingClientRect(),
+        preview.getBoundingClientRect(),
+    );
+    preview.style.setProperty('--preview-arrow-offset', `${actualArrowOffset}px`);
+}
+
+function canShowMindMapContentPreview(card) {
+    if (!card?.isConnected) return false;
+    const node = findNode(state.data, card.dataset.nodeId);
+    return Boolean(String(node?.content || '').trim())
+        && (card.classList.contains('simple') || !card.querySelector('.card-body'));
+}
+
+function showMindMapContentPreview(card) {
+    clearMindMapContentPreviewTimer('showTimer');
+    clearMindMapContentPreviewTimer('hideTimer');
+    if (!canShowMindMapContentPreview(card)) return;
+    if (mindMapContentPreviewState.card === card && mindMapContentPreviewState.el) return;
+
+    hideMindMapContentPreview();
+    const node = findNode(state.data, card.dataset.nodeId);
+    const preview = document.createElement('div');
+    preview.className = `card-content-preview${card.classList.contains('simple') ? ' simple-preview' : ''}`;
+    preview.dataset.placement = 'bottom';
+    preview.tabIndex = 0;
+    preview.setAttribute('aria-label', `${node.topic || '卡片'}的内容预览`);
+    // 与普通卡片共用 card-body/md-content 结构和 Markdown 渲染路径，确保样式及富内容一致。
+    preview.innerHTML = createMindMapNodeContentBodyHTML(node.content);
+    const previewContent = preview.firstElementChild;
+    preview.addEventListener('pointerenter', () => clearMindMapContentPreviewTimer('hideTimer'));
+    preview.addEventListener('pointerleave', event => {
+        if (!card.contains(event.relatedTarget)) scheduleMindMapContentPreviewHide();
+    });
+    preview.addEventListener('pointerdown', () => preview.focus());
+    preview.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+            const range = document.createRange();
+            range.selectNodeContents(preview);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            event.preventDefault();
+        }
+    });
+    document.body.appendChild(preview);
+    const processRichContentResult = processRichContent(previewContent);
+    // 长内容绝不能因富内容布局或浏览器恢复行为而从中间开始显示。
+    const resetPreviewScrollTop = () => {
+        if (preview.isConnected) previewContent.scrollTop = 0;
+    };
+    resetPreviewScrollTop();
+    requestAnimationFrame(resetPreviewScrollTop);
+    setTimeout(resetPreviewScrollTop, 0);
+
+    const previewViewport = getMindMapContentPreviewViewport();
+    const placement = getMindMapContentPreviewPlacement(
+        card.getBoundingClientRect(),
+        preview.getBoundingClientRect(),
+        previewViewport,
+        getMindMapContentPreviewOccupiedRects(card),
+    );
+    preview.dataset.placement = placement.placement;
+    preview.style.maxWidth = `${placement.maxWidth}px`;
+    previewContent.style.maxHeight = `${placement.maxHeight}px`;
+    preview.style.left = `${placement.left}px`;
+    preview.style.top = `${placement.top}px`;
+    fitMindMapContentPreviewToViewport(preview, previewContent, card, placement, previewViewport);
+    preview.classList.add('is-visible');
+    mindMapContentPreviewState.card = card;
+    mindMapContentPreviewState.el = preview;
+    Promise.resolve(processRichContentResult).then(() => {
+        requestAnimationFrame(() => {
+            if (!preview.isConnected) return;
+            fitMindMapContentPreviewToViewport(preview, previewContent, card, placement, previewViewport);
+            resetPreviewScrollTop();
+        });
+    });
+}
+
+function scheduleMindMapContentPreviewShow(card) {
+    clearMindMapContentPreviewTimer('hideTimer');
+    if (!canShowMindMapContentPreview(card) || mindMapContentPreviewState.card === card) return;
+    clearMindMapContentPreviewTimer('showTimer');
+    mindMapContentPreviewState.showTimer = setTimeout(() => {
+        if (card.matches(':hover')) showMindMapContentPreview(card);
+    }, 30);
+}
+
+function initializeMindMapContentPreview() {
+    document.addEventListener('pointerover', event => {
+        const card = event.target.closest('.node-card');
+        if (!card || card.contains(event.relatedTarget)) return;
+        scheduleMindMapContentPreviewShow(card);
+    });
+    document.addEventListener('pointerout', event => {
+        const card = event.target.closest('.node-card');
+        const preview = mindMapContentPreviewState.el;
+        if (!card || card.contains(event.relatedTarget) || preview?.contains(event.relatedTarget)) return;
+        scheduleMindMapContentPreviewHide();
+    });
+    window.addEventListener('resize', hideMindMapContentPreview);
+}
+
 function initializeMapMouseEvents() {
     // --- 新增变量：用于性能优化的节流阀 ---
     let rafId = null; 
@@ -2214,6 +2579,8 @@ function initializeMapMouseEvents() {
     // #region 鼠标按下事件
     document.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; 
+        // 预览气泡位于画布外；在其中选择、复制文字时不能触发画布平移或卡片操作。
+        if (e.target.closest('.card-content-preview')) return;
          // ▼▼▼ [新增功能] 空格键按下时，强制进入平移模式 (优先级最高) ▼▼▼
         if (isSpacePressed) {
             state.mode = 'PANNING';
@@ -6053,6 +6420,10 @@ function getMindMapResizeHandlesHTML() {
         + '<div class="resize-handle resize-br" data-resize="wh"></div>';
 }
 
+function createMindMapNodeContentBodyHTML(content, style = '') {
+    return `<div class="card-body md-content" style="${style}">${renderMarkdown(content)}</div>`;
+}
+
 function toggleMindMapEntitySimpleMode(entity) {
     entity.isSimple = !entity.isSimple;
     entity.heightMode = 'auto';
@@ -6215,7 +6586,9 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
         }
     }
 
-    const bodyContent = (hasContent && !isContentCollapsed) ? renderMarkdown(node.content) : '';
+    const bodyContent = (hasContent && !isContentCollapsed && !isSimple)
+        ? createMindMapNodeContentBodyHTML(node.content, `${bodyHeightStyle} ${bodyBgStyle}`)
+        : '';
     const toggleIcon = isSimple ? 'ri-layout-top-2-line' : 'ri-sticky-note-line';
     const toggleTitle = isSimple ? '切换回标准卡片' : '切换为便利贴模式';
 
@@ -6260,7 +6633,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
                 ${hasContent && !isContentCollapsed && !isSimple ? `<i class="ri-aspect-ratio-line tool-icon" data-action="auto-height" title="自适应尺寸"></i>` : ''}
                 ${hasContent && !isSimple && !isCompactCollapsed ? `<i class="tool-icon ${node.contentCollapsed?'ri-arrow-down-s-line':'ri-arrow-up-s-line'}" data-action="toggle-content"></i>` : ''}
             </div>
-            ${hasContent && !isContentCollapsed && !isSimple ? `<div class="card-body md-content" style="${bodyHeightStyle} ${bodyBgStyle}">${bodyContent}</div>` : ''}
+            ${bodyContent}
             ${resizeHandles}
             ${foldBtn}
         </div>
@@ -6268,6 +6641,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
     </div>`;
 }
 function renderTree() {
+    hideMindMapContentPreview();
     closeMindMapRelationNavigationMenu();
     if (skipNextGlobalScrollCapture) skipNextGlobalScrollCapture = false;
     else saveGlobalScrolls();
@@ -6439,6 +6813,7 @@ function updateChildrenDOM(nodeId) {
 };
 
 function updateNodeDOM(nodeId) {
+    if (mindMapContentPreviewState.card?.dataset.nodeId === nodeId) hideMindMapContentPreview();
     if(nodeId === state.data.id) { renderTree(); return; }
     
     saveGlobalScrolls();

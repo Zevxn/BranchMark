@@ -53,6 +53,9 @@
             --shadow-color-hover: rgba(0, 0, 0, 0.219);
             --shadow-color-active: rgba(24,144,255,0.15);
             --node-default-color: rgba(0,0,0,0.15);
+            --node-card-max-width: 600px;
+            --node-card-max-body-height: 600px;
+            --simple-card-max-height: 400px;
             
             /* 工具栏与弹窗 */
             --toolbar-bg: white;
@@ -1186,7 +1189,7 @@
             background: var(--card-bg); border: var(--node-card-border-width) solid var(--card-border); border-radius: var(--node-card-radius);
             box-shadow: 0 2px 8px var(--shadow-color); display: flex; flex-direction: column; position: relative;
             transition: box-shadow 0.2s, border-color 0.2s;
-            width: fit-content; min-width: 120px; max-width: 600px; 
+            width: fit-content; min-width: 120px; max-width: var(--node-card-max-width);
             flex-shrink: 0; z-index: 10;
             overflow: visible;
             transition: box-shadow 0.2s, border-color 0.2s, background-color 0.2s;
@@ -1283,9 +1286,83 @@
 
         .card-body {
             padding: 3px 10px; overflow-y: auto; overflow-x: hidden; background: var(--card-bg); border-radius: 0 0 8px 8px;
-            height: auto; max-height: 600px; min-height: 0; color: var(--text-color);
+            height: auto; max-height: var(--node-card-max-body-height); min-height: 0; color: var(--text-color);
             user-select: text;  /* 允许文字被选中 */
             cursor: auto;       /* 鼠标恢复为文本指针 */
+        }
+
+        /* 折叠卡片与便利贴的正文预览：固定在视口中，避免受脑图画布缩放和裁切影响。 */
+        .card-content-preview {
+            position: fixed;
+            z-index: 880;
+            box-sizing: border-box;
+            /* left 已由定位逻辑给定，固定定位元素在 auto 宽度下会按正文内容收缩。 */
+            width: auto;
+            max-width: min(var(--node-card-max-width), calc(100vw - 24px));
+            padding: 0;
+            overflow: visible;
+            color: var(--text-color);
+            background: var(--card-bg);
+            border: 1px solid var(--toolbar-border);
+            border-radius: var(--node-card-radius, 8px);
+            box-shadow: 0 8px 24px var(--shadow-color-hover);
+            user-select: text;
+            cursor: text;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.12s ease;
+        }
+        .card-content-preview.simple-preview {
+            max-height: none;
+        }
+        /* 正文节点沿用普通卡片的 body 结构；它负责内容滚动，外层才能露出箭头。 */
+        .card-content-preview .card-body {
+            box-sizing: border-box;
+            width: auto;
+            min-width: 0;
+            min-height: 52px;
+            max-height: min(var(--node-card-max-body-height), calc(100vh - 24px));
+            border-radius: inherit;
+            padding: 10px 12px;
+        }
+        .card-content-preview .card-body > :first-child { margin-top: 0; }
+        .card-content-preview .card-body > :last-child { margin-bottom: 0; }
+        .card-content-preview.simple-preview .card-body {
+            max-height: min(var(--simple-card-max-height), calc(100vh - 24px));
+        }
+        .card-content-preview.is-visible {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+        }
+        .card-content-preview::before {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background: var(--card-bg);
+            border: 1px solid var(--toolbar-border);
+            border-radius: 2px;
+            transform: rotate(45deg);
+            z-index: 0;
+            pointer-events: none;
+        }
+        .card-content-preview > * {
+            position: relative;
+            z-index: 1;
+        }
+        .card-content-preview[data-placement="right"]::before {
+            left: -7px;
+            top: calc(var(--preview-arrow-offset) - 6px);
+        }
+        .card-content-preview[data-placement="left"]::before {
+            right: -7px;
+            top: calc(var(--preview-arrow-offset) - 6px);
+        }
+        .card-content-preview[data-placement="bottom"]::before {
+            top: -7px;
+            left: calc(var(--preview-arrow-offset) - 6px);
         }
 
         /* Resize Handles */
@@ -1517,7 +1594,7 @@
             min-width: 150px;
             /* 关键：给一个默认的最大高度限制，防止 auto 时撑破屏幕，
             但在 manual 模式下会被 inline-style 覆盖 */
-            max-height: 400px; 
+            max-height: var(--simple-card-max-height);
         }
 
         /* 便利贴的内容区域 (其实是 header) */
@@ -1662,7 +1739,8 @@
         /* ============================== 右键菜单 =============================== 右键菜单 == */
         .context-menu {
             position: fixed;
-            z-index: 3000;
+            z-index: 880;
+            box-sizing: border-box;
             background: var(--modal-bg);
             border: 1px solid var(--toolbar-border);
             border-radius: 8px;

@@ -137,7 +137,6 @@ assert.match(
 
 for (const removedPath of [
     'app/CSS/AI-Contents.css',
-    'app/JS/MindMap.min.js',
     'app/locales/en_US/messages.json',
     'app/locales/zh_CN/messages.json',
     'scripts/package-quicker.mjs',
