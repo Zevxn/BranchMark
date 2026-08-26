@@ -1449,11 +1449,36 @@ function positionMindMapContextMenu(menu, clientX, clientY) {
 
 function initializeMapContextMenu() {
     const contextMenu = document.getElementById('contextMenu');
+    let contextTargetKind = 'node';
+    let contextTargetId = null;
+
+    const resetActionVisibility = () => {
+        contextMenu.querySelectorAll(':scope > .menu-item[data-action]').forEach(item => {
+            item.style.display = '';
+        });
+    };
+    const setActionVisibility = (action, visible) => {
+        const item = contextMenu.querySelector(`:scope > .menu-item[data-action="${action}"]`);
+        if (item) item.style.display = visible ? '' : 'none';
+    };
+    const setDeleteLabel = label => {
+        const item = contextMenu.querySelector(':scope > .menu-item[data-action="delete"]');
+        if (!item) return;
+        const icon = item.querySelector('i');
+        item.replaceChildren();
+        if (icon) item.appendChild(icon);
+        item.append(` ${label}`);
+    };
     
     // 1. 监听右键点击 (呼出菜单)
     document.addEventListener('contextmenu', (e) => {
         if (e.target.closest('.bookmark-manager-container')) return;
-        if (!e.target.closest('.node-card')) return;
+        const summaryEditor = e.target.closest('.summary-editor');
+        const card = e.target.closest('.node-card');
+        if (!summaryEditor && !card) return;
+
+        e.preventDefault();
+        resetActionVisibility();
 
         const expandItem=contextMenu.querySelector('.menu-item[data-action="expand"]');
         const collapseItem=contextMenu.querySelector('.menu-item[data-action="collapse"]');
@@ -1461,11 +1486,34 @@ function initializeMapContextMenu() {
         const toSimpleItem=contextMenu.querySelector('.menu-item[data-action="to-simple"]');
         const addRelationItem=contextMenu.querySelector('.menu-item[data-action="add-relation"]');
         const createTabItem=contextMenu.querySelector('.menu-item[data-action="create-tab-from-node"]');
-        const card = e.target.closest('.node-card');
+
+        if (summaryEditor) {
+            const summary = getMindMapSummaryById(summaryEditor.dataset.summaryId);
+            if (!summary) {
+                contextMenu.classList.remove('active');
+                return;
+            }
+            contextTargetKind = 'summary';
+            contextTargetId = summary.id;
+            selectMindMapSummary(summary.id);
+            setDeleteLabel('删除总结');
+            ['cut', 'copy', 'paste', 'add-relation', 'create-tab-from-node', 'expand', 'collapse']
+                .forEach(action => setActionVisibility(action, false));
+            toStandardItem.style.display = summary.isSimple ? '' : 'none';
+            toSimpleItem.style.display = summary.isSimple ? 'none' : '';
+            positionMindMapContextMenu(contextMenu, e.clientX, e.clientY);
+            return;
+        }
+
+        contextTargetKind = 'node';
+        contextTargetId = card.dataset.nodeId;
+        setDeleteLabel('删除节点');
+        clearSelectedMindMapRelation();
+        clearSelectedMindMapSummary();
         const node = findNode(state.data, card.dataset.nodeId);
         const isCompactCollapsed = isTemporarilyCollapsed(node);
 
-        if (!card) {
+        if (!node) {
             contextMenu.classList.remove('active');
             return;
         }
@@ -1501,8 +1549,6 @@ function initializeMapContextMenu() {
             }
         }
 
-        e.preventDefault();
-
         // 选中逻辑
         const nodeId = card.dataset.nodeId;
         if (!state.selectedIds.has(nodeId)) {
@@ -1526,7 +1572,7 @@ function initializeMapContextMenu() {
         const item = e.target.closest('.menu-item');
         const swatch = e.target.closest('.color-swatch'); // 【修改】使用新类名
 
-        if ((!item && !swatch) || (item && item.classList.contains('has-submenu'))) return;
+        if ((!item && !swatch) || (!swatch && item && item.classList.contains('has-submenu'))) return;
 
         let action = item ? item.dataset.action : null;
         let colorVal = null;
@@ -1534,6 +1580,33 @@ function initializeMapContextMenu() {
         if (swatch) {
             action = 'set-color';
             colorVal = swatch.dataset.color; // 【修改】使用 data-val
+        }
+        if (contextTargetKind === 'summary') {
+            const summary = getMindMapSummaryById(contextTargetId);
+            if (!summary) {
+                contextMenu.classList.remove('active');
+                return;
+            }
+            if (action === 'copy-md') {
+                navigator.clipboard.writeText(summary.content || '');
+                showTopToast('✅ Markdown内容已复制！');
+            } else if (action === 'delete') {
+                state.selectedSummaryId = summary.id;
+                deleteSelectedMindMapSummary();
+            } else if (action === 'auto-fit') {
+                autoFitMindMapEntity(summary, 'summary');
+            } else if (
+                (action === 'to-simple' && !summary.isSimple)
+                || (action === 'to-standard' && summary.isSimple)
+            ) {
+                toggleMindMapEntitySimpleMode(summary);
+                recordHistory();
+                scheduleRenderMindMapSummaries();
+            } else if (action === 'set-color' && applyColorToMindMapSelection(colorVal)) {
+                recordHistory();
+            }
+            contextMenu.classList.remove('active');
+            return;
         }
         // 复制粘贴操作不需要进入下面的 forEach 循环，因为它们自己会处理 state.selectedIds
         if (action === 'cut') {

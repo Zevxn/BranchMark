@@ -116,6 +116,14 @@ assert.match(mindMap, /function prepareMindMapSummaryLayout\(summaries\)[\s\S]*?
     '横向总结应先比较局部空白与实际所需空间，只对不足部分申请布局占位');
 assert.match(mindMap, /function getMindMapSummarySelectedBranchAnchor[\s\S]*?ancestorChains[\s\S]*?ancestorChains\.every\(chain => chain\.includes\(unit\)\)/,
     '总结布局应找到共同包含全部成员卡片的分支边界');
+assert.match(mindMap, /function initializeMapContextMenu\(\)[\s\S]*?const summaryEditor = e\.target\.closest\('\.summary-editor'\)[\s\S]*?selectMindMapSummary\(summary\.id\)/,
+    '右击总结卡片时应复用脑图右键菜单并选中对应总结');
+assert.match(mindMap, /contextTargetKind = 'node'[\s\S]*?clearSelectedMindMapRelation\(\);[\s\S]*?clearSelectedMindMapSummary\(\);/,
+    '从总结切换到普通卡片右键菜单时应清理旧的独立对象选中态');
+assert.match(mindMap, /\['cut', 'copy', 'paste', 'add-relation', 'create-tab-from-node', 'expand', 'collapse'\][\s\S]*?setActionVisibility\(action, false\)/,
+    '总结右键菜单应隐藏依赖树节点结构的不适用功能');
+assert.match(mindMap, /contextTargetKind === 'summary'[\s\S]*?action === 'copy-md'[\s\S]*?action === 'delete'[\s\S]*?action === 'auto-fit'[\s\S]*?action === 'to-simple'[\s\S]*?action === 'set-color'/,
+    '总结右键菜单应复用复制、删除、自适应、模式切换和颜色动作');
 assert.match(mindMap, /const useSelectedBoundary = placement === 'top'[\s\S]*?let direction = useSelectedBoundary \? 'before' : \(placement === 'top' \? 'after' : 'before'\)/,
     '上方总结应移动成员分支，下方总结应直接推动实际碰撞的完整障碍分支');
 assert.match(mindMap, /other\.anchor\.contains\(candidate\.anchor\)/,
