@@ -86,6 +86,10 @@ assert.match(mindMap, /document\.querySelectorAll\('\.fold-btn'\)[\s\S]*?MINDMAP
     '可见折叠按钮应作为带安全间距的路由障碍');
 assert.match(mindMap, /function getMindMapRelationFoldCorridors\(cardRects\)/,
     '路由应计算折叠按钮与相邻子卡片之间的几何中线');
+assert.match(mindMap, /function getMindMapRelationRouteFoldCorridors\(/,
+    '折叠按钮走廊应按自然路线筛选，避免影响可从其他方向通过的线路');
+assert.match(mindMap, /const naturalRoute = routeMindMapRelation\([\s\S]*?\[\][\s\S]*?getMindMapRelationRouteFoldCorridors\(naturalRoute, preferredChannels\)/,
+    '单条关联线应先计算无通道偏好的自然路线，再决定是否启用折叠走廊');
 assert.match(mindMap, /getMindMapRelationRoutingKey\(relations, cardRects, controlObstacles, preferredChannels\)/,
     '折叠按钮位置变化后应使关系路由缓存失效');
 assert.match(mindMap, /collectMindMapNodeIds\(findNode\(state\.data,id\), deletedNodeIds\)[\s\S]*?removeMindMapRelationsForNodes\(deletedNodeIds\)/,
@@ -297,6 +301,52 @@ assert.equal(vm.runInContext(`
             [foldOwnerObstacle, foldButtonObstacle, foldChildObstacle, unrelatedGridObstacle]
         ))
 `, routingContext), true, '绕行折叠按钮的每一段线路都应保持安全间距');
+
+routingContext.foldCorridorScope = [{
+    id: 'fold-corridor:fold-owner:0',
+    ownerId: 'fold-owner',
+    axis: 'x',
+    coordinate: 116,
+    gapMin: 104,
+    gapMax: 128,
+    triggerMin: 82,
+    triggerMax: 118,
+    min: 52,
+    max: 148,
+    side: 'right',
+    neighborIds: ['fold-child']
+}];
+routingContext.leftNaturalRoute = {
+    points: [
+        { x: 40, y: 40 },
+        { x: 40, y: 200 },
+        { x: 180, y: 200 }
+    ]
+};
+assert.equal(vm.runInContext(
+    'getMindMapRelationRouteFoldCorridors(leftNaturalRoute, foldCorridorScope).length',
+    routingContext,
+), 0, '自然路线可从左侧通过时，即使两端横跨通道也不应被折叠走廊吸附');
+routingContext.crossingNaturalRoute = {
+    points: [
+        { x: 40, y: 100 },
+        { x: 180, y: 100 }
+    ]
+};
+assert.equal(vm.runInContext(
+    'getMindMapRelationRouteFoldCorridors(crossingNaturalRoute, foldCorridorScope).length',
+    routingContext,
+), 1, '自然路线确实横穿折叠按钮父子间隙时应启用该走廊');
+routingContext.verticalGapRoute = {
+    points: [
+        { x: 116, y: 20 },
+        { x: 116, y: 180 }
+    ]
+};
+assert.equal(vm.runInContext(
+    'getMindMapRelationRouteFoldCorridors(verticalGapRoute, foldCorridorScope).length',
+    routingContext,
+), 1, '自然路线纵向经过折叠按钮父子间隙时也应启用该走廊');
 
 routingContext.occupiedRoute = [{ from: { x: 0, y: 50 }, to: { x: 400, y: 50 } }];
 const separatedRoute = vm.runInContext(

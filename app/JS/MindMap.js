@@ -4568,8 +4568,13 @@ function getMindMapRelationFoldCorridors(cardRects) {
         const verticalRects = [buttonRect, ...childRects, ...(ownerRect ? [ownerRect] : [])];
         corridors.push({
             id: `fold-corridor:${ownerId}:${index}`,
+            ownerId,
             axis: 'x',
             coordinate: (buttonBoundary + childBoundary) / 2,
+            gapMin: Math.min(buttonBoundary, childBoundary),
+            gapMax: Math.max(buttonBoundary, childBoundary),
+            triggerMin: buttonRect.top - MINDMAP_RELATION_ROUTING_PADDING,
+            triggerMax: buttonRect.bottom + MINDMAP_RELATION_ROUTING_PADDING,
             min: Math.min(...verticalRects.map(rect => rect.top)) - MINDMAP_RELATION_ROUTING_PADDING,
             max: Math.max(...verticalRects.map(rect => rect.bottom)) + MINDMAP_RELATION_ROUTING_PADDING,
             side: isLeft ? 'left' : 'right',
@@ -4577,6 +4582,31 @@ function getMindMapRelationFoldCorridors(cardRects) {
         });
     });
     return corridors;
+}
+
+function getMindMapRelationRouteFoldCorridors(route, corridors = []) {
+    if (!route?.points?.length || corridors.length === 0) return [];
+    const epsilon = 0.1;
+    const segments = getMindMapRelationSegments(route.points);
+
+    return corridors.filter(corridor => corridor.axis === 'x' && segments.some(segment => {
+        const horizontal = Math.abs(segment.from.y - segment.to.y) < epsilon;
+        if (horizontal) {
+            const y = segment.from.y;
+            if (y < corridor.triggerMin - epsilon || y > corridor.triggerMax + epsilon) return false;
+            const minX = Math.min(segment.from.x, segment.to.x);
+            const maxX = Math.max(segment.from.x, segment.to.x);
+            return minX <= corridor.coordinate + epsilon && maxX >= corridor.coordinate - epsilon;
+        }
+
+        const x = segment.from.x;
+        const minY = Math.min(segment.from.y, segment.to.y);
+        const maxY = Math.max(segment.from.y, segment.to.y);
+        const overlapsVerticalRange = Math.max(minY, corridor.triggerMin)
+            <= Math.min(maxY, corridor.triggerMax) + epsilon;
+        const insideFoldGap = x >= corridor.gapMin - epsilon && x <= corridor.gapMax + epsilon;
+        return overlapsVerticalRange && insideFoldGap;
+    }));
 }
 
 function getMindMapRelationRoutingKey(relations, cardRects, controlObstacles = [], preferredChannels = []) {
@@ -4604,9 +4634,14 @@ function getMindMapRelationRoutingKey(relations, cardRects, controlObstacles = [
         channel.id,
         channel.axis,
         Math.round(channel.coordinate * 10),
+        Math.round(channel.gapMin * 10),
+        Math.round(channel.gapMax * 10),
+        Math.round(channel.triggerMin * 10),
+        Math.round(channel.triggerMax * 10),
         Math.round(channel.min * 10),
         Math.round(channel.max * 10),
         channel.side,
+        channel.ownerId,
         channel.neighborIds
     ]);
     return JSON.stringify([geometry, controlGeometry, channelGeometry, relationState]);
@@ -4651,13 +4686,24 @@ function buildMindMapRelationRoutes(relations, cardRects, controlObstacles = [],
         const sourceRect = cardRects.get(sourceId);
         const targetRect = cardRects.get(targetId);
         if (!sourceRect || !targetRect) return;
-        const route = routeMindMapRelation(
+        const naturalRoute = routeMindMapRelation(
             sourceRect,
             targetRect,
             obstacles,
             occupiedSegments,
-            preferredChannels
+            []
         );
+        if (!naturalRoute) return;
+        const relationChannels = getMindMapRelationRouteFoldCorridors(naturalRoute, preferredChannels);
+        const route = relationChannels.length > 0
+            ? routeMindMapRelation(
+                sourceRect,
+                targetRect,
+                obstacles,
+                occupiedSegments,
+                relationChannels
+            ) || naturalRoute
+            : naturalRoute;
         if (!route) return;
         routes.set(relation.id, route);
         occupiedSegments.push(...getMindMapRelationSegments(route.points));
