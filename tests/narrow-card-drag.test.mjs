@@ -69,5 +69,37 @@ assert.match(html, /\.resize-br\s*\{[^}]*z-index:\s*51/,
     '右下角手柄应高于侧边和底边手柄，以稳定接收双向自适应操作');
 assert.match(html, /\.resize-bl\s*\{[^}]*z-index:\s*51/,
     '左下角手柄应高于侧边和底边手柄，以稳定接收双向自适应操作');
+assert.match(html, /\.node-card\s*\{[\s\S]*?--node-card-radius:\s*8px[\s\S]*?--node-card-border-width:\s*2px/,
+    '卡片应声明角标所需的圆角和边框宽度变量');
+assert.match(html, /\.node-card\.is-root\s*\{[^}]*--node-card-border-width:\s*4px/,
+    '根节点应覆盖边框宽度变量，使角标跟随更粗的根节点边框');
+assert.match(html, /\.node-card \.resize-br,\s*\.node-card \.resize-bl\s*\{[\s\S]*?bottom:\s*0[\s\S]*?width:\s*32px[\s\S]*?height:\s*32px[\s\S]*?overflow:\s*hidden/,
+    '卡片底角手柄应覆盖在卡片内侧，并提供足够大的拖拽区域');
+assert.match(html, /\.node-card \.resize-bl::after,\s*\.node-card \.resize-br::after\s*\{[\s\S]*?width:\s*100%[\s\S]*?height:\s*100%[\s\S]*?background:\s*color-mix\(in srgb, var\(--text-color-secondary\) 62%, transparent\)[\s\S]*?pointer-events:\s*none/,
+    '两侧尺寸手柄应共用不截获鼠标事件的灰色三角角标样式');
+assert.match(html, /\.node-card \.resize-bl\s*\{[^}]*border-bottom-left-radius:\s*max\(0px, calc\(var\(--node-card-radius\) - var\(--node-card-border-width\)\)\)/,
+    '左下角手柄应按卡片内侧圆角裁切');
+assert.match(html, /\.node-card \.resize-br\s*\{[^}]*border-bottom-right-radius:\s*max\(0px, calc\(var\(--node-card-radius\) - var\(--node-card-border-width\)\)\)/,
+    '右下角手柄应按卡片内侧圆角裁切');
+assert.match(html, /\.node-card \.resize-bl::after\s*\{[^}]*clip-path:\s*polygon\(0 0, 0 100%, 100% 100%\)/,
+    '左下角手柄应显示向左镜像的灰色三角角标');
+assert.match(html, /\.node-card \.resize-br::after\s*\{[^}]*clip-path:\s*polygon\(100% 0, 100% 100%, 0 100%\)/,
+    '右下角手柄应显示向右镜像的灰色三角角标');
+const standardTopicWrapperRule = html.match(/\.node-card:not\(\.simple\) \.topic-wrapper\s*\{([^}]*)\}/);
+assert.ok(standardTopicWrapperRule, '标准卡片标题外层应具有独立的收缩规则');
+assert.match(standardTopicWrapperRule[1], /flex:\s*1 1 auto/,
+    '标题外层应参与 Flex 收缩，不能由长标题撑开卡片');
+assert.match(standardTopicWrapperRule[1], /min-width:\s*0/,
+    '标题外层必须解除默认最小内容宽度限制');
+assert.match(standardTopicWrapperRule[1], /overflow:\s*hidden/,
+    '标题外层应裁切超出卡片宽度的文本');
+const standardTopicRule = html.match(/\.node-card:not\(\.simple\) \.node-topic\s*\{([^}]*)\}/);
+assert.ok(standardTopicRule, '标准卡片标题文本应具有独立的收缩规则');
+assert.match(standardTopicRule[1], /min-width:\s*0/,
+    '标题文本必须允许收缩，才能显示省略号而不溢出');
+assert.match(standardTopicRule[1], /flex:\s*1 1 auto/,
+    '标题文本应填充并收缩标题可用空间');
+assert.match(html, /\.node-card\.simple \.node-topic\s*\{[\s\S]*?white-space:\s*pre-wrap/,
+    '便利贴标题仍应保留原有自动换行行为');
 
 console.log('卡片交互校验通过：悬浮工具栏、双击自适应与新节点直接输入逻辑完整。');
