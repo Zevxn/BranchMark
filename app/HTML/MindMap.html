@@ -235,6 +235,113 @@
             display: none;
         }
         .toolbar.hide-bar{ top: -65px; } 
+        #btn-settings { flex: 0 0 auto; }
+        .mindmap-settings-popover {
+            position: fixed;
+            z-index: 1100;
+            width: min(300px, calc(100vw - 24px));
+            box-sizing: border-box;
+            padding: 8px;
+            color: var(--text-color);
+            background: color-mix(in srgb, var(--toolbar-bg) 96%, transparent);
+            border: 1px solid var(--toolbar-border);
+            border-radius: 10px;
+            box-shadow: 0 10px 30px var(--shadow-color-hover);
+            backdrop-filter: blur(12px);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transform: translateY(-6px);
+            transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s ease;
+        }
+        .mindmap-settings-popover.is-open {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+            transform: translateY(0);
+        }
+        .mindmap-settings-title {
+            padding: 6px 8px 8px;
+            color: var(--text-color);
+            font-size: 13px;
+            font-weight: 650;
+        }
+        .mindmap-setting-row {
+            display: grid;
+            grid-template-columns: 28px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 8px;
+            min-height: 48px;
+            padding: 6px 8px;
+            border-radius: 7px;
+            cursor: pointer;
+        }
+        .mindmap-setting-row:hover { background: var(--btn-hover); }
+        .mindmap-setting-icon {
+            display: grid;
+            place-items: center;
+            color: var(--text-color-secondary);
+            font-size: 17px;
+        }
+        .mindmap-setting-copy { min-width: 0; }
+        .mindmap-setting-name {
+            display: block;
+            color: var(--text-color);
+            font-size: 13px;
+            font-weight: 550;
+            line-height: 1.35;
+        }
+        .mindmap-setting-value {
+            display: block;
+            margin-top: 2px;
+            color: var(--text-color-secondary);
+            font-size: 11px;
+            line-height: 1.3;
+        }
+        .mindmap-setting-toggle {
+            position: relative;
+            width: 34px;
+            height: 20px;
+            flex: 0 0 auto;
+        }
+        .mindmap-setting-toggle input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+        }
+        .mindmap-setting-switch {
+            position: absolute;
+            inset: 0;
+            box-sizing: border-box;
+            background: var(--scroll-thumb);
+            border: 1px solid color-mix(in srgb, var(--text-color-secondary) 24%, transparent);
+            border-radius: 999px;
+            transition: background-color 0.16s ease, border-color 0.16s ease;
+        }
+        .mindmap-setting-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 14px;
+            height: 14px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.24);
+            transition: transform 0.16s ease;
+        }
+        .mindmap-setting-toggle input:checked + .mindmap-setting-switch {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+        .mindmap-setting-toggle input:checked + .mindmap-setting-switch::after {
+            transform: translateX(14px);
+        }
+        .mindmap-setting-toggle input:focus-visible + .mindmap-setting-switch {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
         .toolbar .btn,
         .modal-head .btn { border: 1px solid transparent; background: transparent; padding: 6px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px; font-size: 14px; color: var(--text-color-secondary); position: relative; }
         .toolbar .btn:hover:not(:disabled):not(.primary),
@@ -639,6 +746,7 @@
             font-variant-numeric: tabular-nums;
         }
         .node-stats-divider { opacity: 0.42; }
+        .node-stats[hidden] { display: none; }
         .mindmap-tabs {
             position: fixed;
             left: 0;
@@ -1364,6 +1472,10 @@
             top: -7px;
             left: calc(var(--preview-arrow-offset) - 6px);
         }
+        .card-content-preview[data-placement="top"]::before {
+            bottom: -7px;
+            left: calc(var(--preview-arrow-offset) - 6px);
+        }
 
         /* Resize Handles */
         .resize-handle { position: absolute; opacity: 0; z-index: 50; transition: 0.1s; }
@@ -1571,10 +1683,14 @@
             left: 0;
             height: 7px;
         }
-        .node-card:hover > .card-floating-tools,
         .node-card:focus-within > .card-floating-tools,
-        .summary-editor:hover > .card-floating-tools,
         .summary-editor:focus-within > .card-floating-tools {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+        }
+        :root:not([data-card-toolbar-hover="false"]) .node-card:hover > .card-floating-tools,
+        :root:not([data-card-toolbar-hover="false"]) .summary-editor:hover > .card-floating-tools {
             opacity: 1;
             visibility: visible;
             pointer-events: auto;
@@ -2060,8 +2176,6 @@
             opacity: 0.6; 
         }
 
-        #btn-theme-toggle { flex: 0 0 auto; }
-
         /* WebView2 中 display:none 的文件输入框可能拒绝脚本触发选择器。
            保留一个已渲染但不可见的控件，供 showPicker()/click() 使用。 */
         .mindmap-file-input {
@@ -2117,10 +2231,47 @@
             <i class="ri-folder-settings-line"></i>
         </button>
         <div class="divider"></div>
-        <button class="btn" id="btn-theme-toggle" type="button" title="切换到暗色模式" aria-label="切换亮暗模式">
-            <i class="ri-moon-line"></i>
+        <button class="btn" id="btn-settings" type="button" title="设置" aria-label="打开设置" aria-haspopup="dialog" aria-controls="mindMapSettingsPopover" aria-expanded="false">
+            <i class="ri-settings-3-line"></i>
         </button>
     </div>
+
+    <section class="mindmap-settings-popover" id="mindMapSettingsPopover" role="dialog" aria-label="思维导图设置" aria-hidden="true">
+        <div class="mindmap-settings-title">设置</div>
+        <label class="mindmap-setting-row" for="settingThemeToggle">
+            <span class="mindmap-setting-icon"><i class="ri-contrast-2-line" aria-hidden="true"></i></span>
+            <span class="mindmap-setting-copy">
+                <span class="mindmap-setting-name">暗色模式</span>
+                <span class="mindmap-setting-value" id="settingThemeValue">当前为亮色</span>
+            </span>
+            <span class="mindmap-setting-toggle">
+                <input id="settingThemeToggle" type="checkbox">
+                <span class="mindmap-setting-switch" aria-hidden="true"></span>
+            </span>
+        </label>
+        <label class="mindmap-setting-row" for="settingCardToolbarHoverToggle">
+            <span class="mindmap-setting-icon"><i class="ri-tools-line" aria-hidden="true"></i></span>
+            <span class="mindmap-setting-copy">
+                <span class="mindmap-setting-name">悬停显示卡片工具栏</span>
+                <span class="mindmap-setting-value" id="settingCardToolbarHoverValue">悬停时显示</span>
+            </span>
+            <span class="mindmap-setting-toggle">
+                <input id="settingCardToolbarHoverToggle" type="checkbox" checked>
+                <span class="mindmap-setting-switch" aria-hidden="true"></span>
+            </span>
+        </label>
+        <label class="mindmap-setting-row" for="settingNodeStatsToggle">
+            <span class="mindmap-setting-icon"><i class="ri-bar-chart-box-line" aria-hidden="true"></i></span>
+            <span class="mindmap-setting-copy">
+                <span class="mindmap-setting-name">显示左下角统计</span>
+                <span class="mindmap-setting-value" id="settingNodeStatsValue">显示节点统计</span>
+            </span>
+            <span class="mindmap-setting-toggle">
+                <input id="settingNodeStatsToggle" type="checkbox" checked>
+                <span class="mindmap-setting-switch" aria-hidden="true"></span>
+            </span>
+        </label>
+    </section>
 
     <section class="map-search-panel" id="mapSearchPanel" role="dialog" aria-label="搜索卡片" aria-hidden="true">
         <div class="map-search-bar">

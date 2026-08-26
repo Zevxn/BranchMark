@@ -20,8 +20,8 @@ const context = vm.createContext({
 });
 vm.runInContext(source.slice(helperStart, helperEnd), context, { filename: 'content-preview-placement.js' });
 
-const getPlacement = (card, preview, viewport, occupied = []) => vm.runInContext(
-    `getMindMapContentPreviewPlacement(${JSON.stringify(card)}, ${JSON.stringify(preview)}, ${JSON.stringify(viewport)}, ${JSON.stringify(occupied)})`,
+const getPlacement = (card, preview, viewport, occupied = [], allowTop = false) => vm.runInContext(
+    `getMindMapContentPreviewPlacement(${JSON.stringify(card)}, ${JSON.stringify(preview)}, ${JSON.stringify(viewport)}, ${JSON.stringify(occupied)}, ${allowTop})`,
     context,
 );
 
@@ -81,6 +81,18 @@ assert.equal(narrowedRightPlacement.placement, 'right',
     '右侧达到最小可读宽度时，应收缩气泡宽度而不是错误回退到下方');
 assert.equal(narrowedRightPlacement.maxWidth, 168,
     '右侧气泡宽度应限制为卡片与视口右边缘之间的实际剩余空间');
+
+const topPlacement = getPlacement(card, preview, viewport, [
+    { left: 532, top: 230, right: 792, bottom: 410 },
+    { left: 128, top: 230, right: 388, bottom: 410 },
+    { left: 330, top: 372, right: 590, bottom: 552 },
+], true);
+assert.equal(topPlacement.placement, 'top',
+    '关闭悬停工具栏后，应把卡片上方加入候选并在遮挡更少时选中');
+assert.equal(topPlacement.arrowOffset, 130,
+    '上方气泡的箭头仍应指向卡片横向中心');
+assert.match(mindMapHtml, /\.card-content-preview\[data-placement="top"\]::before\s*\{[^}]*bottom:\s*-7px/s,
+    '上方气泡的箭头应位于气泡底边并朝向目标卡片');
 
 const availableContentHeight = vm.runInContext(
     "getMindMapContentPreviewAvailableContentHeight('bottom', { top: 148, height: 140 }, { height: 138 }, { top: 64, bottom: 271 })",

@@ -73,7 +73,11 @@ assert.equal(native.window.chrome.webview, nativeWebView,
 assert.ok(nativeWrites.length > 0, '启动时应修复当前脑图的旧快照并写回 Quicker');
 assert.deepEqual(JSON.parse(nativeWrites.at(-1).value).chrome.MindMapData, startupSnapshot);
 
-await native.window.chrome.storage.local.set({ mindmap_theme: 'dark' });
+await native.window.chrome.storage.local.set({
+    mindmap_theme: 'dark',
+    mindmap_card_toolbar_hover: false,
+    mindmap_node_stats_visible: false,
+});
 const bookmarkData = { folders: {}, items: {}, rootOrder: [] };
 await native.window.chrome.runtime.sendMessage({
     action: 'IDB_SET',
@@ -87,6 +91,8 @@ assert.deepEqual(bookmarkResult.data.bookmarkData, bookmarkData);
 const nativeState = JSON.parse(nativeWrites.at(-1).value);
 assert.equal(nativeWrites.at(-1).key, 'app_data_json');
 assert.equal(nativeState.chrome.mindmap_theme, 'dark');
+assert.equal(nativeState.chrome.mindmap_card_toolbar_hover, false);
+assert.equal(nativeState.chrome.mindmap_node_stats_visible, false);
 assert.deepEqual(nativeState.idb.bookmarkData, bookmarkData);
 
 let transportRuntimeWindow = null;
@@ -151,7 +157,12 @@ assert.deepEqual(reopenedAsyncReference.data['MindMapData.__REF__async_file-extr
 const browserValues = new Map();
 const browser = startRuntime({ storageValues: browserValues, host: 'browser-mindmap.test' });
 assert.equal(browser.window.__DEEPCONVO_NATIVE_QUICKER_HOST__, false);
-await browser.window.chrome.storage.local.set({ mindmap_theme: 'light', currentFileID: 'browser_file' });
+await browser.window.chrome.storage.local.set({
+    mindmap_theme: 'light',
+    mindmap_card_toolbar_hover: false,
+    mindmap_node_stats_visible: false,
+    currentFileID: 'browser_file',
+});
 await browser.window.chrome.runtime.sendMessage({
     action: 'IDB_SET',
     data: { bookmarkData, 'MindMapData.__REF__browser_file-extra': startupSnapshot },
@@ -160,12 +171,18 @@ assert.ok(browserValues.has('deepconvo-standalone:chrome:mindmap_theme'));
 assert.ok(browserValues.has('deepconvo-standalone:idb:bookmarkData'));
 
 const reopenedBrowser = startRuntime({ storageValues: browserValues, host: 'browser-mindmap.test' });
-const reopenedTheme = await reopenedBrowser.window.chrome.storage.local.get('mindmap_theme');
+const reopenedSettings = await reopenedBrowser.window.chrome.storage.local.get([
+    'mindmap_theme',
+    'mindmap_card_toolbar_hover',
+    'mindmap_node_stats_visible',
+]);
 const reopenedBookmarks = await reopenedBrowser.window.chrome.runtime.sendMessage({
     action: 'IDB_GET',
     keys: 'bookmarkData',
 });
-assert.equal(reopenedTheme.mindmap_theme, 'light');
+assert.equal(reopenedSettings.mindmap_theme, 'light');
+assert.equal(reopenedSettings.mindmap_card_toolbar_hover, false);
+assert.equal(reopenedSettings.mindmap_node_stats_visible, false);
 assert.equal(JSON.stringify(reopenedBookmarks.data.bookmarkData), JSON.stringify(bookmarkData));
 
 console.log('存储同步校验通过：Quicker 原生变量与普通浏览器本地存储均可读写并恢复数据。');
