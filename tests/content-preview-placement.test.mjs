@@ -14,6 +14,8 @@ assert.ok(helperStart >= 0 && helperEnd > helperStart,
 const context = vm.createContext({
     MINDMAP_CONTENT_PREVIEW_GAP: 12,
     MINDMAP_CONTENT_PREVIEW_ARROW_INSET: 8,
+    MINDMAP_CONTENT_PREVIEW_ARROW_CORNER_CLEARANCE: 24,
+    MINDMAP_CONTENT_PREVIEW_BOTTOM_COMFORT_HEIGHT: 160,
     MINDMAP_CONTENT_PREVIEW_MIN_HEIGHT: 52,
     MINDMAP_CONTENT_PREVIEW_MIN_WIDTH: 120,
     Math,
@@ -94,6 +96,41 @@ assert.equal(topPlacement.arrowOffset, 130,
 assert.match(mindMapHtml, /\.card-content-preview\[data-placement="top"\]::before\s*\{[^}]*bottom:\s*-7px/s,
     '上方气泡的箭头应位于气泡底边并朝向目标卡片');
 
+const bottomEdgeCard = { left: 800, top: 740, width: 200, height: 100, right: 1000, bottom: 840 };
+const edgeConstrainedPlacement = getPlacement(
+    bottomEdgeCard,
+    { width: 600, height: 720 },
+    { left: 12, top: 64, right: 1200, bottom: 800 },
+    [],
+    true,
+);
+assert.equal(edgeConstrainedPlacement.placement, 'top',
+    '底部卡片使左右箭头贴近角落时，应优先选择能正对卡片中心的上方气泡');
+assert.ok(edgeConstrainedPlacement.arrowEdgeClearance >= 24,
+    '选中的箭头应保留足够的边角间距，避免落在气泡角落');
+
+const constrainedSideArrow = getPlacement(
+    bottomEdgeCard,
+    { width: 600, height: 720 },
+    { left: 12, top: 64, right: 1200, bottom: 800 },
+);
+assert.ok(constrainedSideArrow.arrowEdgeClearance < 24 || constrainedSideArrow.arrowAlignmentError > 1,
+    '没有上方候选时，算法应明确识别左右箭头被挤到边角的受限状态');
+
+const shallowBottomPlacement = getPlacement(
+    { left: 320, top: 15, width: 206, height: 48, right: 526, bottom: 63 },
+    { width: 480, height: 74 },
+    { left: 12, top: 12, right: 1000, bottom: 176 },
+    [
+        { left: 31, top: 15, right: 269, bottom: 63 },
+        { left: 576, top: 15, right: 816, bottom: 63 },
+    ],
+);
+assert.notEqual(shallowBottomPlacement.placement, 'bottom',
+    '下方只剩卡片与 Tab 栏之间的狭窄走廊时，应优先选择可读的左右候选');
+assert.ok(shallowBottomPlacement.availableHeight >= 160,
+    '被选中的侧边候选应拥有完整的纵向可用高度');
+
 const availableContentHeight = vm.runInContext(
     "getMindMapContentPreviewAvailableContentHeight('bottom', { top: 148, height: 140 }, { height: 138 }, { top: 64, bottom: 271 })",
     context,
@@ -127,5 +164,8 @@ assert.match(source, /function positionMindMapContextMenu[\s\S]*?getMindMapUsabl
     '右键菜单定位必须复用 Tab 栏感知的可用底边');
 assert.match(source, /function getMindMapContentPreviewViewport[\s\S]*?getMindMapUsableViewportBottom\(MINDMAP_CONTENT_PREVIEW_MARGIN\)/,
     '预览气泡定位必须复用 Tab 栏感知的可用底边');
+assert.match(source,
+    /Promise\.resolve\(processRichContentResult\)\.then\([\s\S]*?positionMindMapContentPreview\(preview, previewContent, card, true\)/,
+    'Mermaid 等富内容渲染完成后，必须按真实尺寸重新选择预览方向');
 
 console.log('内容预览定位校验通过：避让文字、左右不足时下置、箭头对齐卡片中心。');
