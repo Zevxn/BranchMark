@@ -4888,6 +4888,20 @@ function clearMindMapSummaryLayoutSpaces() {
     return previousSpaces;
 }
 
+function getMindMapSummarySelectedBranchAnchor(selectedCards) {
+    const ancestorChains = selectedCards.map(card => {
+        const chain = [];
+        let unit = card.closest('.child-unit');
+        while (unit) {
+            chain.push(unit);
+            unit = unit.parentElement?.closest('.child-unit') || null;
+        }
+        return chain;
+    }).filter(chain => chain.length > 0);
+    if (ancestorChains.length !== selectedCards.length || ancestorChains.length === 0) return null;
+    return ancestorChains[0].find(unit => ancestorChains.every(chain => chain.includes(unit))) || null;
+}
+
 function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = null) {
     const selectedIds = new Set(nodeIds || []);
     const selectedCards = Array.from(selectedIds)
@@ -4895,6 +4909,7 @@ function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = 
         .filter(Boolean);
     if (selectedCards.length === 0 || !candidate?.collisionRect) return [];
 
+    const selectedBranchAnchor = getMindMapSummarySelectedBranchAnchor(selectedCards);
     const obstaclesByAnchor = new Map();
     document.querySelectorAll('.node-card').forEach(card => {
         if (selectedIds.has(card.dataset.nodeId) || card.getClientRects().length === 0) return;
@@ -4906,10 +4921,20 @@ function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = 
             && rect.bottom > collisionRect.top;
         if (!intersects) return;
 
-        const closestUnit = card.closest('.child-unit');
-        const anchor = closestUnit && !selectedCards.some(selectedCard => closestUnit.contains(selectedCard))
-            ? closestUnit
-            : null;
+        const useSelectedBoundary = placement === 'top'
+            && selectedBranchAnchor
+            && !selectedBranchAnchor.contains(card);
+        let anchor = useSelectedBoundary ? selectedBranchAnchor : null;
+        let direction = useSelectedBoundary ? 'before' : (placement === 'top' ? 'after' : 'before');
+        if (!useSelectedBoundary) {
+            // 下方总结必须直接推动实际碰撞的分支；上方总结遇到内部障碍时亦如此。
+            anchor = null;
+            let currentUnit = card.closest('.child-unit');
+            while (currentUnit && !selectedCards.some(selectedCard => currentUnit.contains(selectedCard))) {
+                anchor = currentUnit;
+                currentUnit = currentUnit.parentElement?.closest('.child-unit') || null;
+            }
+        }
         const distance = placement === 'top'
             ? bounds.top - rect.bottom
             : rect.top - bounds.bottom;
@@ -4919,7 +4944,7 @@ function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = 
             obstaclesByAnchor.set(key, {
                 anchor,
                 obstacle: card,
-                direction: placement === 'top' ? 'after' : 'before',
+                direction,
                 distance
             });
         }
@@ -4928,7 +4953,7 @@ function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = 
         || !Array.from(obstaclesByAnchor.values()).some(other =>
             other !== candidate
             && other.anchor
-            && candidate.anchor.contains(other.anchor)
+            && other.anchor.contains(candidate.anchor)
         ));
 }
 

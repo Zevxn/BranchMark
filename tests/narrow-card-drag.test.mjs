@@ -73,18 +73,26 @@ assert.match(html, /\.node-card\s*\{[\s\S]*?--node-card-radius:\s*8px[\s\S]*?--n
     '卡片应声明角标所需的圆角和边框宽度变量');
 assert.match(html, /\.node-card\.is-root\s*\{[^}]*--node-card-border-width:\s*4px/,
     '根节点应覆盖边框宽度变量，使角标跟随更粗的根节点边框');
-assert.match(html, /\.node-card \.resize-br,\s*\.node-card \.resize-bl\s*\{[\s\S]*?bottom:\s*0[\s\S]*?width:\s*32px[\s\S]*?height:\s*32px[\s\S]*?overflow:\s*hidden/,
-    '卡片底角手柄应覆盖在卡片内侧，并提供足够大的拖拽区域');
-assert.match(html, /\.node-card \.resize-bl::after,\s*\.node-card \.resize-br::after\s*\{[\s\S]*?width:\s*100%[\s\S]*?height:\s*100%[\s\S]*?background:\s*color-mix\(in srgb, var\(--text-color-secondary\) 62%, transparent\)[\s\S]*?pointer-events:\s*none/,
-    '两侧尺寸手柄应共用不截获鼠标事件的灰色三角角标样式');
-assert.match(html, /\.node-card \.resize-bl\s*\{[^}]*border-bottom-left-radius:\s*max\(0px, calc\(var\(--node-card-radius\) - var\(--node-card-border-width\)\)\)/,
-    '左下角手柄应按卡片内侧圆角裁切');
-assert.match(html, /\.node-card \.resize-br\s*\{[^}]*border-bottom-right-radius:\s*max\(0px, calc\(var\(--node-card-radius\) - var\(--node-card-border-width\)\)\)/,
-    '右下角手柄应按卡片内侧圆角裁切');
+assert.match(html, /\.node-card \.resize-br,\s*\.node-card \.resize-bl\s*\{[\s\S]*?bottom:\s*calc\(-1 \* var\(--node-card-border-width\)\)[\s\S]*?width:\s*32px[\s\S]*?height:\s*32px[\s\S]*?overflow:\s*hidden/,
+    '卡片底角手柄应补偿边框宽度并提供足够大的拖拽区域');
+assert.match(html, /\.node-card \.resize-bl::after,\s*\.node-card \.resize-br::after\s*\{[\s\S]*?width:\s*20px[\s\S]*?height:\s*20px[\s\S]*?background:\s*color-mix\(in srgb, var\(--text-color-secondary\) 62%, transparent\)[\s\S]*?pointer-events:\s*none/,
+    '两侧尺寸手柄应共用不截获鼠标事件的灰色小三角角标样式');
+assert.match(html, /\.node-card \.resize-bl\s*\{[^}]*left:\s*calc\(-1 \* var\(--node-card-border-width\)\)[^}]*border-bottom-left-radius:\s*var\(--node-card-radius\)/,
+    '左下角手柄应补偿边框并按卡片外侧圆角裁切');
+assert.match(html, /\.node-card \.resize-br\s*\{[^}]*right:\s*calc\(-1 \* var\(--node-card-border-width\)\)[^}]*border-bottom-right-radius:\s*var\(--node-card-radius\)/,
+    '右下角手柄应补偿边框并按卡片外侧圆角裁切');
 assert.match(html, /\.node-card \.resize-bl::after\s*\{[^}]*clip-path:\s*polygon\(0 0, 0 100%, 100% 100%\)/,
     '左下角手柄应显示向左镜像的灰色三角角标');
 assert.match(html, /\.node-card \.resize-br::after\s*\{[^}]*clip-path:\s*polygon\(100% 0, 100% 100%, 0 100%\)/,
     '右下角手柄应显示向右镜像的灰色三角角标');
+assert.match(html, /\.summary-editor\s*\{[\s\S]*?--summary-card-radius:\s*8px[\s\S]*?--summary-card-border-width:\s*2px/,
+    '总结卡片应声明独立的圆角和边框宽度变量');
+assert.match(html, /\.summary-editor \.resize-br,\s*\.summary-editor \.resize-bl\s*\{[\s\S]*?bottom:\s*calc\(-1 \* var\(--summary-card-border-width\)\)[\s\S]*?width:\s*32px[\s\S]*?height:\s*32px/,
+    '总结卡片应提供与普通卡片一致的大尺寸底角拖拽热区');
+assert.match(html, /\.summary-editor \.resize-bl::after,\s*\.summary-editor \.resize-br::after\s*\{[\s\S]*?width:\s*20px[\s\S]*?height:\s*20px[\s\S]*?pointer-events:\s*none/,
+    '总结卡片应显示不截获鼠标事件的灰色三角角标');
+assert.match(html, /\.summary-editor \.resize-br\s*\{[^}]*right:\s*calc\(-1 \* var\(--summary-card-border-width\)\)[^}]*border-bottom-right-radius:\s*var\(--summary-card-radius\)/,
+    '总结卡片右下角标应贴合自身圆角');
 const standardTopicWrapperRule = html.match(/\.node-card:not\(\.simple\) \.topic-wrapper\s*\{([^}]*)\}/);
 assert.ok(standardTopicWrapperRule, '标准卡片标题外层应具有独立的收缩规则');
 assert.match(standardTopicWrapperRule[1], /flex:\s*1 1 auto/,
