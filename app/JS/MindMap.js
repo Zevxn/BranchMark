@@ -7,6 +7,7 @@ if (typeof marked !== 'undefined') marked.use({ breaks: true, gfm: true });
 const MINDMAP_THEME_STORAGE_KEY = 'mindmap_theme';
 const MINDMAP_CARD_TOOLBAR_HOVER_STORAGE_KEY = 'mindmap_card_toolbar_hover';
 const MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY = 'mindmap_node_stats_visible';
+const MINDMAP_CARD_MIN_WIDTH = 100;
 const mindMapSettings = {
     cardToolbarHover: true,
     nodeStatsVisible: true,
@@ -2897,18 +2898,17 @@ function initializeMapMouseEvents() {
                 let delta = e.clientX - state.resize.mx;
                 if(isLeftCard) delta = -delta; 
                 
-                newWidth = state.resize.startW + (delta / s);
-                newWidth = Math.max(120, Math.min(600, newWidth)); // 限制范围
+                const rawWidth = state.resize.startW + (delta * state.resize.widthPointerFactor / s);
+                newWidth = Math.max(state.resize.minWidth, Math.min(600, rawWidth)); // 限制范围
             }
             
             // --- B. 计算高度 ---
             if(state.resize.dir.includes('h')) { 
-                const delta = e.clientY - state.resize.my;
+                const delta = (e.clientY - state.resize.my) * state.resize.heightPointerDirection;
                 const isSimple = n.isSimple;
                 const maxHeightLimit = isSimple ? 400 : 800;
-                
-                newHeight = state.resize.startH + (delta * 2 / s);
-                newHeight = Math.max(state.resize.minHeight, Math.min(maxHeightLimit, newHeight));
+                const rawHeight = state.resize.startH + (delta * state.resize.heightPointerFactor / s);
+                newHeight = Math.max(state.resize.minHeight, Math.min(maxHeightLimit, rawHeight));
             }
 
             // 3. 应用到当前操作的节点
@@ -2951,7 +2951,9 @@ function initializeMapMouseEvents() {
                 // ▲▲▲ 新增结束 ▲▲▲
                 // =========================================================
             }
-            scheduleRenderMindMapSummaries();
+            // 总结卡片已经直接更新当前 DOM；拖拽期间再次执行布局规划会改写它的
+            // transform/位置，让手柄脱离光标。节点缩放仍需实时刷新关联的总结括号。
+            if (resizeKind !== 'summary') scheduleRenderMindMapSummaries();
 
             // stabilizeRoot();
         }
@@ -5111,7 +5113,7 @@ function getMindMapSummaryHorizontalCandidate(bounds, placement, editorSize, lab
     const braceY = getMindMapSummaryHorizontalBraceY(bounds, placement);
     const labelY = braceY + direction * (depth * 1.55 + MINDMAP_SUMMARY_LABEL_GAP + labelOffset);
     const centerX = (bounds.left + bounds.right) / 2;
-    const editorWidth = Math.max(120, editorSize?.width || MINDMAP_SUMMARY_ESTIMATED_WIDTH);
+    const editorWidth = Math.max(MINDMAP_CARD_MIN_WIDTH, editorSize?.width || MINDMAP_SUMMARY_ESTIMATED_WIDTH);
     const editorHeight = Math.max(60, editorSize?.height || MINDMAP_SUMMARY_ESTIMATED_HEIGHT);
     const editorRect = {
         left: centerX - editorWidth / 2,
@@ -5149,7 +5151,7 @@ function getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffse
     const depth = Math.min(18, Math.max(12, height * 0.08));
     const labelX = braceX + direction * (depth * 1.55 + MINDMAP_SUMMARY_LABEL_GAP);
     const labelY = (bounds.top + bounds.bottom) / 2;
-    const editorWidth = Math.max(120, editorSize?.width || MINDMAP_SUMMARY_ESTIMATED_WIDTH);
+    const editorWidth = Math.max(MINDMAP_CARD_MIN_WIDTH, editorSize?.width || MINDMAP_SUMMARY_ESTIMATED_WIDTH);
     const editorHeight = Math.max(60, editorSize?.height || MINDMAP_SUMMARY_ESTIMATED_HEIGHT);
     const editorRect = {
         left: side === 'left' ? labelX - editorWidth : labelX,
@@ -5623,7 +5625,7 @@ function getMindMapSummaryEditorCanvasSize(summaryId) {
     }
     const rect = getMindMapCanvasRect(editor);
     return {
-        width: Math.max(120, rect.width),
+        width: Math.max(MINDMAP_CARD_MIN_WIDTH, rect.width),
         height: Math.max(60, rect.height)
     };
 }
@@ -6684,10 +6686,10 @@ function autoFitMindMapEntity(target, kind = 'node', direction = 'wh') {
 
 function beginMindMapResize(event, target, kind, element) {
     if (!target || !element) return;
-    const bodySelector = kind === 'summary' ? '.summary-card-body' : '.card-body';
-    const body = target.isSimple ? null : element.querySelector(bodySelector);
-    const heightElement = body || element;
-    const minHeight = Number.parseFloat(window.getComputedStyle(heightElement).minHeight);
+    const heightElement = getMindMapEntityHeightElement(target, kind, element);
+    const body = heightElement === element ? null : heightElement;
+    const minWidth = getMindMapEntityMinWidth(element);
+    const minHeight = getMindMapEntityMinHeight(target, kind, element);
     state.mode = 'RESIZING';
     state.resize = {
         node: target,
@@ -6697,7 +6699,11 @@ function beginMindMapResize(event, target, kind, element) {
         handleEl: event.target,
         startW: element.offsetWidth,
         startH: body ? body.offsetHeight : element.offsetHeight,
-        minHeight: Number.isFinite(minHeight) ? minHeight : 0,
+        minWidth,
+        minHeight,
+        widthPointerFactor: getMindMapResizePointerFactor(kind, element, 'width'),
+        heightPointerFactor: getMindMapResizePointerFactor(kind, element, 'height'),
+        heightPointerDirection: getMindMapResizeHeightDirection(kind, element),
         mx: event.clientX,
         my: event.clientY,
         startViewTy: state.view.ty
@@ -6707,23 +6713,60 @@ function beginMindMapResize(event, target, kind, element) {
     event.stopPropagation();
 }
 
+function getMindMapResizePointerFactor(kind, element, axis) {
+    if (kind !== 'summary' || !element?.classList.contains('horizontal')) {
+        return axis === 'height' ? 2 : 1;
+    }
+    // 横向总结卡片以 X 轴中心定位，宽度每增加 2px，右侧手柄只移动 1px；
+    // 高度则由靠近括号的一侧锚定，手柄与高度保持 1:1。
+    return axis === 'width' ? 2 : 1;
+}
+
+function getMindMapResizeHeightDirection(kind, element) {
+    // 顶部总结卡片的底边与括号锚定，因此把高度手柄放在自由的顶边；
+    // 向上拖动（负 delta）应增加高度。
+    return kind === 'summary'
+        && element?.classList.contains('horizontal')
+        && element.classList.contains('placement-top')
+        ? -1
+        : 1;
+}
+
+function getMindMapEntityHeightElement(target, kind, element) {
+    if (!target || !element || target.isSimple) return element;
+    return element.querySelector(kind === 'summary' ? '.summary-card-body' : '.card-body') || element;
+}
+
+function getMindMapEntityMinHeight(target, kind, element) {
+    const heightElement = getMindMapEntityHeightElement(target, kind, element);
+    const minHeight = Number.parseFloat(window.getComputedStyle(heightElement).minHeight);
+    return Number.isFinite(minHeight) ? minHeight : 0;
+}
+
+function getMindMapEntityMinWidth(element) {
+    const minWidth = Number.parseFloat(window.getComputedStyle(element).minWidth);
+    return Number.isFinite(minWidth) ? minWidth : MINDMAP_CARD_MIN_WIDTH;
+}
+
 function applyMindMapEntitySize(target, kind, width, height, sourceIsSimple) {
     const element = getMindMapResizableElement(target, kind);
     if (!element) return;
     if (width !== null) {
-        target.width = width;
+        const safeWidth = Math.max(getMindMapEntityMinWidth(element), width);
+        target.width = safeWidth;
         target.widthMode = 'manual';
-        element.style.width = `${width}px`;
+        element.style.width = `${safeWidth}px`;
     }
     if (height === null || Boolean(target.isSimple) !== Boolean(sourceIsSimple)) return;
-    target.bodyHeight = height;
+    const safeHeight = Math.max(getMindMapEntityMinHeight(target, kind, element), height);
+    target.bodyHeight = safeHeight;
     target.heightMode = 'manual';
     if (target.isSimple) {
-        element.style.height = `${height}px`;
+        element.style.height = `${safeHeight}px`;
         return;
     }
     const body = element.querySelector(kind === 'summary' ? '.summary-card-body' : '.card-body');
-    if (body) body.style.height = `${height}px`;
+    if (body) body.style.height = `${safeHeight}px`;
     element.style.height = 'auto';
 }
 

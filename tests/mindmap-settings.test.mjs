@@ -29,8 +29,12 @@ assert.match(mindMap, /function applyMindMapNodeStatsVisibility[\s\S]*?nodeStats
 assert.match(html,
     /:root:not\(\[data-card-toolbar-hover="false"\]\) \.node-card:hover > \.card-floating-tools/,
     '关闭设置后，卡片悬停不得再显示悬浮工具栏');
-assert.match(html, /\.node-card:focus-within > \.card-floating-tools/,
-    '关闭鼠标悬停后仍应保留键盘聚焦时的工具栏可访问性');
+assert.match(html,
+    /:root:not\(\[data-card-toolbar-hover="false"\]\) \.node-card:focus-within > \.card-floating-tools/,
+    '关闭设置后，卡片处于编辑焦点时也不得继续显示悬浮工具栏');
+assert.doesNotMatch(html,
+    /(?:^|\r?\n)\s*\.node-card:focus-within > \.card-floating-tools/m,
+    '卡片聚焦显示规则必须受工具栏设置约束');
 assert.match(mindMap,
     /getMindMapContentPreviewOccupiedRects\(card\),\s*!mindMapSettings\.cardToolbarHover/,
     '只有关闭悬停工具栏时，预览定位才应启用上方候选');

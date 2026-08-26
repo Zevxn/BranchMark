@@ -23,22 +23,26 @@ assert.match(html, /\.summary-editor\s*\{[\s\S]*?min-height:\s*0/,
     '总结卡片容器不应额外锁定高于普通卡片的最小高度');
 assert.match(html, /\.summary-label-layer\s*\{[\s\S]*?width:\s*1px/,
     '总结编辑器覆盖层应继续使用不干扰画布布局的最小尺寸');
-assert.match(html, /\.summary-editor\s*\{[\s\S]*?width:\s*max-content;[\s\S]*?min-width:\s*120px;[\s\S]*?max-width:\s*600px/,
+assert.match(html, /\.summary-editor\s*\{[\s\S]*?width:\s*max-content;[\s\S]*?min-width:\s*var\(--node-card-min-width\);[\s\S]*?max-width:\s*600px/,
     '总结卡片自动宽度应按内容固有宽度计算，并复用普通卡片的尺寸边界');
-assert.match(html, /\.node-card\.simple,\s*\.summary-editor\.simple\s*\{\s*min-height:\s*60px/,
-    '普通便利贴与总结便利贴应复用一致的最小高度');
+assert.match(html, /\.node-card\.simple,\s*\.summary-editor\.simple\s*\{\s*min-height:\s*var\(--node-card-topic-only-min-height\)/,
+    '普通便利贴与总结便利贴应复用无正文普通卡片的最小高度');
 assert.match(html, /\.summary-editor\.simple \.summary-card-body\s*\{\s*display:\s*none/,
     '便利贴模式应隐藏正文并仅展示总结标题');
 assert.match(html, /\.summary-editor\.topic-empty \.summary-card-header\s*\{\s*display:\s*none/,
     '总结标题为空时应彻底隐藏标题栏');
 assert.match(html, /\.summary-editor\.topic-empty\.has-content \.summary-card-body\s*\{[\s\S]*?border-radius:\s*6px/,
     '无标题总结的正文应直接接管卡片顶部圆角');
+assert.match(html, /\.summary-editor\.topic-empty\.has-content \.summary-card-body\s*\{[\s\S]*?min-height:\s*calc\([\s\S]*?--node-card-topic-only-min-height/,
+    '无标题但有正文的总结卡片应把统一最小高度落实到实际缩放的正文区域');
 assert.doesNotMatch(html, /\.summary-editor\.topic-empty::before/,
     '总结标题为空时不应生成普通卡片使用的幽灵拖动手柄');
 assert.match(html, /\.summary-editor\.horizontal\.placement-top\s*\{\s*transform:\s*translate\(-50%,\s*-100%\)/,
     '横向总结在上方时应以底边居中对齐大括号');
 assert.match(html, /\.summary-editor\.horizontal\.placement-bottom\s*\{\s*transform:\s*translate\(-50%,\s*0\)/,
     '横向总结在下方时应以顶边居中对齐大括号');
+assert.match(html, /\.summary-editor\.horizontal\.placement-top \.resize-b\s*\{[\s\S]*?top:\s*-5px;[\s\S]*?bottom:\s*auto;/,
+    '顶部横向总结应把高度手柄放到不受括号锚定的顶边');
 assert.match(html, /\.child-unit\.summary-space-before\s*\{\s*margin-top:\s*var\(--summary-space-before/,
     '导图中部的横向总结应能在分支前预留真实布局空间');
 assert.match(html, /\.child-unit\.summary-space-after\s*\{\s*margin-bottom:\s*var\(--summary-space-after/,
@@ -94,6 +98,12 @@ assert.match(mindMap, /topic\.addEventListener\('blur'[\s\S]*?recordHistory\(\);
     '清空总结标题并失焦后应立即重新测量和渲染卡片');
 assert.match(mindMap, /beginMindMapResize\(event, summary, 'summary', editor\)/,
     '总结卡片应复用卡片尺寸调整状态机');
+assert.match(mindMap, /function getMindMapResizePointerFactor\(kind, element, axis\)[\s\S]*?classList\.contains\('horizontal'\)[\s\S]*?axis === 'width' \? 2 : 1/,
+    '横向总结以中心定位时应补偿宽度手柄只有一半位移的问题');
+assert.match(mindMap, /function getMindMapResizeHeightDirection\(kind, element\)[\s\S]*?classList\.contains\('placement-top'\)[\s\S]*?\? -1/,
+    '顶部横向总结从自由顶边调高时应反转纵向拖拽方向');
+assert.match(mindMap, /if \(resizeKind !== 'summary'\) scheduleRenderMindMapSummaries\(\);/,
+    '总结卡片拖拽期间不应重复运行会改写定位的总结布局器');
 assert.match(mindMap, /editor\.addEventListener\('dblclick'[\s\S]*?if \(handle\) autoFitMindMapEntity\(summary, 'summary', handle\.dataset\.resize\);[\s\S]*?openMindMapEditor\(summary\)/,
     '总结卡片双击应打开公共 Markdown 编辑器，仅尺寸手柄双击执行自适应');
 assert.match(mindMap, /const summary = getMindMapSummaryById\(state\.selectedSummaryId\);[\s\S]*?const node = summary \|\| findNode[\s\S]*?openMindMapEditor\(node, false, true\)/,
@@ -214,6 +224,7 @@ vm.runInContext(`
     const MINDMAP_SUMMARY_BRACE_OFFSET = 18;
     const MINDMAP_SUMMARY_LABEL_GAP = 22;
     const MINDMAP_SUMMARY_COLLISION_GAP = 14;
+    const MINDMAP_CARD_MIN_WIDTH = 100;
     const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
     const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
     const MINDMAP_SUMMARY_ORIENTATION_SWITCH_PENALTY = 48;

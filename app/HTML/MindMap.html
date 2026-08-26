@@ -53,8 +53,10 @@
             --shadow-color-hover: rgba(0, 0, 0, 0.219);
             --shadow-color-active: rgba(24,144,255,0.15);
             --node-default-color: rgba(0,0,0,0.15);
+            --node-card-min-width: 100px;
             --node-card-max-width: 600px;
             --node-card-max-body-height: 600px;
+            --node-card-topic-only-min-height: 43px;
             --simple-card-max-height: 400px;
             
             /* 工具栏与弹窗 */
@@ -940,7 +942,7 @@
             --summary-card-border-width: 2px;
             position: absolute;
             width: max-content;
-            min-width: 120px;
+            min-width: var(--node-card-min-width);
             max-width: 600px;
             min-height: 0;
             box-sizing: border-box;
@@ -1036,13 +1038,22 @@
         }
         .summary-editor.topic-empty .summary-card-header { display: none; }
         .summary-editor.topic-empty.has-content .summary-card-body {
+            min-height: calc(
+                var(--node-card-topic-only-min-height)
+                - 2 * var(--summary-card-border-width)
+            );
             padding-top: 8px;
             padding-bottom: 8px;
             border-radius: 6px;
         }
+        .summary-editor.topic-empty.has-content {
+            min-height: var(--node-card-topic-only-min-height);
+        }
+        .summary-editor.topic-empty.has-content .summary-card-body > :first-child { margin-top: 0; }
+        .summary-editor.topic-empty.has-content .summary-card-body > :last-child { margin-bottom: 0; }
         .summary-editor:not(.has-content) .summary-card-body { display: none; }
         .summary-editor.simple {
-            min-width: 150px;
+            min-width: var(--node-card-min-width);
             max-height: 400px;
             background: color-mix(in srgb, var(--summary-accent) 13%, var(--card-bg));
             border-color: color-mix(in srgb, var(--summary-accent) 64%, var(--card-border));
@@ -1297,7 +1308,8 @@
             background: var(--card-bg); border: var(--node-card-border-width) solid var(--card-border); border-radius: var(--node-card-radius);
             box-shadow: 0 2px 8px var(--shadow-color); display: flex; flex-direction: column; position: relative;
             transition: box-shadow 0.2s, border-color 0.2s;
-            width: fit-content; min-width: 120px; max-width: var(--node-card-max-width);
+            width: fit-content; min-width: var(--node-card-min-width); max-width: var(--node-card-max-width);
+            min-height: var(--node-card-topic-only-min-height);
             flex-shrink: 0; z-index: 10;
             overflow: visible;
             transition: box-shadow 0.2s, border-color 0.2s, background-color 0.2s;
@@ -1557,6 +1569,37 @@
             right: 0;
             clip-path: polygon(100% 0, 100% 100%, 0 100%);
         }
+        /* 顶部横向总结卡片的底边锚定在括号上，尺寸手柄应位于可移动的顶边。 */
+        .summary-editor.horizontal.placement-top .resize-b {
+            top: -5px;
+            bottom: auto;
+        }
+        .summary-editor.horizontal.placement-top .resize-br,
+        .summary-editor.horizontal.placement-top .resize-bl {
+            top: calc(-1 * var(--summary-card-border-width));
+            bottom: auto;
+        }
+        .summary-editor.horizontal.placement-top .resize-br {
+            border-top-right-radius: var(--summary-card-radius);
+            border-bottom-right-radius: 0;
+            cursor: nesw-resize;
+        }
+        .summary-editor.horizontal.placement-top .resize-bl {
+            border-top-left-radius: var(--summary-card-radius);
+            border-bottom-left-radius: 0;
+            cursor: nwse-resize;
+        }
+        .summary-editor.horizontal.placement-top .resize-br::after,
+        .summary-editor.horizontal.placement-top .resize-bl::after {
+            top: 0;
+            bottom: auto;
+        }
+        .summary-editor.horizontal.placement-top .resize-br::after {
+            clip-path: polygon(0 0, 100% 0, 100% 100%);
+        }
+        .summary-editor.horizontal.placement-top .resize-bl::after {
+            clip-path: polygon(0 0, 100% 0, 0 100%);
+        }
         .node-card.left-side .resize-l { display: block; }
         .node-card.left-side .resize-bl { display: block; }
         .resize-b { bottom:-5px; left:0; right:0; height:10px; cursor:row-resize; }
@@ -1683,12 +1726,8 @@
             left: 0;
             height: 7px;
         }
-        .node-card:focus-within > .card-floating-tools,
-        .summary-editor:focus-within > .card-floating-tools {
-            opacity: 1;
-            visibility: visible;
-            pointer-events: auto;
-        }
+        :root:not([data-card-toolbar-hover="false"]) .node-card:focus-within > .card-floating-tools,
+        :root:not([data-card-toolbar-hover="false"]) .summary-editor:focus-within > .card-floating-tools,
         :root:not([data-card-toolbar-hover="false"]) .node-card:hover > .card-floating-tools,
         :root:not([data-card-toolbar-hover="false"]) .summary-editor:hover > .card-floating-tools {
             opacity: 1;
@@ -1698,7 +1737,7 @@
         /* --- 便利贴模式 (Simple Mode) 滚动与布局修复 ------------ */
         .node-card.simple,
         .summary-editor.simple {
-            min-height: 60px;
+            min-height: var(--node-card-topic-only-min-height);
         }
         .node-card.simple {
             display: flex;       /* 变成 flex 布局 */
@@ -1707,7 +1746,7 @@
             overflow: visible !important; /* 必须 visible，否则外部的 resize 手柄会被切掉 */
             box-sizing: border-box;
             position: relative;
-            min-width: 150px;
+            min-width: var(--node-card-min-width);
             /* 关键：给一个默认的最大高度限制，防止 auto 时撑破屏幕，
             但在 manual 模式下会被 inline-style 覆盖 */
             max-height: var(--simple-card-max-height);
@@ -2118,6 +2157,15 @@
             /* 顶部留白，防止 Body 内容顶格 */
             padding-top: 10px !important; 
         }
+        .node-card.topic-empty:not(.simple) .card-body {
+            min-height: calc(
+                var(--node-card-topic-only-min-height)
+                - 10px
+                - 2 * var(--node-card-border-width)
+            );
+        }
+        .node-card.topic-empty:not(.simple) .card-body > :first-child { margin-top: 0; }
+        .node-card.topic-empty:not(.simple) .card-body > :last-child { margin-bottom: 0; }
 
         /* 2. 实体 Header：作为“隐形抓手” (永远存在，位置固定，不可见) */
         /* 它的作用仅仅是：占位、接收点击、接收拖拽 */
