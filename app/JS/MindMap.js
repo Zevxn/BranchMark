@@ -5059,7 +5059,6 @@ function getMindMapSummaryRelationProfile(nodeIds) {
     const ids = Array.from(new Set(nodeIds || []));
     const selectedIds = new Set(ids);
     const siblingsByParent = new Map();
-    const selectedChildCountByParent = new Map();
     let parentChildCount = 0;
 
     ids.forEach(nodeId => {
@@ -5067,10 +5066,6 @@ function getMindMapSummaryRelationProfile(nodeIds) {
         if (!parent) return;
         if (selectedIds.has(parent.id)) {
             parentChildCount++;
-            selectedChildCountByParent.set(
-                parent.id,
-                (selectedChildCountByParent.get(parent.id) || 0) + 1
-            );
         }
         const siblings = siblingsByParent.get(parent.id) || [];
         siblings.push(nodeId);
@@ -5083,8 +5078,10 @@ function getMindMapSummaryRelationProfile(nodeIds) {
     });
     const isCompleteSubtree = isMindMapSummaryCompleteSubtree(ids);
     const isSingleChain = !isCompleteSubtree
-        && parentChildCount === ids.length - 1
-        && Array.from(selectedChildCountByParent.values()).every(count => count <= 1);
+        && ids.every((nodeId, index) => ids.slice(index + 1).every(otherId =>
+            isDescendant(state.data, nodeId, otherId)
+            || isDescendant(state.data, otherId, nodeId)
+        ));
     return {
         parentChildCount,
         siblingCount,
@@ -5218,7 +5215,7 @@ function getMindMapSummaryHorizontalCandidate(
     return { braceY, labelY, editorRect, footprint, collisionRect, requiredSpace, braceOffset };
 }
 
-function getMindMapSummaryHorizontalBraceLane(bounds, placement, occupiedGroups = []) {
+function getMindMapSummaryHorizontalBraceLane(bounds, placement, editorSize, occupiedGroups = []) {
     const direction = placement === 'top' ? -1 : 1;
     const left = bounds.left - 8;
     const right = bounds.right + 8;
@@ -5227,6 +5224,15 @@ function getMindMapSummaryHorizontalBraceLane(bounds, placement, occupiedGroups 
     let braceY = baseBraceY;
 
     for (let index = 0; index <= occupiedGroups.length; index++) {
+        const naturalCandidate = getMindMapSummaryHorizontalCandidate(
+            bounds,
+            placement,
+            editorSize,
+            0,
+            braceOffset
+        );
+        const candidateTop = Math.min(naturalCandidate.braceY, naturalCandidate.editorRect.top);
+        const candidateBottom = Math.max(naturalCandidate.braceY, naturalCandidate.editorRect.bottom);
         let outwardShift = 0;
         occupiedGroups.forEach(group => {
             if (group.placement !== placement
@@ -5235,6 +5241,13 @@ function getMindMapSummaryHorizontalBraceLane(bounds, placement, occupiedGroups 
                 return;
             }
             const outerEdge = Number.isFinite(group.outerEdge) ? group.outerEdge : group.braceY;
+            const groupTop = Math.min(group.braceY, outerEdge);
+            const groupBottom = Math.max(group.braceY, outerEdge);
+            const overlapsVertically = candidateTop < groupBottom + MINDMAP_SUMMARY_COLLISION_GAP
+                && candidateBottom > groupTop - MINDMAP_SUMMARY_COLLISION_GAP;
+            // 水平投影相交并不代表两个总结属于同一局部区域。只有“大括号+卡片”
+            // 的自然纵向占用也相交时才分配外侧轨道，避免把上方分支的总结推到下方。
+            if (!overlapsVertically) return;
             const targetBraceY = placement === 'top'
                 ? outerEdge - MINDMAP_SUMMARY_BRACE_LANE_GAP
                 : outerEdge + MINDMAP_SUMMARY_BRACE_LANE_GAP;
@@ -5904,6 +5917,7 @@ function prepareMindMapSummaryLayout(summaries) {
             const braceLane = getMindMapSummaryHorizontalBraceLane(
                 geometry.bounds,
                 fixed.placement,
+                editorSize,
                 occupiedHorizontalSummaryGroups
             );
             const collisionResult = getMindMapSummaryCollisionFreeHorizontalCandidate(

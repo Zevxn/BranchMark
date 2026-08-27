@@ -126,8 +126,8 @@ assert.match(mindMap, /scheduleRenderMindMapRelations\(\);\s*scheduleRenderMindM
     '卡片布局更新时应同时刷新关系线和总结标注');
 assert.match(mindMap, /function isMindMapSummaryCompleteSubtree[\s\S]*?selectedRoots\.length !== 1[\s\S]*?subtreeIds\.size === selectedIds\.size/,
     '总结方向判定应识别唯一入口且成员完整的子树');
-assert.match(mindMap, /orientation:\s*isCompleteSubtree[\s\S]*?\? 'vertical'[\s\S]*?isSingleChain \|\| parentChildCount > siblingCount/,
-    '完整子树应优先使用纵向总结，连续单链和父子关系占优的混合选区才使用横向总结');
+assert.match(mindMap, /const isSingleChain[\s\S]*?isDescendant\(state\.data, nodeId, otherId\)[\s\S]*?isDescendant\(state\.data, otherId, nodeId\)[\s\S]*?orientation:\s*isCompleteSubtree[\s\S]*?\? 'vertical'[\s\S]*?isSingleChain \|\| parentChildCount > siblingCount/,
+    '完整子树应优先使用纵向总结，跨级单链和父子关系占优的混合选区才使用横向总结');
 assert.match(mindMap, /function prepareMindMapSummaryLayout\(summaries\)[\s\S]*?clearMindMapSummaryBranchShifts\(\)[\s\S]*?const shiftByUnit = new Map\(\)[\s\S]*?MINDMAP_SUMMARY_LAYOUT_MAX_STEPS[\s\S]*?applyMindMapSummaryBoundaryShift/,
     '总结布局应从原始树迭代求解分支位移约束');
 assert.doesNotMatch(mindMap, /summary-space-before|summary-space-after|--summary-space|spacingRequests/,
@@ -154,7 +154,7 @@ assert.match(mindMap, /function getMindMapSummaryHorizontalBraceY\(bounds, place
     '横向总结大括号必须贴近成员卡片，不能移到整张导图之外');
 assert.match(mindMap, /function getMindMapSummaryCollisionFreeHorizontalCandidate[\s\S]*?getMindMapSummaryCollisionOffset[\s\S]*?labelOffset \+= collisionOffset[\s\S]*?occupiedSummaryRects/,
     '多个总结卡片应使用实际矩形错位，避免彼此覆盖');
-assert.match(mindMap, /function getMindMapSummaryHorizontalBraceLane[\s\S]*?occupiedGroups[\s\S]*?group\.outerEdge[\s\S]*?MINDMAP_SUMMARY_BRACE_LANE_GAP[\s\S]*?braceOffset \+= outwardShift/,
+assert.match(mindMap, /function getMindMapSummaryHorizontalBraceLane[\s\S]*?naturalCandidate[\s\S]*?group\.outerEdge[\s\S]*?overlapsVertically[\s\S]*?MINDMAP_SUMMARY_BRACE_LANE_GAP[\s\S]*?braceOffset \+= outwardShift/,
     '范围相交的横向总结应把大括号和卡片作为完整组合分配轨道');
 assert.match(mindMap, /orderedSummaries[\s\S]*?compareMindMapSummaryLayoutOrder[\s\S]*?occupiedHorizontalSummaryGroups[\s\S]*?outerEdge:[\s\S]*?candidate\.editorRect/,
     '多个总结应使用稳定顺序，并以先前总结卡片外边界计算下一条大括号');
@@ -247,6 +247,10 @@ const selectionContext = vm.createContext({
     findNode: (_root, id) => id === 'missing' ? null : (selectionNodes[id] || { id, children: [] }),
     isDescendantOfLeft: id => id.startsWith('left-'),
     findParent: (_root, id) => selectionParents[id] || null,
+    isDescendant: (_root, nodeId, targetId) => {
+        const visit = node => (node.children || []).some(child => child.id === targetId || visit(child));
+        return visit(selectionNodes[nodeId] || { children: [] });
+    },
 });
 vm.runInContext(`const MINDMAP_SUMMARY_MIN_NODES = 2; ${selectionSource}`, selectionContext);
 selectionContext.sameSide = new Set(['left-a', 'left-b', 'left-c']);
@@ -262,6 +266,7 @@ assert.equal(vm.runInContext('getMindMapSummarySelection(crossSide)', selectionC
 assert.equal(vm.runInContext('getMindMapSummarySelection(withRoot)', selectionContext), null,
     '根卡片不能参与同侧总结');
 selectionContext.parentDominant = ['left-parent', 'left-child-a', 'left-grandchild'];
+selectionContext.skippedGenerationChain = ['left-parent', 'left-grandchild'];
 selectionContext.siblingDominant = ['left-sibling-a', 'left-sibling-b', 'left-sibling-c'];
 selectionContext.completeSubtree = [
     'left-complete-root',
@@ -274,6 +279,11 @@ assert.deepEqual(
     JSON.parse(JSON.stringify(vm.runInContext('getMindMapSummaryRelationProfile(parentDominant)', selectionContext))),
     { parentChildCount: 2, siblingCount: 0, orientation: 'horizontal' },
     '连续父子关系占优时应选择横向总结',
+);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext('getMindMapSummaryRelationProfile(skippedGenerationChain)', selectionContext))),
+    { parentChildCount: 0, siblingCount: 0, orientation: 'horizontal' },
+    '祖先与隔代后代仍在同一条分支链上，应选择横向总结',
 );
 assert.deepEqual(
     JSON.parse(JSON.stringify(vm.runInContext('getMindMapSummaryRelationProfile(siblingDominant)', selectionContext))),
@@ -385,7 +395,7 @@ assert.ok(localBottomCandidate.editorRect.top > pathContext.bounds.bottom,
 assert.ok(localBottomCandidate.requiredSpace > localBottomCandidate.editorRect.bottom - pathContext.bounds.bottom,
     '所需空间应包含总结卡片外侧的安全间距');
 pathContext.firstTopLane = vm.runInContext(
-    "getMindMapSummaryHorizontalBraceLane(bounds, 'top', [])",
+    "getMindMapSummaryHorizontalBraceLane(bounds, 'top', editorSize, [])",
     pathContext,
 );
 pathContext.firstTopCandidate = vm.runInContext(
@@ -397,7 +407,7 @@ pathContext.topSummaryGroups = [{
     outerEdge: pathContext.firstTopCandidate.editorRect.top,
 }];
 pathContext.secondTopLane = vm.runInContext(
-    "getMindMapSummaryHorizontalBraceLane(bounds, 'top', topSummaryGroups)",
+    "getMindMapSummaryHorizontalBraceLane(bounds, 'top', editorSize, topSummaryGroups)",
     pathContext,
 );
 assert.equal(pathContext.firstTopLane.braceOffset, 0,
@@ -414,13 +424,28 @@ assert.ok(pathContext.outerTopCandidate.braceY <= pathContext.firstTopLane.track
     '外侧轨道应同时移动横向大括号及其总结卡片锚点');
 pathContext.nonOverlappingBounds = { left: 400, top: 50, right: 560, bottom: 250 };
 pathContext.nonOverlappingTopLane = vm.runInContext(
-    "getMindMapSummaryHorizontalBraceLane(nonOverlappingBounds, 'top', topSummaryGroups)",
+    "getMindMapSummaryHorizontalBraceLane(nonOverlappingBounds, 'top', editorSize, topSummaryGroups)",
     pathContext,
 );
 assert.equal(pathContext.nonOverlappingTopLane.braceOffset, 0,
     '水平范围不相交的大括号应复用贴近成员的基础轨道');
+pathContext.verticallySeparatedBounds = { left: 100, top: 430, right: 300, bottom: 630 };
+pathContext.verticallySeparatedBottomGroup = {
+    placement: 'bottom',
+    left: 92,
+    right: 308,
+    braceY: 668,
+    outerEdge: 790,
+};
+pathContext.verticallySeparatedGroups = [pathContext.verticallySeparatedBottomGroup];
+pathContext.localBottomLane = vm.runInContext(
+    "getMindMapSummaryHorizontalBraceLane(bounds, 'bottom', editorSize, verticallySeparatedGroups)",
+    pathContext,
+);
+assert.equal(pathContext.localBottomLane.braceOffset, 0,
+    '上下相隔较远的横向总结即使水平投影重合，也必须各自贴近成员范围');
 pathContext.firstBottomLane = vm.runInContext(
-    "getMindMapSummaryHorizontalBraceLane(bounds, 'bottom', [])",
+    "getMindMapSummaryHorizontalBraceLane(bounds, 'bottom', editorSize, [])",
     pathContext,
 );
 pathContext.firstBottomCandidate = vm.runInContext(
@@ -432,7 +457,7 @@ pathContext.bottomSummaryGroups = [{
     outerEdge: pathContext.firstBottomCandidate.editorRect.bottom,
 }];
 pathContext.secondBottomLane = vm.runInContext(
-    "getMindMapSummaryHorizontalBraceLane(bounds, 'bottom', bottomSummaryGroups)",
+    "getMindMapSummaryHorizontalBraceLane(bounds, 'bottom', editorSize, bottomSummaryGroups)",
     pathContext,
 );
 assert.ok(pathContext.secondBottomLane.track.braceY >= pathContext.firstBottomCandidate.editorRect.bottom + 13.9,
