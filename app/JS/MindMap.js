@@ -4984,6 +4984,7 @@ const MINDMAP_SUMMARY_TEXT_LIMIT = 2000;
 const MINDMAP_SUMMARY_BRACE_OFFSET = 18;
 const MINDMAP_SUMMARY_LABEL_GAP = 22;
 const MINDMAP_SUMMARY_COLLISION_GAP = 14;
+const MINDMAP_SUMMARY_BRACE_LANE_GAP = 14;
 const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
 const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
 const MINDMAP_SUMMARY_LAYOUT_MAX_STEPS = 240;
@@ -5093,6 +5094,15 @@ function getMindMapSummaryRelationProfile(nodeIds) {
     };
 }
 
+function compareMindMapSummaryLayoutOrder(left, right) {
+    const memberCountDifference = (right?.nodeIds?.length || 0) - (left?.nodeIds?.length || 0);
+    if (memberCountDifference !== 0) return memberCountDifference;
+    const leftSignature = Array.from(new Set(left?.nodeIds || [])).sort().join('|');
+    const rightSignature = Array.from(new Set(right?.nodeIds || [])).sort().join('|');
+    return leftSignature.localeCompare(rightSignature)
+        || String(left?.id || '').localeCompare(String(right?.id || ''));
+}
+
 function getMindMapSummaryBracePath(bounds, side, braceX = null) {
     const direction = side === 'left' ? -1 : 1;
     const x = Number.isFinite(braceX)
@@ -5166,11 +5176,18 @@ function getMindMapSummaryHorizontalBraceY(bounds, placement) {
         : bounds.bottom + MINDMAP_SUMMARY_BRACE_OFFSET;
 }
 
-function getMindMapSummaryHorizontalCandidate(bounds, placement, editorSize, labelOffset = 0) {
+function getMindMapSummaryHorizontalCandidate(
+    bounds,
+    placement,
+    editorSize,
+    labelOffset = 0,
+    braceOffset = 0
+) {
     const width = Math.max(80, bounds.right - bounds.left + 16);
     const depth = Math.min(18, Math.max(12, width * 0.08));
     const direction = placement === 'top' ? -1 : 1;
-    const braceY = getMindMapSummaryHorizontalBraceY(bounds, placement);
+    const braceY = getMindMapSummaryHorizontalBraceY(bounds, placement)
+        + direction * Math.max(0, Number(braceOffset) || 0);
     const labelY = braceY + direction * (depth * 1.55 + MINDMAP_SUMMARY_LABEL_GAP + labelOffset);
     const centerX = (bounds.left + bounds.right) / 2;
     const editorWidth = Math.max(MINDMAP_CARD_MIN_WIDTH, editorSize?.width || MINDMAP_SUMMARY_ESTIMATED_WIDTH);
@@ -5198,7 +5215,42 @@ function getMindMapSummaryHorizontalCandidate(bounds, placement, editorSize, lab
     const requiredSpace = placement === 'top'
         ? bounds.top - editorRect.top + MINDMAP_SUMMARY_COLLISION_GAP
         : editorRect.bottom - bounds.bottom + MINDMAP_SUMMARY_COLLISION_GAP;
-    return { braceY, labelY, editorRect, footprint, collisionRect, requiredSpace };
+    return { braceY, labelY, editorRect, footprint, collisionRect, requiredSpace, braceOffset };
+}
+
+function getMindMapSummaryHorizontalBraceLane(bounds, placement, occupiedGroups = []) {
+    const direction = placement === 'top' ? -1 : 1;
+    const left = bounds.left - 8;
+    const right = bounds.right + 8;
+    const baseBraceY = getMindMapSummaryHorizontalBraceY(bounds, placement);
+    let braceOffset = 0;
+    let braceY = baseBraceY;
+
+    for (let index = 0; index <= occupiedGroups.length; index++) {
+        let outwardShift = 0;
+        occupiedGroups.forEach(group => {
+            if (group.placement !== placement
+                || right <= group.left
+                || left >= group.right) {
+                return;
+            }
+            const outerEdge = Number.isFinite(group.outerEdge) ? group.outerEdge : group.braceY;
+            const targetBraceY = placement === 'top'
+                ? outerEdge - MINDMAP_SUMMARY_BRACE_LANE_GAP
+                : outerEdge + MINDMAP_SUMMARY_BRACE_LANE_GAP;
+            const requiredShift = placement === 'top'
+                ? braceY - targetBraceY
+                : targetBraceY - braceY;
+            outwardShift = Math.max(outwardShift, requiredShift);
+        });
+        if (outwardShift <= 0) break;
+        braceOffset += outwardShift;
+        braceY = baseBraceY + direction * braceOffset;
+    }
+    return {
+        braceOffset,
+        track: { placement, left, right, braceY }
+    };
 }
 
 function getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffset = 0) {
@@ -5292,7 +5344,8 @@ function getMindMapSummaryCollisionFreeHorizontalCandidate(
     placement,
     editorSize,
     obstacleRects,
-    initialLabelOffset = 0
+    initialLabelOffset = 0,
+    braceOffset = 0
 ) {
     const obstacles = Array.isArray(obstacleRects) ? obstacleRects : [];
     const initialOffset = Math.max(0, Number(initialLabelOffset) || 0);
@@ -5301,7 +5354,8 @@ function getMindMapSummaryCollisionFreeHorizontalCandidate(
         bounds,
         placement,
         editorSize,
-        labelOffset
+        labelOffset,
+        braceOffset
     );
     for (let index = 0; index <= obstacles.length; index++) {
         const collisionOffset = getMindMapSummaryCollisionOffset(candidate, placement, obstacles);
@@ -5311,7 +5365,8 @@ function getMindMapSummaryCollisionFreeHorizontalCandidate(
             bounds,
             placement,
             editorSize,
-            labelOffset
+            labelOffset,
+            braceOffset
         );
     }
     return {
@@ -5814,7 +5869,8 @@ function prepareMindMapSummaryLayout(summaries) {
     clearMindMapSummaryBranchShifts();
     const fixedLayouts = new Map();
     const shiftByUnit = new Map();
-    summaries.forEach(summary => {
+    const orderedSummaries = [...summaries].sort(compareMindMapSummaryLayoutOrder);
+    orderedSummaries.forEach(summary => {
         const geometry = getMindMapSummaryGeometry(summary);
         if (!geometry) return;
         fixedLayouts.set(summary.id, {
@@ -5826,7 +5882,8 @@ function prepareMindMapSummaryLayout(summaries) {
     const evaluateLayouts = () => {
         const evaluations = [];
         const occupiedSummaryRects = [];
-        summaries.forEach(summary => {
+        const occupiedHorizontalSummaryGroups = [];
+        orderedSummaries.forEach(summary => {
             const fixed = fixedLayouts.get(summary.id);
             const geometry = getMindMapSummaryGeometry(summary, fixed);
             if (!geometry || !fixed) return;
@@ -5844,11 +5901,18 @@ function prepareMindMapSummaryLayout(summaries) {
                 return;
             }
 
+            const braceLane = getMindMapSummaryHorizontalBraceLane(
+                geometry.bounds,
+                fixed.placement,
+                occupiedHorizontalSummaryGroups
+            );
             const collisionResult = getMindMapSummaryCollisionFreeHorizontalCandidate(
                 geometry.bounds,
                 fixed.placement,
                 editorSize,
-                occupiedSummaryRects
+                occupiedSummaryRects,
+                0,
+                braceLane.braceOffset
             );
             const anchors = getMindMapSummaryLayoutAnchors(
                 summary.nodeIds,
@@ -5867,6 +5931,13 @@ function prepareMindMapSummaryLayout(summaries) {
                 anchors
             });
             occupiedSummaryRects.push(collisionResult.candidate.editorRect);
+            occupiedHorizontalSummaryGroups.push({
+                ...braceLane.track,
+                braceY: collisionResult.candidate.braceY,
+                outerEdge: fixed.placement === 'top'
+                    ? collisionResult.candidate.editorRect.top
+                    : collisionResult.candidate.editorRect.bottom
+            });
         });
         return evaluations;
     };
@@ -5912,6 +5983,7 @@ function prepareMindMapSummaryLayout(summaries) {
             orientation: 'horizontal',
             placement: evaluation.placement,
             region: 'local',
+            braceY: evaluation.candidate.braceY,
             labelOffset: evaluation.labelOffset
         });
     });

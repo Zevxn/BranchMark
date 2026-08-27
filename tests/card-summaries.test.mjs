@@ -154,6 +154,10 @@ assert.match(mindMap, /function getMindMapSummaryHorizontalBraceY\(bounds, place
     '横向总结大括号必须贴近成员卡片，不能移到整张导图之外');
 assert.match(mindMap, /function getMindMapSummaryCollisionFreeHorizontalCandidate[\s\S]*?getMindMapSummaryCollisionOffset[\s\S]*?labelOffset \+= collisionOffset[\s\S]*?occupiedSummaryRects/,
     '多个总结卡片应使用实际矩形错位，避免彼此覆盖');
+assert.match(mindMap, /function getMindMapSummaryHorizontalBraceLane[\s\S]*?occupiedGroups[\s\S]*?group\.outerEdge[\s\S]*?MINDMAP_SUMMARY_BRACE_LANE_GAP[\s\S]*?braceOffset \+= outwardShift/,
+    '范围相交的横向总结应把大括号和卡片作为完整组合分配轨道');
+assert.match(mindMap, /orderedSummaries[\s\S]*?compareMindMapSummaryLayoutOrder[\s\S]*?occupiedHorizontalSummaryGroups[\s\S]*?outerEdge:[\s\S]*?candidate\.editorRect/,
+    '多个总结应使用稳定顺序，并以先前总结卡片外边界计算下一条大括号');
 assert.match(mindMap, /fixedLayouts\.set\(summary\.id[\s\S]*?orientation:\s*geometry\.orientation[\s\S]*?placement:\s*geometry\.orientation === 'horizontal' \? geometry\.placement : geometry\.side/,
     '总结应先固定大括号方向和位置，再进行分支位移求解');
 assert.doesNotMatch(mindMap, /function prepareMindMapSummaryLayout\(summaries\)[\s\S]*?chooseMindMapSummaryHorizontalLayout\(|function prepareMindMapSummaryLayout\(summaries\)[\s\S]*?chooseMindMapSummaryAutoOrientation\(/,
@@ -281,12 +285,25 @@ assert.deepEqual(
     { parentChildCount: 4, siblingCount: 1, orientation: 'vertical' },
     '完整子树即使父子关系数量占优，也应在分支外侧使用纵向总结',
 );
+selectionContext.overlappingSummaries = [
+    { id: 'summary-ac', nodeIds: ['A', 'C'] },
+    { id: 'summary-abc', nodeIds: ['A', 'B', 'C'] },
+];
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext(
+        '[...overlappingSummaries].sort(compareMindMapSummaryLayoutOrder).map(summary => summary.id)',
+        selectionContext,
+    ))),
+    ['summary-abc', 'summary-ac'],
+    '成员范围重叠时应按成员数量稳定分配内外轨道，不受创建顺序影响',
+);
 
 const pathContext = vm.createContext({});
 vm.runInContext(`
     const MINDMAP_SUMMARY_BRACE_OFFSET = 18;
     const MINDMAP_SUMMARY_LABEL_GAP = 22;
     const MINDMAP_SUMMARY_COLLISION_GAP = 14;
+    const MINDMAP_SUMMARY_BRACE_LANE_GAP = 14;
     const MINDMAP_CARD_MIN_WIDTH = 100;
     const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
     const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
@@ -367,6 +384,59 @@ assert.ok(localBottomCandidate.editorRect.top > pathContext.bounds.bottom,
     '下方总结编辑框应位于大括号外侧');
 assert.ok(localBottomCandidate.requiredSpace > localBottomCandidate.editorRect.bottom - pathContext.bounds.bottom,
     '所需空间应包含总结卡片外侧的安全间距');
+pathContext.firstTopLane = vm.runInContext(
+    "getMindMapSummaryHorizontalBraceLane(bounds, 'top', [])",
+    pathContext,
+);
+pathContext.firstTopCandidate = vm.runInContext(
+    "getMindMapSummaryHorizontalCandidate(bounds, 'top', editorSize, 0, firstTopLane.braceOffset)",
+    pathContext,
+);
+pathContext.topSummaryGroups = [{
+    ...pathContext.firstTopLane.track,
+    outerEdge: pathContext.firstTopCandidate.editorRect.top,
+}];
+pathContext.secondTopLane = vm.runInContext(
+    "getMindMapSummaryHorizontalBraceLane(bounds, 'top', topSummaryGroups)",
+    pathContext,
+);
+assert.equal(pathContext.firstTopLane.braceOffset, 0,
+    '首个横向大括号应保持贴近成员范围');
+assert.ok(pathContext.secondTopLane.braceOffset >= 14,
+    '范围相同的第二个横向大括号应进入外侧轨道');
+assert.ok(pathContext.secondTopLane.track.braceY <= pathContext.firstTopCandidate.editorRect.top - 13.9,
+    '上方第二个大括号必须越过第一个总结卡片，保持括号与卡片成组排列');
+pathContext.outerTopCandidate = vm.runInContext(
+    "getMindMapSummaryHorizontalCandidate(bounds, 'top', editorSize, 0, secondTopLane.braceOffset)",
+    pathContext,
+);
+assert.ok(pathContext.outerTopCandidate.braceY <= pathContext.firstTopLane.track.braceY - 14,
+    '外侧轨道应同时移动横向大括号及其总结卡片锚点');
+pathContext.nonOverlappingBounds = { left: 400, top: 50, right: 560, bottom: 250 };
+pathContext.nonOverlappingTopLane = vm.runInContext(
+    "getMindMapSummaryHorizontalBraceLane(nonOverlappingBounds, 'top', topSummaryGroups)",
+    pathContext,
+);
+assert.equal(pathContext.nonOverlappingTopLane.braceOffset, 0,
+    '水平范围不相交的大括号应复用贴近成员的基础轨道');
+pathContext.firstBottomLane = vm.runInContext(
+    "getMindMapSummaryHorizontalBraceLane(bounds, 'bottom', [])",
+    pathContext,
+);
+pathContext.firstBottomCandidate = vm.runInContext(
+    "getMindMapSummaryHorizontalCandidate(bounds, 'bottom', editorSize, 0, firstBottomLane.braceOffset)",
+    pathContext,
+);
+pathContext.bottomSummaryGroups = [{
+    ...pathContext.firstBottomLane.track,
+    outerEdge: pathContext.firstBottomCandidate.editorRect.bottom,
+}];
+pathContext.secondBottomLane = vm.runInContext(
+    "getMindMapSummaryHorizontalBraceLane(bounds, 'bottom', bottomSummaryGroups)",
+    pathContext,
+);
+assert.ok(pathContext.secondBottomLane.track.braceY >= pathContext.firstBottomCandidate.editorRect.bottom + 13.9,
+    '下方第二个大括号必须越过第一个总结卡片，保持括号与卡片成组排列');
 pathContext.manualResizeObstacle = {
     left: localBottomCandidate.editorRect.left,
     right: localBottomCandidate.editorRect.right,

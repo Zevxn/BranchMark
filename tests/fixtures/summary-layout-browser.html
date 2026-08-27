@@ -15,17 +15,27 @@
         const frame = document.getElementById('appFrame');
         const fixtureData = {
             id: 'root', topic: '根节点', content: '', relations: [],
-            summaries: [{
-                id: 'summary-large', nodeIds: ['selected-parent', 'selected-child'],
-                topic: '总结', content: '浏览器布局测试', widthMode: 'manual', width: 560,
-                heightMode: 'manual', bodyHeight: 520, isSimple: false
-            }],
+            summaries: [
+                {
+                    id: 'summary-large', nodeIds: ['selected-parent', 'selected-child'],
+                    topic: '大总结', content: '浏览器布局测试', widthMode: 'manual', width: 560,
+                    heightMode: 'manual', bodyHeight: 520, isSimple: false
+                },
+                {
+                    id: 'summary-nested', nodeIds: ['selected-parent', 'selected-child', 'selected-grandchild'],
+                    topic: '嵌套总结', content: '横向大括号轨道测试', widthMode: 'manual', width: 260,
+                    heightMode: 'manual', bodyHeight: 150, isSimple: false
+                }
+            ],
             children: [
                 { id: 'upper', topic: '上方分支', content: '', children: [
                     { id: 'upper-child', topic: '上方子节点', content: '', children: [] }
                 ]},
                 { id: 'selected-parent', topic: '被总结父节点', content: '', children: [
-                    { id: 'selected-child', topic: '被总结子节点', content: '', children: [] }
+                    { id: 'selected-child', topic: '被总结子节点', content: '', children: [
+                        { id: 'selected-grandchild', topic: '被总结孙节点', content: '', children: [] }
+                    ]},
+                    { id: 'selected-omitted-child', topic: '未参与总结的子节点', content: '', children: [] }
                 ]},
                 { id: 'obstacle-a', topic: '障碍分支 A', content: '', children: [
                     { id: 'obstacle-a-child', topic: '障碍 A 子节点', content: '', children: [] }
@@ -48,15 +58,28 @@
             }
             setTimeout(() => {
                 const doc = frame.contentDocument;
-                const summary = doc.querySelector('.summary-editor');
-                const memberIds = new Set(['selected-parent', 'selected-child']);
-                const summaryRect = summary?.getBoundingClientRect();
-                const overlaps = Array.from(doc.querySelectorAll('.node-card')).filter(card => {
-                    if (!summaryRect || memberIds.has(card.dataset.nodeId)) return false;
-                    const rect = card.getBoundingClientRect();
-                    return rect.left < summaryRect.right && rect.right > summaryRect.left
-                        && rect.top < summaryRect.bottom && rect.bottom > summaryRect.top;
+                const summaries = Array.from(doc.querySelectorAll('.summary-editor'));
+                const summaryRects = summaries.map(editor => editor.getBoundingClientRect());
+                const overlaps = [];
+                summaries.forEach((editor, summaryIndex) => {
+                    const summaryData = fixtureData.summaries.find(item => item.id === editor.dataset.summaryId);
+                    const memberIds = new Set(summaryData?.nodeIds || []);
+                    Array.from(doc.querySelectorAll('.node-card')).forEach(card => {
+                        if (memberIds.has(card.dataset.nodeId)) return;
+                        const rect = card.getBoundingClientRect();
+                        const summaryRect = summaryRects[summaryIndex];
+                        if (rect.left < summaryRect.right && rect.right > summaryRect.left
+                            && rect.top < summaryRect.bottom && rect.bottom > summaryRect.top) {
+                            overlaps.push({ summaryId: editor.dataset.summaryId, nodeId: card.dataset.nodeId });
+                        }
+                    });
                 });
+                const summaryOverlaps = summaryRects.flatMap((rect, index) => summaryRects.slice(index + 1)
+                    .filter(other => rect.left < other.right && rect.right > other.left
+                        && rect.top < other.bottom && rect.bottom > other.top));
+                const braceYs = Array.from(doc.querySelectorAll('#summary-brace-layer .summary-brace'))
+                    .map(path => Number(path.getAttribute('d')?.match(/^M\s+[-\d.]+\s+([-\d.]+)/)?.[1]))
+                    .filter(Number.isFinite);
                 const shifted = doc.querySelectorAll('.child-unit.summary-shifted').length;
                 const connectors = doc.querySelectorAll('#tree-connector-layer .tree-connector').length;
                 const marginArtifacts = doc.querySelectorAll('.summary-space-before, .summary-space-after').length;
@@ -69,11 +92,23 @@
                     right: Math.round(rect.right), bottom: Math.round(rect.bottom),
                 } : null;
                 const result = {
-                    overlaps: overlaps.map(card => ({ id: card.dataset.nodeId, rect: rectValue(card.getBoundingClientRect()) })),
-                    summaryRect: rectValue(summaryRect), shifted, shiftedValues, connectors, marginArtifacts
+                    overlaps,
+                    summaryOverlaps: summaryOverlaps.length,
+                    summaryRects: summaryRects.map(rectValue),
+                    braceYs,
+                    shifted,
+                    shiftedValues,
+                    connectors,
+                    marginArtifacts
                 };
                 document.getElementById('result').textContent = JSON.stringify(result, null, 2);
-                document.body.dataset.result = overlaps.length === 0 && shifted > 0 && connectors >= 6 && marginArtifacts === 0
+                document.body.dataset.result = overlaps.length === 0
+                    && summaryOverlaps.length === 0
+                    && braceYs.length === 2
+                    && Math.abs(braceYs[0] - braceYs[1]) >= 10
+                    && shifted > 0
+                    && connectors >= 8
+                    && marginArtifacts === 0
                     ? 'pass'
                     : 'fail';
             }, 1200);
