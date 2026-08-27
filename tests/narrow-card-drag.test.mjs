@@ -97,6 +97,18 @@ assert.match(html, /\.resize-bl\s*\{[^}]*z-index:\s*51/,
     '左下角手柄应高于侧边和底边手柄，以稳定接收双向自适应操作');
 assert.match(html, /\.node-card\s*\{[\s\S]*?--node-card-radius:\s*8px[\s\S]*?--node-card-border-width:\s*2px/,
     '卡片应声明角标所需的圆角和边框宽度变量');
+assert.match(html, /\.node-card\s*\{[\s\S]*?--node-card-inner-radius:\s*max\(0px, calc\(var\(--node-card-radius\) - var\(--node-card-border-width\)\)\)/,
+    '卡片内部背景圆角应跟随外圆角和实际边框宽度');
+assert.match(html, /\.card-header\s*\{[\s\S]*?border-radius:\s*var\(--node-card-inner-radius\)/,
+    '标准卡片标题背景应贴合卡片内沿圆角');
+assert.match(html, /\.node-card\.has-content:not\(\.simple\):not\(\.content-collapsed\) > \.card-header\s*\{[^}]*border-radius:\s*var\(--node-card-inner-radius\) var\(--node-card-inner-radius\) 0 0/,
+    '只有正文实际展开时，标准卡片标题才应只保留顶部内圆角');
+assert.match(mindMap, /\$\{isContentCollapsed\?'content-collapsed':''\}/,
+    '正文折叠或精简折叠时应给普通卡片添加独立状态类，使标题恢复四角圆角');
+assert.doesNotMatch(`${html}\n${mindMap}`, /node-card-selection-ring/,
+    '不应再用额外选中描边掩盖标题背景越过圆角的问题');
+assert.match(html, /\.card-body\s*\{[\s\S]*?border-radius:\s*0 0 var\(--node-card-inner-radius\) var\(--node-card-inner-radius\)/,
+    '标准卡片正文背景应贴合卡片底部内圆角，避免选中边框在拐角处被遮细');
 assert.match(html, /\.node-card\.is-root\s*\{[^}]*--node-card-border-width:\s*4px/,
     '根节点应覆盖边框宽度变量，使角标跟随更粗的根节点边框');
 assert.match(html, /\.node-card \.resize-br,\s*\.node-card \.resize-bl\s*\{[\s\S]*?bottom:\s*calc\(-1 \* var\(--node-card-border-width\)\)[\s\S]*?width:\s*32px[\s\S]*?height:\s*32px[\s\S]*?overflow:\s*hidden/,

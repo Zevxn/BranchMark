@@ -950,6 +950,7 @@
         .summary-editor {
             --summary-card-radius: 8px;
             --summary-card-border-width: 2px;
+            --summary-card-inner-radius: max(0px, calc(var(--summary-card-radius) - var(--summary-card-border-width)));
             position: absolute;
             width: max-content;
             min-width: var(--node-card-min-width);
@@ -962,6 +963,7 @@
             flex-direction: column;
             overflow: visible;
             background: var(--card-bg);
+            background-clip: padding-box;
             border: var(--summary-card-border-width) solid var(--card-border);
             border-radius: var(--summary-card-radius);
             box-shadow: 0 2px 8px var(--shadow-color);
@@ -988,8 +990,12 @@
             padding: 8px 10px;
             color: var(--text-color);
             background: linear-gradient(to bottom, var(--header-bg-top), var(--header-bg-bottom));
-            border-bottom: 1px solid var(--header-border-bottom);
-            border-radius: 5px 5px 0 0;
+            border-radius: var(--summary-card-inner-radius) var(--summary-card-inner-radius) 0 0;
+            background-clip: padding-box;
+        }
+        .summary-editor:not(.has-content) > .summary-card-header,
+        .summary-editor.simple > .summary-card-header {
+            border-radius: var(--summary-card-inner-radius);
         }
         .summary-card-title {
             display: inline-flex;
@@ -1041,7 +1047,8 @@
             overflow-y: auto;
             overflow-x: hidden;
             background: var(--card-bg);
-            border-radius: 0 0 6px 6px;
+            border-radius: 0 0 var(--summary-card-inner-radius) var(--summary-card-inner-radius);
+            background-clip: padding-box;
             color: var(--text-color);
             max-height: 600px;
             user-select: text;
@@ -1054,7 +1061,7 @@
             );
             padding-top: 8px;
             padding-bottom: 8px;
-            border-radius: 6px;
+            border-radius: var(--summary-card-inner-radius);
         }
         .summary-editor.topic-empty.has-content {
             min-height: var(--node-card-topic-only-min-height);
@@ -1078,7 +1085,7 @@
             overflow: auto;
             background: transparent;
             border: 0;
-            border-radius: 5px;
+            border-radius: var(--summary-card-inner-radius);
         }
         .summary-editor.simple .summary-card-title {
             display: flex;
@@ -1310,7 +1317,9 @@
         .node-card {
             --node-card-radius: 8px;
             --node-card-border-width: 2px;
+            --node-card-inner-radius: max(0px, calc(var(--node-card-radius) - var(--node-card-border-width)));
             background: var(--card-bg); border: var(--node-card-border-width) solid var(--card-border); border-radius: var(--node-card-radius);
+            background-clip: padding-box;
             box-shadow: 0 2px 8px var(--shadow-color); display: flex; flex-direction: column; position: relative;
             transition: box-shadow 0.2s, border-color 0.2s;
             width: fit-content; min-width: var(--node-card-min-width); max-width: var(--node-card-max-width);
@@ -1381,15 +1390,19 @@
 
         .card-header {
             padding: 10px 12px; font-weight: 600; font-size: 15px;
-            border-bottom: 1px solid transparent; display: flex; justify-content: space-between; align-items: center;
-            background: linear-gradient(to bottom, var(--header-bg-top), var(--header-bg-bottom)); border-radius: 5px;
+            display: flex; justify-content: space-between; align-items: center;
+            background: linear-gradient(to bottom, var(--header-bg-top), var(--header-bg-bottom)); border-radius: var(--node-card-inner-radius);
             cursor: grab; white-space: nowrap; color: var(--text-color);
+            background-clip: padding-box;
         }
         .card-header[style*="background"] {
             /* 强制子元素背景继承，以便遮盖文字 */
             background-clip: padding-box;
         }
         .card-header:active { cursor: grabbing; }
+        .node-card.has-content:not(.simple):not(.content-collapsed) > .card-header {
+            border-radius: var(--node-card-inner-radius) var(--node-card-inner-radius) 0 0;
+        }
         .node-card.has-content .card-header { border-bottom-color: var(--header-border-bottom); }
         .content-indicator { color: var(--primary); margin-right: 6px; font-size: 16px; pointer-events: none; mix-blend-mode: multiply; }
         .node-topic { outline:none; cursor:text; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; user-select: text; pointer-events: auto; }
@@ -1410,7 +1423,8 @@
         }
 
         .card-body {
-            padding: 3px 10px; overflow-y: auto; overflow-x: hidden; background: var(--card-bg); border-radius: 0 0 8px 8px;
+            padding: 3px 10px; overflow-y: auto; overflow-x: hidden; background: var(--card-bg); border-radius: 0 0 var(--node-card-inner-radius) var(--node-card-inner-radius);
+            background-clip: padding-box;
             height: auto; max-height: var(--node-card-max-body-height); min-height: 0; color: var(--text-color);
             user-select: text;  /* 允许文字被选中 */
             cursor: auto;       /* 鼠标恢复为文本指针 */

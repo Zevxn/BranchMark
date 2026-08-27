@@ -7073,7 +7073,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
     const isContentCollapsed = Boolean(node.contentCollapsed || isCompactCollapsed);
     const relationCount = getMindMapRelatedCardItems(node.id).length;
     // const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''}`;
-    const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''} ${isTopicEmpty?'topic-empty':''}`;
+    const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isContentCollapsed?'content-collapsed':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''} ${isTopicEmpty?'topic-empty':''}`;
     // --- 尺寸样式 ---
     let cardStyle = '';
     

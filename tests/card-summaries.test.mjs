@@ -33,8 +33,14 @@ assert.match(html, /\.summary-editor\.simple \.summary-card-body\s*\{\s*display:
     '便利贴模式应隐藏正文并仅展示总结标题');
 assert.match(html, /\.summary-editor\.topic-empty \.summary-card-header\s*\{\s*display:\s*none/,
     '总结标题为空时应彻底隐藏标题栏');
-assert.match(html, /\.summary-editor\.topic-empty\.has-content \.summary-card-body\s*\{[\s\S]*?border-radius:\s*6px/,
+assert.match(html, /\.summary-editor\.topic-empty\.has-content \.summary-card-body\s*\{[\s\S]*?border-radius:\s*var\(--summary-card-inner-radius\)/,
     '无标题总结的正文应直接接管卡片顶部圆角');
+assert.match(html, /\.summary-editor\s*\{[\s\S]*?--summary-card-inner-radius:\s*max\(0px, calc\(var\(--summary-card-radius\) - var\(--summary-card-border-width\)\)\)/,
+    '总结卡片内部背景圆角应由外圆角减去边框宽度得到');
+assert.match(html, /\.summary-card-header\s*\{[\s\S]*?border-radius:\s*var\(--summary-card-inner-radius\) var\(--summary-card-inner-radius\) 0 0/,
+    '总结标题背景应贴合卡片内沿圆角，避免选中边框在拐角处被遮细');
+assert.match(html, /\.summary-editor:not\(\.has-content\) > \.summary-card-header,[\s\S]*?\.summary-editor\.simple > \.summary-card-header\s*\{[\s\S]*?border-radius:\s*var\(--summary-card-inner-radius\)/,
+    '仅标题和便利贴总结应让标题背景贴合四个内圆角');
 assert.match(html, /\.summary-editor\.topic-empty\.has-content \.summary-card-body\s*\{[\s\S]*?min-height:\s*calc\([\s\S]*?--node-card-topic-only-min-height/,
     '无标题但有正文的总结卡片应把统一最小高度落实到实际缩放的正文区域');
 assert.doesNotMatch(html, /\.summary-editor\.topic-empty::before/,
