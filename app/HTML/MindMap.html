@@ -850,6 +850,7 @@
             font-size: 13px;
             line-height: 20px;
         }
+        .tree-connector-layer,
         .relation-layer {
             position: absolute;
             top: 0;
@@ -859,6 +860,15 @@
             overflow: visible;
             z-index: 5;
             pointer-events: none;
+        }
+        .tree-connector-layer { z-index: 1; }
+        .tree-connector {
+            fill: none;
+            stroke: var(--line-color);
+            stroke-width: var(--line-width);
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            vector-effect: non-scaling-stroke;
         }
         .relation-line {
             fill: none;
@@ -1143,6 +1153,7 @@
             position: absolute; 
             left: 0; 
             top: 0; 
+            z-index: 2;
         }
 
         /* ====== 框选拖拽 ========================================================================== */
@@ -1263,20 +1274,13 @@
             padding: 5px 0; 
             width: max-content; /* 关键：让每个子单元只包裹自己的内容 */
         }
-        .child-unit.summary-space-before { margin-top: var(--summary-space-before, 0px); }
-        .child-unit.summary-space-after { margin-bottom: var(--summary-space-after, 0px); }
-        .child-unit.summary-space-before:not(:first-child):not(:last-child)::after {
-            top: calc(-1 * var(--summary-space-before, 0px));
+        .child-unit.summary-shifted {
+            transform: translateY(var(--summary-shift-y, 0px));
         }
-        .child-unit.summary-space-after:not(:first-child):not(:last-child)::after {
-            bottom: calc(-1 * var(--summary-space-after, 0px));
-        }
-        .child-unit.summary-space-before:last-child:not(:first-child)::before {
-            top: calc(-1 * var(--summary-space-before, 0px));
-            height: calc(50% + var(--line-width) / 2 + var(--summary-space-before, 0px));
-        }
-        .child-unit.summary-space-after:first-child:not(:last-child)::before {
-            height: calc(50% + var(--line-width) / 2 + var(--summary-space-after, 0px));
+        .root-locator.tree-connectors-active .child-unit::before,
+        .root-locator.tree-connectors-active .child-unit::after,
+        .root-locator.tree-connectors-active .child-cross-line {
+            display: none !important;
         }
         .child-unit::before { content:''; position:absolute; left: -30px; width: 30px; height: calc(50% + var(--line-width) / 2); border-left: var(--line-width) solid var(--line-color); top: calc(50% - var(--line-width) / 2); }
         .child-unit::after { content:''; position:absolute; left: -30px; top: 0; bottom: 0;width: 0; border-left: var(--line-width) solid var(--line-color); }
@@ -2412,6 +2416,7 @@
 
     <div id="app">
         <div class="canvas-layer" id="canvas-layer">
+            <svg class="tree-connector-layer" id="tree-connector-layer" aria-label="脑图父子连接线"></svg>
             <svg class="relation-layer" id="relation-layer" aria-label="卡片关联线"></svg>
             <svg class="summary-brace-layer" id="summary-brace-layer" aria-label="多卡片总结大括号"></svg>
             <div class="root-locator" id="tree-root"></div>

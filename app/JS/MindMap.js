@@ -4986,10 +4986,8 @@ const MINDMAP_SUMMARY_LABEL_GAP = 22;
 const MINDMAP_SUMMARY_COLLISION_GAP = 14;
 const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
 const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
-const MINDMAP_SUMMARY_ORIENTATION_SWITCH_PENALTY = 48;
-const MINDMAP_SUMMARY_ORIENTATION_HYSTERESIS = 24;
+const MINDMAP_SUMMARY_LAYOUT_MAX_STEPS = 240;
 let summaryRenderFrame = null;
-const summaryOrientationCache = new Map();
 
 function getMindMapSummaries() {
     return Array.isArray(state.data?.summaries) ? state.data.summaries : [];
@@ -5033,16 +5031,46 @@ function getMindMapSummarySelection(nodeIds = state.selectedIds) {
     return { nodeIds: ids, side: Array.from(sides)[0] };
 }
 
+function isMindMapSummaryCompleteSubtree(nodeIds) {
+    const selectedIds = new Set(nodeIds || []);
+    if (selectedIds.size < MINDMAP_SUMMARY_MIN_NODES) return false;
+
+    const selectedRoots = Array.from(selectedIds).filter(nodeId => {
+        const parent = findParent(state.data, nodeId);
+        return !parent || !selectedIds.has(parent.id);
+    });
+    if (selectedRoots.length !== 1) return false;
+
+    const subtreeRoot = findNode(state.data, selectedRoots[0]);
+    if (!subtreeRoot) return false;
+    const subtreeIds = new Set();
+    const visit = node => {
+        if (!node || subtreeIds.has(node.id)) return;
+        subtreeIds.add(node.id);
+        (node.children || []).forEach(visit);
+    };
+    visit(subtreeRoot);
+    return subtreeIds.size === selectedIds.size
+        && Array.from(subtreeIds).every(nodeId => selectedIds.has(nodeId));
+}
+
 function getMindMapSummaryRelationProfile(nodeIds) {
     const ids = Array.from(new Set(nodeIds || []));
     const selectedIds = new Set(ids);
     const siblingsByParent = new Map();
+    const selectedChildCountByParent = new Map();
     let parentChildCount = 0;
 
     ids.forEach(nodeId => {
         const parent = findParent(state.data, nodeId);
         if (!parent) return;
-        if (selectedIds.has(parent.id)) parentChildCount++;
+        if (selectedIds.has(parent.id)) {
+            parentChildCount++;
+            selectedChildCountByParent.set(
+                parent.id,
+                (selectedChildCountByParent.get(parent.id) || 0) + 1
+            );
+        }
         const siblings = siblingsByParent.get(parent.id) || [];
         siblings.push(nodeId);
         siblingsByParent.set(parent.id, siblings);
@@ -5052,10 +5080,16 @@ function getMindMapSummaryRelationProfile(nodeIds) {
     siblingsByParent.forEach(siblings => {
         siblingCount += siblings.length * (siblings.length - 1) / 2;
     });
+    const isCompleteSubtree = isMindMapSummaryCompleteSubtree(ids);
+    const isSingleChain = !isCompleteSubtree
+        && parentChildCount === ids.length - 1
+        && Array.from(selectedChildCountByParent.values()).every(count => count <= 1);
     return {
         parentChildCount,
         siblingCount,
-        orientation: parentChildCount > siblingCount ? 'horizontal' : 'vertical'
+        orientation: isCompleteSubtree
+            ? 'vertical'
+            : (isSingleChain || parentChildCount > siblingCount ? 'horizontal' : 'vertical')
     };
 }
 
@@ -5253,26 +5287,38 @@ function getMindMapSummaryCollisionOffset(candidate, placement, occupiedRects) {
     return offset;
 }
 
-function chooseMindMapSummaryHorizontalLayout(preferredPlacement, topEvaluation, bottomEvaluation) {
-    const preferred = preferredPlacement === 'top' ? topEvaluation : bottomEvaluation;
-    const alternate = preferredPlacement === 'top' ? bottomEvaluation : topEvaluation;
-    if (preferred.deficit <= 0) return preferred;
-    if (alternate.deficit <= 0) return alternate;
-    return alternate.deficit < preferred.deficit ? alternate : preferred;
-}
-
-function chooseMindMapSummaryAutoOrientation(verticalEvaluation, horizontalEvaluation, previousOrientation = null) {
-    const verticalCost = verticalEvaluation.cost;
-    const horizontalCost = horizontalEvaluation.deficit + MINDMAP_SUMMARY_ORIENTATION_SWITCH_PENALTY;
-    if (previousOrientation === 'vertical'
-        && verticalCost <= horizontalCost + MINDMAP_SUMMARY_ORIENTATION_HYSTERESIS) {
-        return verticalEvaluation;
+function getMindMapSummaryCollisionFreeHorizontalCandidate(
+    bounds,
+    placement,
+    editorSize,
+    obstacleRects,
+    initialLabelOffset = 0
+) {
+    const obstacles = Array.isArray(obstacleRects) ? obstacleRects : [];
+    const initialOffset = Math.max(0, Number(initialLabelOffset) || 0);
+    let labelOffset = initialOffset;
+    let candidate = getMindMapSummaryHorizontalCandidate(
+        bounds,
+        placement,
+        editorSize,
+        labelOffset
+    );
+    for (let index = 0; index <= obstacles.length; index++) {
+        const collisionOffset = getMindMapSummaryCollisionOffset(candidate, placement, obstacles);
+        if (collisionOffset <= 0) break;
+        labelOffset += collisionOffset;
+        candidate = getMindMapSummaryHorizontalCandidate(
+            bounds,
+            placement,
+            editorSize,
+            labelOffset
+        );
     }
-    if (previousOrientation === 'horizontal'
-        && horizontalCost <= verticalCost + MINDMAP_SUMMARY_ORIENTATION_HYSTERESIS) {
-        return horizontalEvaluation;
-    }
-    return verticalCost <= horizontalCost ? verticalEvaluation : horizontalEvaluation;
+    return {
+        candidate,
+        labelOffset,
+        shifted: labelOffset > initialOffset
+    };
 }
 
 function getMindMapSummaryLayoutDeficit(requiredSpace, anchors) {
@@ -5557,19 +5603,11 @@ function updateMindMapSummarySelectionAction() {
     action.style.top = `${Math.round(actionTop)}px`;
 }
 
-function clearMindMapSummaryLayoutSpaces() {
-    const spacedUnits = document.querySelectorAll('.child-unit.summary-space-before, .child-unit.summary-space-after');
-    const previousSpaces = new Map();
-    spacedUnits.forEach(unit => {
-        previousSpaces.set(unit, {
-            before: Number.parseFloat(unit.style.getPropertyValue('--summary-space-before')) || 0,
-            after: Number.parseFloat(unit.style.getPropertyValue('--summary-space-after')) || 0
-        });
-        unit.classList.remove('summary-space-before', 'summary-space-after');
-        unit.style.removeProperty('--summary-space-before');
-        unit.style.removeProperty('--summary-space-after');
+function clearMindMapSummaryBranchShifts() {
+    document.querySelectorAll('.child-unit.summary-shifted').forEach(unit => {
+        unit.classList.remove('summary-shifted');
+        unit.style.removeProperty('--summary-shift-y');
     });
-    return previousSpaces;
 }
 
 function getMindMapSummarySelectedBranchAnchor(selectedCards) {
@@ -5586,38 +5624,72 @@ function getMindMapSummarySelectedBranchAnchor(selectedCards) {
     return ancestorChains[0].find(unit => ancestorChains.every(chain => chain.includes(unit))) || null;
 }
 
+function getMindMapSummaryDescendantSeparationAnchor(obstacleCard, selectedCards, placement) {
+    const obstacleWrapper = obstacleCard?.closest?.('.node-wrapper');
+    if (!obstacleWrapper) return null;
+    const childrenContainer = Array.from(obstacleWrapper.children || [])
+        .find(child => child.classList?.contains('children-container'));
+    if (!childrenContainer) return null;
+    const selectedUnits = Array.from(childrenContainer.children || []).filter(unit =>
+        unit.classList?.contains('child-unit')
+        && selectedCards.some(selectedCard => unit.contains(selectedCard))
+    );
+    if (selectedUnits.length === 0) return null;
+    return {
+        // 障碍本身是成员祖先时，应把成员子分支推离祖先卡片：
+        // 上方总结将成员上移，下方总结将成员下移。
+        anchor: placement === 'top' ? selectedUnits[selectedUnits.length - 1] : selectedUnits[0],
+        direction: placement === 'top' ? 'after' : 'before'
+    };
+}
+
+function getMindMapSummarySeparationAnchor(obstacleCard, selectedCards) {
+    let unit = obstacleCard?.closest?.('.child-unit') || null;
+    let outermostSeparateUnit = null;
+    while (unit && !selectedCards.some(selectedCard => unit.contains(selectedCard))) {
+        // 持续提升到“障碍分支”和“成员分支”分叉处的下一层。这个单元
+        // 包含完整障碍子树，同时不会把共同祖先及其无关后代拆开。
+        outermostSeparateUnit = unit;
+        unit = unit.parentElement?.closest('.child-unit') || null;
+    }
+    return outermostSeparateUnit;
+}
+
 function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = null) {
     const selectedIds = new Set(nodeIds || []);
     const selectedCards = Array.from(selectedIds)
         .map(nodeId => document.getElementById(`card-${nodeId}`))
         .filter(Boolean);
-    if (selectedCards.length === 0 || !candidate?.collisionRect) return [];
+    if (selectedCards.length === 0 || !candidate?.editorRect) return [];
 
-    const selectedBranchAnchor = getMindMapSummarySelectedBranchAnchor(selectedCards);
     const obstaclesByAnchor = new Map();
     document.querySelectorAll('.node-card').forEach(card => {
         if (selectedIds.has(card.dataset.nodeId) || card.getClientRects().length === 0) return;
         const rect = getMindMapCanvasRect(card);
-        const collisionRect = candidate.collisionRect;
+        if (placement === 'top' && rect.top >= candidate.braceY) return;
+        if (placement === 'bottom' && rect.bottom <= candidate.braceY) return;
+        const collisionRect = {
+            left: candidate.editorRect.left - MINDMAP_SUMMARY_COLLISION_GAP,
+            right: candidate.editorRect.right + MINDMAP_SUMMARY_COLLISION_GAP,
+            top: candidate.editorRect.top - MINDMAP_SUMMARY_COLLISION_GAP,
+            bottom: candidate.editorRect.bottom + MINDMAP_SUMMARY_COLLISION_GAP
+        };
         const intersects = rect.left < collisionRect.right
             && rect.right > collisionRect.left
             && rect.top < collisionRect.bottom
             && rect.bottom > collisionRect.top;
         if (!intersects) return;
 
-        const useSelectedBoundary = placement === 'top'
-            && selectedBranchAnchor
-            && !selectedBranchAnchor.contains(card);
-        let anchor = useSelectedBoundary ? selectedBranchAnchor : null;
-        let direction = useSelectedBoundary ? 'before' : (placement === 'top' ? 'after' : 'before');
-        if (!useSelectedBoundary) {
-            // 下方总结必须直接推动实际碰撞的分支；上方总结遇到内部障碍时亦如此。
-            anchor = null;
-            let currentUnit = card.closest('.child-unit');
-            while (currentUnit && !selectedCards.some(selectedCard => currentUnit.contains(selectedCard))) {
-                anchor = currentUnit;
-                currentUnit = currentUnit.parentElement?.closest('.child-unit') || null;
-            }
+        let anchor = getMindMapSummarySeparationAnchor(card, selectedCards);
+        let direction = placement === 'top' ? 'after' : 'before';
+        if (!anchor) {
+            const descendantBoundary = getMindMapSummaryDescendantSeparationAnchor(
+                card,
+                selectedCards,
+                placement
+            );
+            anchor = descendantBoundary?.anchor || null;
+            direction = descendantBoundary?.direction || direction;
         }
         const distance = placement === 'top'
             ? bounds.top - rect.bottom
@@ -5633,12 +5705,94 @@ function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = 
             });
         }
     });
-    return Array.from(obstaclesByAnchor.values()).filter(candidate => !candidate.anchor
-        || !Array.from(obstaclesByAnchor.values()).some(other =>
+    const obstacles = Array.from(obstaclesByAnchor.values());
+    return obstacles.filter(candidate => !candidate.anchor
+        || !obstacles.some(other =>
             other !== candidate
             && other.anchor
             && other.anchor.contains(candidate.anchor)
         ));
+}
+
+function addMindMapSummaryUnitShift(unit, deltaY, shiftByUnit) {
+    if (!unit || !Number.isFinite(deltaY) || Math.abs(deltaY) < 0.5) return false;
+    const nextShift = (shiftByUnit.get(unit) || 0) + deltaY;
+    shiftByUnit.set(unit, nextShift);
+    unit.style.setProperty('--summary-shift-y', `${Math.round(nextShift)}px`);
+    unit.classList.add('summary-shifted');
+    return true;
+}
+
+function getMindMapSummaryDirectChildUnits(container) {
+    return Array.from(container?.children || [])
+        .filter(child => child.classList?.contains('child-unit'));
+}
+
+function applyMindMapSummaryBoundaryShift(anchor, direction, distance, shiftByUnit) {
+    const magnitude = Math.max(0, Math.ceil(Number(distance) || 0));
+    if (!anchor || magnitude <= 0 || !['before', 'after'].includes(direction)) return false;
+    const deltaY = direction === 'before' ? magnitude : -magnitude;
+    let currentUnit = anchor;
+    let isInitialBoundary = true;
+    let changed = false;
+
+    while (currentUnit) {
+        const container = currentUnit.parentElement;
+        if (!container?.classList?.contains('children-container')) break;
+        const siblings = getMindMapSummaryDirectChildUnits(container);
+        const index = siblings.indexOf(currentUnit);
+        if (index < 0) break;
+
+        // 初始层移动碰撞分支及同方向的兄弟；向上逐层传播时只移动
+        // 外侧兄弟，当前祖先单元已经包含被移动的后代，不能重复平移。
+        const targets = direction === 'before'
+            ? siblings.slice(index + (isInitialBoundary ? 0 : 1))
+            : siblings.slice(0, index + (isInitialBoundary ? 1 : 0));
+        targets.forEach(unit => {
+            changed = addMindMapSummaryUnitShift(unit, deltaY, shiftByUnit) || changed;
+        });
+
+        currentUnit = container.closest('.child-unit');
+        isInitialBoundary = false;
+    }
+    return changed;
+}
+
+function getMindMapSummaryTreeConnectorPath(parentRect, childRect, side) {
+    const startX = side === 'left' ? parentRect.left : parentRect.right;
+    const endX = side === 'left' ? childRect.right : childRect.left;
+    const startY = (parentRect.top + parentRect.bottom) / 2;
+    const endY = (childRect.top + childRect.bottom) / 2;
+    const middleX = (startX + endX) / 2;
+    const round = value => Math.round(value * 10) / 10;
+    return `M ${round(startX)} ${round(startY)} H ${round(middleX)} V ${round(endY)} H ${round(endX)}`;
+}
+
+function renderMindMapTreeConnectors() {
+    const layer = document.getElementById('tree-connector-layer');
+    const treeRoot = document.getElementById('tree-root');
+    if (!layer || !treeRoot) return;
+    layer.replaceChildren();
+    treeRoot.classList.add('tree-connectors-active');
+
+    document.querySelectorAll('.node-card').forEach(card => {
+        const nodeId = card.dataset.nodeId;
+        if (!nodeId || nodeId === state.data.id || card.getClientRects().length === 0) return;
+        const parent = findParent(state.data, nodeId);
+        const parentCard = parent ? document.getElementById(`card-${parent.id}`) : null;
+        if (!parentCard || parentCard.getClientRects().length === 0) return;
+        const side = getMindMapNodeBranchSide(nodeId);
+        if (!side) return;
+        const path = document.createElementNS(MINDMAP_SUMMARY_SVG_NS, 'path');
+        path.classList.add('tree-connector');
+        path.dataset.nodeId = nodeId;
+        path.setAttribute('d', getMindMapSummaryTreeConnectorPath(
+            getMindMapCanvasRect(parentCard),
+            getMindMapCanvasRect(card),
+            side
+        ));
+        layer.appendChild(path);
+    });
 }
 
 function getMindMapSummaryEditorCanvasSize(summaryId) {
@@ -5657,145 +5811,151 @@ function getMindMapSummaryEditorCanvasSize(summaryId) {
 }
 
 function prepareMindMapSummaryLayout(summaries) {
-    const previousSpaces = clearMindMapSummaryLayoutSpaces();
-    const plans = new Map();
-    const spacingRequests = new Map();
-    const occupiedSummaryRects = [];
-    const activeSummaryIds = new Set(summaries.map(summary => summary.id));
-    Array.from(summaryOrientationCache.keys()).forEach(summaryId => {
-        if (!activeSummaryIds.has(summaryId)) summaryOrientationCache.delete(summaryId);
-    });
-
+    clearMindMapSummaryBranchShifts();
+    const fixedLayouts = new Map();
+    const shiftByUnit = new Map();
     summaries.forEach(summary => {
         const geometry = getMindMapSummaryGeometry(summary);
         if (!geometry) return;
-        const editorSize = getMindMapSummaryEditorCanvasSize(summary.id);
-        const evaluatePlacement = placement => {
-            let labelOffset = 0;
-            let candidate = getMindMapSummaryHorizontalCandidate(
-                geometry.bounds,
-                placement,
-                editorSize,
-                labelOffset
-            );
-            for (let index = 0; index <= occupiedSummaryRects.length; index++) {
-                const collisionOffset = getMindMapSummaryCollisionOffset(
-                    candidate,
-                    placement,
+        fixedLayouts.set(summary.id, {
+            orientation: geometry.orientation,
+            placement: geometry.orientation === 'horizontal' ? geometry.placement : geometry.side
+        });
+    });
+
+    const evaluateLayouts = () => {
+        const evaluations = [];
+        const occupiedSummaryRects = [];
+        summaries.forEach(summary => {
+            const fixed = fixedLayouts.get(summary.id);
+            const geometry = getMindMapSummaryGeometry(summary, fixed);
+            if (!geometry || !fixed) return;
+            const editorSize = getMindMapSummaryEditorCanvasSize(summary.id);
+            if (fixed.orientation === 'vertical') {
+                const evaluation = getMindMapSummaryVerticalEvaluation(
+                    geometry.bounds,
+                    geometry.side,
+                    editorSize,
+                    summary.nodeIds,
                     occupiedSummaryRects
                 );
-                if (collisionOffset <= 0) break;
-                labelOffset += collisionOffset;
-                candidate = getMindMapSummaryHorizontalCandidate(
-                    geometry.bounds,
-                    placement,
-                    editorSize,
-                    labelOffset
-                );
+                evaluations.push({ summary, geometry, ...evaluation });
+                occupiedSummaryRects.push(evaluation.candidate.editorRect);
+                return;
             }
-            const anchors = getMindMapSummaryLayoutAnchors(
-                summary.nodeIds,
-                placement,
+
+            const collisionResult = getMindMapSummaryCollisionFreeHorizontalCandidate(
                 geometry.bounds,
-                candidate
-            );
-            const layoutSpace = getMindMapSummaryLayoutDeficit(candidate.requiredSpace, anchors);
-            return {
-                orientation: 'horizontal',
-                placement,
-                region: 'local',
-                labelOffset,
-                candidate,
-                anchors,
-                availableSpace: layoutSpace.availableSpace,
-                deficit: layoutSpace.deficit
-            };
-        };
-        const topEvaluation = evaluatePlacement('top');
-        const bottomEvaluation = evaluatePlacement('bottom');
-        const rootCard = document.getElementById(`card-${state.data.id}`);
-        const rootRect = rootCard ? getMindMapCanvasRect(rootCard) : null;
-        const preferredHorizontalPlacement = geometry.orientation === 'horizontal'
-            ? geometry.placement
-            : getMindMapSummaryHorizontalPlacement(geometry.bounds, rootRect).placement;
-        const horizontalEvaluation = chooseMindMapSummaryHorizontalLayout(
-            preferredHorizontalPlacement,
-            topEvaluation,
-            bottomEvaluation
-        );
-        let chosen = horizontalEvaluation;
-        if (geometry.orientation === 'vertical') {
-            const verticalEvaluation = getMindMapSummaryVerticalEvaluation(
-                geometry.bounds,
-                geometry.side,
+                fixed.placement,
                 editorSize,
-                summary.nodeIds,
                 occupiedSummaryRects
             );
-            chosen = chooseMindMapSummaryAutoOrientation(
-                verticalEvaluation,
-                horizontalEvaluation,
-                summaryOrientationCache.get(summary.id) || null
+            const anchors = getMindMapSummaryLayoutAnchors(
+                summary.nodeIds,
+                fixed.placement,
+                geometry.bounds,
+                collisionResult.candidate
             );
-        }
-        summaryOrientationCache.set(summary.id, chosen.orientation);
-
-        if (chosen.orientation === 'vertical') {
-            plans.set(summary.id, {
-                orientation: 'vertical',
-                placement: geometry.side,
-                region: 'side',
-                braceX: chosen.candidate.braceX
+            evaluations.push({
+                summary,
+                geometry,
+                orientation: 'horizontal',
+                placement: fixed.placement,
+                region: 'local',
+                labelOffset: collisionResult.labelOffset,
+                candidate: collisionResult.candidate,
+                anchors
             });
-            occupiedSummaryRects.push(chosen.candidate.editorRect);
+            occupiedSummaryRects.push(collisionResult.candidate.editorRect);
+        });
+        return evaluations;
+    };
+
+    let evaluations = [];
+    for (let step = 0; step < MINDMAP_SUMMARY_LAYOUT_MAX_STEPS; step++) {
+        evaluations = evaluateLayouts();
+        let nextConstraint = null;
+        evaluations.forEach(evaluation => {
+            if (evaluation.orientation !== 'horizontal') return;
+            evaluation.anchors.forEach(({ anchor, direction, distance }) => {
+                if (!anchor) return;
+                const deficit = Math.max(0, evaluation.candidate.requiredSpace - distance);
+                if (deficit <= 0) return;
+                if (!nextConstraint || deficit > nextConstraint.deficit) {
+                    nextConstraint = { anchor, direction, deficit };
+                }
+            });
+        });
+        if (!nextConstraint) break;
+        const changed = applyMindMapSummaryBoundaryShift(
+            nextConstraint.anchor,
+            nextConstraint.direction,
+            nextConstraint.deficit,
+            shiftByUnit
+        );
+        if (!changed) break;
+    }
+    evaluations = evaluateLayouts();
+
+    const plans = new Map();
+    evaluations.forEach(evaluation => {
+        if (evaluation.orientation === 'vertical') {
+            plans.set(evaluation.summary.id, {
+                orientation: 'vertical',
+                placement: evaluation.geometry.side,
+                region: 'side',
+                braceX: evaluation.candidate.braceX
+            });
             return;
         }
-        plans.set(summary.id, {
+        plans.set(evaluation.summary.id, {
             orientation: 'horizontal',
-            placement: chosen.placement,
+            placement: evaluation.placement,
             region: 'local',
-            labelOffset: chosen.labelOffset
-        });
-        occupiedSummaryRects.push(chosen.candidate.editorRect);
-
-        if (chosen.deficit <= 0) return;
-        chosen.anchors.forEach(({ anchor, direction, distance }) => {
-            if (!anchor) return;
-            const deficit = Math.max(0, chosen.candidate.requiredSpace - distance);
-            if (deficit <= 0) return;
-            const request = spacingRequests.get(anchor) || { before: 0, after: 0 };
-            request[direction] = Math.max(request[direction], Math.ceil(deficit));
-            spacingRequests.set(anchor, request);
+            labelOffset: evaluation.labelOffset
         });
     });
-
-    spacingRequests.forEach((request, anchor) => {
-        if (request.before > 0) {
-            anchor.style.setProperty('--summary-space-before', `${request.before}px`);
-            anchor.classList.add('summary-space-before');
-        }
-        if (request.after > 0) {
-            anchor.style.setProperty('--summary-space-after', `${request.after}px`);
-            anchor.classList.add('summary-space-after');
-        }
-    });
-
-    const layoutChanged = previousSpaces.size !== spacingRequests.size
-        || Array.from(new Set([...previousSpaces.keys(), ...spacingRequests.keys()])).some(anchor => {
-            const previous = previousSpaces.get(anchor) || { before: 0, after: 0 };
-            const next = spacingRequests.get(anchor) || { before: 0, after: 0 };
-            return previous.before !== next.before || previous.after !== next.after;
-        });
-    if (layoutChanged) {
-        stabilizeRoot();
-        scheduleRenderMindMapRelations();
-        scheduleRenderMindMapSummaries();
-    }
+    if (shiftByUnit.size > 0) scheduleRenderMindMapRelations();
     return plans;
+}
+
+function prepareMindMapSummaryEditorsForMeasurement(summaries, labelLayer) {
+    summaries.forEach(summary => {
+        let editor = labelLayer.querySelector(`.summary-editor[data-summary-id="${summary.id}"]`);
+        if (!editor) {
+            editor = createMindMapSummaryEditor(summary.id);
+            labelLayer.appendChild(editor);
+        }
+        const isSimple = Boolean(summary.isSimple);
+        const summaryTopic = String(summary.topic ?? '总结').slice(0, 200);
+        const summaryContent = getMindMapSummaryContent(summary);
+        const topic = editor.querySelector('.summary-topic');
+        const body = editor.querySelector('.summary-card-body');
+        editor.classList.toggle('simple', isSimple);
+        editor.classList.toggle('topic-empty', !summaryTopic.trim());
+        editor.classList.toggle('has-content', Boolean(summaryContent));
+        editor.style.width = summary.widthMode === 'manual' && summary.width ? `${summary.width}px` : '';
+        editor.style.height = isSimple && summary.heightMode === 'manual' && summary.bodyHeight
+            ? `${summary.bodyHeight}px`
+            : '';
+        body.style.height = !isSimple && summary.heightMode === 'manual' && summary.bodyHeight
+            ? `${summary.bodyHeight}px`
+            : '';
+        if (document.activeElement !== topic && topic.innerText !== summaryTopic) topic.textContent = summaryTopic;
+        if (body.dataset.summaryContent !== summaryContent) {
+            body.innerHTML = renderMarkdown(summaryContent);
+            body.dataset.summaryContent = summaryContent;
+            processRichContent(body);
+        }
+    });
 }
 
 function renderMindMapSummaries() {
     summaryRenderFrame = null;
+    // 缩放过程由指针事件直接控制总结卡片尺寸。此时若执行避障重排，
+    // ResizeObserver 与手柄会同时改写位置，造成临界尺寸附近疯狂跳动。
+    // 鼠标松开后 onMouseUp 会再安排一次最终布局。
+    if (state.mode === 'RESIZING' && state.resize?.kind === 'summary') return;
     const braceLayer = $('#summary-brace-layer');
     const labelLayer = $('#summary-label-layer');
     if (!braceLayer || !labelLayer) return;
@@ -5806,8 +5966,12 @@ function renderMindMapSummaries() {
         state.selectedSummaryId = null;
     }
     updateMindMapSummaryMemberHighlights();
+    // 编辑器必须先按持久化尺寸和正文完成 DOM 初始化，避障求解器才能拿到
+    // 真实矩形；先用估算高度布局、下一帧再补测会必然残留大卡片重叠。
+    prepareMindMapSummaryEditorsForMeasurement(summaries, labelLayer);
     const visibleSummaryIds = new Set();
     const layoutPlans = prepareMindMapSummaryLayout(summaries);
+    renderMindMapTreeConnectors();
     let shouldRemeasureLayout = false;
     summaries.forEach(summary => {
         const geometry = getMindMapSummaryGeometry(summary, layoutPlans.get(summary.id));
@@ -5824,11 +5988,8 @@ function renderMindMapSummaries() {
         }
         braceLayer.appendChild(path);
 
-        let editor = labelLayer.querySelector(`.summary-editor[data-summary-id="${summary.id}"]`);
-        if (!editor) {
-            editor = createMindMapSummaryEditor(summary.id);
-            labelLayer.appendChild(editor);
-        }
+        const editor = labelLayer.querySelector(`.summary-editor[data-summary-id="${summary.id}"]`);
+        if (!editor) return;
         editor.classList.toggle('left-side', geometry.orientation === 'vertical' && geometry.side === 'left');
         editor.classList.toggle('horizontal', geometry.orientation === 'horizontal');
         editor.classList.toggle('placement-top', geometry.orientation === 'horizontal' && geometry.placement === 'top');

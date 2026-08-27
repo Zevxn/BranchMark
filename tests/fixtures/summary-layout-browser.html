@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>Summary layout browser fixture</title>
+    <style>
+        html, body, iframe { width: 100%; height: 100%; margin: 0; border: 0; }
+        #result { position: fixed; top: 4px; left: 4px; z-index: 9999; width: 430px; padding: 6px 10px; white-space: pre-wrap; background: #fff; color: #111; font: 11px monospace; }
+    </style>
+</head>
+<body>
+    <div id="result">loading</div>
+    <iframe id="appFrame" src="../../app/HTML/MindMap.html"></iframe>
+    <script>
+        const frame = document.getElementById('appFrame');
+        const fixtureData = {
+            id: 'root', topic: '根节点', content: '', relations: [],
+            summaries: [{
+                id: 'summary-large', nodeIds: ['selected-parent', 'selected-child'],
+                topic: '总结', content: '浏览器布局测试', widthMode: 'manual', width: 560,
+                heightMode: 'manual', bodyHeight: 520, isSimple: false
+            }],
+            children: [
+                { id: 'upper', topic: '上方分支', content: '', children: [
+                    { id: 'upper-child', topic: '上方子节点', content: '', children: [] }
+                ]},
+                { id: 'selected-parent', topic: '被总结父节点', content: '', children: [
+                    { id: 'selected-child', topic: '被总结子节点', content: '', children: [] }
+                ]},
+                { id: 'obstacle-a', topic: '障碍分支 A', content: '', children: [
+                    { id: 'obstacle-a-child', topic: '障碍 A 子节点', content: '', children: [] }
+                ]},
+                { id: 'obstacle-b', topic: '障碍分支 B', content: '', children: [
+                    { id: 'obstacle-b-child', topic: '障碍 B 子节点', content: '', children: [] }
+                ]}
+            ]
+        };
+        let initialized = false;
+        frame.addEventListener('load', () => {
+            const win = frame.contentWindow;
+            if (!initialized) {
+                initialized = true;
+                win.sessionStorage.setItem('MindMapData', JSON.stringify(fixtureData));
+                win.sessionStorage.setItem('pageTitle', '总结避障浏览器测试');
+                win.sessionStorage.setItem('isMapInitialized', 'MindMap-true');
+                win.location.reload();
+                return;
+            }
+            setTimeout(() => {
+                const doc = frame.contentDocument;
+                const summary = doc.querySelector('.summary-editor');
+                const memberIds = new Set(['selected-parent', 'selected-child']);
+                const summaryRect = summary?.getBoundingClientRect();
+                const overlaps = Array.from(doc.querySelectorAll('.node-card')).filter(card => {
+                    if (!summaryRect || memberIds.has(card.dataset.nodeId)) return false;
+                    const rect = card.getBoundingClientRect();
+                    return rect.left < summaryRect.right && rect.right > summaryRect.left
+                        && rect.top < summaryRect.bottom && rect.bottom > summaryRect.top;
+                });
+                const shifted = doc.querySelectorAll('.child-unit.summary-shifted').length;
+                const connectors = doc.querySelectorAll('#tree-connector-layer .tree-connector').length;
+                const marginArtifacts = doc.querySelectorAll('.summary-space-before, .summary-space-after').length;
+                const shiftedValues = Array.from(doc.querySelectorAll('.child-unit.summary-shifted')).map(unit => ({
+                    shift: unit.style.getPropertyValue('--summary-shift-y'),
+                    node: unit.querySelector('.node-card')?.dataset.nodeId || null,
+                }));
+                const rectValue = rect => rect ? {
+                    left: Math.round(rect.left), top: Math.round(rect.top),
+                    right: Math.round(rect.right), bottom: Math.round(rect.bottom),
+                } : null;
+                const result = {
+                    overlaps: overlaps.map(card => ({ id: card.dataset.nodeId, rect: rectValue(card.getBoundingClientRect()) })),
+                    summaryRect: rectValue(summaryRect), shifted, shiftedValues, connectors, marginArtifacts
+                };
+                document.getElementById('result').textContent = JSON.stringify(result, null, 2);
+                document.body.dataset.result = overlaps.length === 0 && shifted > 0 && connectors >= 6 && marginArtifacts === 0
+                    ? 'pass'
+                    : 'fail';
+            }, 1200);
+        });
+    </script>
+</body>
+</html>
