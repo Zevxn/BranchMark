@@ -39,6 +39,22 @@ assert.equal(migrated.tabs[0].data.topic, '旧导图', '迁移不得改变原根
 assert.deepEqual({ ...migrated.tabs[0].view }, legacySnapshot.view, '迁移应保留画布视图');
 assert.deepEqual({ ...migrated.tabs[0].scrollMap }, legacySnapshot.scrollMap, '迁移应保留滚动位置');
 
+const cleanedScrollSnapshot = normalizeWorkbook({
+    data: {
+        id: 'root',
+        topic: '滚动清理',
+        children: [{ id: 'child', topic: '子节点', children: [] }],
+    },
+    scrollMap: {
+        root: 0,
+        child: 24,
+        deleted: 80,
+        invalid: 'not-a-number',
+    },
+});
+assert.deepEqual({ ...cleanedScrollSnapshot.tabs[0].scrollMap }, { child: 24 },
+    '滚动状态应只保留现存节点大于零的有效位置');
+
 const modern = normalizeWorkbook({
     version: 'tabs-v1',
     activeTabId: 'tab_b',
@@ -87,6 +103,10 @@ assert.match(mindMap, /function activateMindMapTab\([\s\S]*?commitCurrentMindMap
     '切页前应提交当前编辑并载入目标页面运行状态');
 assert.match(mindMap, /function getMindMapWorkbookSnapshot\([\s\S]*?tabs:\s*mindMapWorkbook\.tabs\.map/,
     '持久化应保存整个工作簿而非仅保存活动页面');
+assert.match(mindMap, /\.\.\.\(Object\.keys\(scrollMap\)\.length > 0 \? \{ scrollMap \} : \{\}\)/,
+    '导出工作簿时应省略没有有效位置的空 scrollMap');
+assert.match(mindMap, /function saveGlobalScrolls\([\s\S]*?scrollTop > 0[\s\S]*?state\.scrollMap\.set\(nodeId, scrollTop\)[\s\S]*?state\.scrollMap\.delete\(nodeId\)/,
+    '采集滚动位置时应删除零值，避免为每张卡片生成无意义条目');
 assert.match(mindMap, /function reorderMindMapTab\(/,
     '基础版本应支持拖动调整页面顺序');
 assert.match(mindMap, /createTabItem\.style\.display\s*=\s*state\.selectedIds\.size === 1 \? '' : 'none'/,

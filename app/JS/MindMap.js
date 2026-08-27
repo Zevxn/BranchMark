@@ -265,6 +265,29 @@ function cloneMindMapValue(value) {
     return JSON.parse(JSON.stringify(value));
 }
 
+function collectMindMapScrollNodeIds(node, target = new Set()) {
+    if (!node || typeof node !== 'object') return target;
+    if (node.id !== undefined && node.id !== null) target.add(String(node.id));
+    (Array.isArray(node.children) ? node.children : []).forEach(child => {
+        collectMindMapScrollNodeIds(child, target);
+    });
+    return target;
+}
+
+function sanitizeMindMapScrollMap(scrollMap, data) {
+    const validNodeIds = collectMindMapScrollNodeIds(data);
+    const entries = scrollMap instanceof Map
+        ? Array.from(scrollMap.entries())
+        : Object.entries(scrollMap && typeof scrollMap === 'object' ? scrollMap : {});
+    return Object.fromEntries(entries.flatMap(([nodeId, rawScrollTop]) => {
+        const normalizedNodeId = String(nodeId);
+        const scrollTop = Number(rawScrollTop);
+        return validNodeIds.has(normalizedNodeId) && Number.isFinite(scrollTop) && scrollTop > 0
+            ? [[normalizedNodeId, scrollTop]]
+            : [];
+    }));
+}
+
 function createMindMapTab(name = '页面 1', snapshot = null) {
     const data = snapshot?.data
         ? normalizeImportedMindMapTree(snapshot.data)
@@ -278,9 +301,7 @@ function createMindMapTab(name = '页面 1', snapshot = null) {
         name: String(name || '').trim() || '未命名页面',
         data,
         view: snapshot?.view || { tx: window.innerWidth / 2, ty: window.innerHeight / 2, scale: 1 },
-        scrollMap: snapshot?.scrollMap && typeof snapshot.scrollMap === 'object'
-            ? snapshot.scrollMap
-            : {}
+        scrollMap: sanitizeMindMapScrollMap(snapshot?.scrollMap, data)
     };
 }
 
@@ -450,7 +471,8 @@ function syncActiveMindMapTab(captureScroll = true) {
     if (captureScroll) saveGlobalScrolls();
     tab.data = state.data;
     tab.view = state.view;
-    tab.scrollMap = Object.fromEntries(state.scrollMap);
+    tab.scrollMap = sanitizeMindMapScrollMap(state.scrollMap, state.data);
+    state.scrollMap = new Map(Object.entries(tab.scrollMap));
     mindMapTabRuntime.set(tab.id, {
         history: [...state.history],
         historyIndex: state.historyIndex
@@ -463,13 +485,17 @@ function getMindMapWorkbookSnapshot(captureScroll = true) {
     return {
         version: MINDMAP_TABS_VERSION,
         activeTabId: mindMapWorkbook.activeTabId,
-        tabs: mindMapWorkbook.tabs.map(tab => ({
-            id: tab.id,
-            name: tab.name,
-            data: tab.data,
-            view: tab.view,
-            scrollMap: tab.scrollMap || {}
-        }))
+        tabs: mindMapWorkbook.tabs.map(tab => {
+            const scrollMap = sanitizeMindMapScrollMap(tab.scrollMap, tab.data);
+            tab.scrollMap = scrollMap;
+            return {
+                id: tab.id,
+                name: tab.name,
+                data: tab.data,
+                view: tab.view,
+                ...(Object.keys(scrollMap).length > 0 ? { scrollMap } : {})
+            };
+        })
     };
 }
 
@@ -499,7 +525,7 @@ function loadActiveMindMapTab(options = {}) {
     const runtime = options.resetHistory ? null : mindMapTabRuntime.get(tab.id);
     state.data = tab.data;
     state.view = tab.view || { tx: window.innerWidth / 2, ty: window.innerHeight / 2, scale: 1 };
-    state.scrollMap = new Map(Object.entries(tab.scrollMap || {}));
+    state.scrollMap = new Map(Object.entries(sanitizeMindMapScrollMap(tab.scrollMap, tab.data)));
     state.history = runtime?.history?.length
         ? [...runtime.history]
         : [JSON.stringify(tab.data)];
@@ -6532,9 +6558,14 @@ function commitMindMapInlineEditor() {
 // #region 存储相关
 // ==========================================
 function saveGlobalScrolls() {
+    state.scrollMap = new Map(Object.entries(sanitizeMindMapScrollMap(state.scrollMap, state.data)));
     document.querySelectorAll('.card-body').forEach(el => {
         const card = el.closest('.node-card');
-        if(card) state.scrollMap.set(card.dataset.nodeId, el.scrollTop);
+        if (!card) return;
+        const nodeId = card.dataset.nodeId;
+        const scrollTop = Number(el.scrollTop);
+        if (Number.isFinite(scrollTop) && scrollTop > 0) state.scrollMap.set(nodeId, scrollTop);
+        else state.scrollMap.delete(nodeId);
     });
 };
 
