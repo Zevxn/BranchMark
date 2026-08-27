@@ -5736,7 +5736,7 @@ function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = 
         const rect = getMindMapCanvasRect(card);
         if (placement === 'top' && rect.top >= candidate.braceY) return;
         if (placement === 'bottom' && rect.bottom <= candidate.braceY) return;
-        const collisionRect = {
+        const collisionRect = candidate.collisionRect || {
             left: candidate.editorRect.left - MINDMAP_SUMMARY_COLLISION_GAP,
             right: candidate.editorRect.right + MINDMAP_SUMMARY_COLLISION_GAP,
             top: candidate.editorRect.top - MINDMAP_SUMMARY_COLLISION_GAP,
@@ -5832,8 +5832,12 @@ function getMindMapSummaryTreeConnectorPath(parentRect, childRect, side) {
     const startY = (parentRect.top + parentRect.bottom) / 2;
     const endY = (childRect.top + childRect.bottom) / 2;
     const middleX = (startX + endX) / 2;
-    const round = value => Math.round(value * 10) / 10;
-    return `M ${round(startX)} ${round(startY)} H ${round(middleX)} V ${round(endY)} H ${round(endX)}`;
+    return getMindMapRoundedOrthogonalPath([
+        { x: startX, y: startY },
+        { x: middleX, y: startY },
+        { x: middleX, y: endY },
+        { x: endX, y: endY }
+    ], 10);
 }
 
 function renderMindMapTreeConnectors() {
@@ -7148,7 +7152,9 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
     }
 
     // 修复：确保左侧节点也有正确的 Resize 手柄 (左边 resize-l, 左下角 resize-bl)
-    const resizeHandles = (!isContentCollapsed || isSimple) ? getMindMapResizeHandlesHTML() : '';
+    const resizeHandles = (isSimple || (hasContent && !isContentCollapsed))
+        ? getMindMapResizeHandlesHTML()
+        : '';
 
     const foldBtn = (!isRoot && hasChildren) ? 
         `<div class="fold-btn ${areChildrenVisible?'has-children':''} ${isLeft?'left-side':''}" data-action="fold"><i class="${areChildrenVisible?'ri-subtract-line':'ri-add-line'}"></i></div>` : '';

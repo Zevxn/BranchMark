@@ -95,6 +95,10 @@ assert.equal(topPlacement.arrowOffset, 130,
     '上方气泡的箭头仍应指向卡片横向中心');
 assert.match(mindMapHtml, /\.card-content-preview\[data-placement="top"\]::before\s*\{[^}]*bottom:\s*-7px/s,
     '上方气泡的箭头应位于气泡底边并朝向目标卡片');
+assert.match(mindMapHtml, /\.card-content-preview \.card-body:has\(> p:only-child\)\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*justify-content:\s*safe center;/s,
+    '只有一个段落的短文本预览应在最小高度内安全垂直居中');
+assert.doesNotMatch(mindMapHtml, /\.card-content-preview \.card-body\s*\{[^}]*justify-content:\s*(?!safe center)/s,
+    '多段、表格和长内容预览不得全局强制居中');
 
 const bottomEdgeCard = { left: 800, top: 740, width: 200, height: 100, right: 1000, bottom: 840 };
 const edgeConstrainedPlacement = getPlacement(

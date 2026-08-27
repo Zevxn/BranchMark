@@ -45,6 +45,10 @@ assert.match(html, /\.summary-editor\.horizontal\.placement-bottom\s*\{\s*transf
     '横向总结在下方时应以顶边居中对齐大括号');
 assert.match(html, /\.summary-editor\.horizontal\.placement-top \.resize-b\s*\{[\s\S]*?top:\s*-5px;[\s\S]*?bottom:\s*auto;/,
     '顶部横向总结应把高度手柄放到不受括号锚定的顶边');
+assert.match(html, /\.summary-editor:not\(\.simple\):not\(\.has-content\) \.resize-handle\s*\{\s*display:\s*none !important;/,
+    '没有正文、只有 Topic 的标准总结卡片不应显示尺寸调节手柄');
+assert.doesNotMatch(html, /\.summary-editor:not\(\.has-content\) \.resize-(?:b|br|bl)/,
+    '便利贴总结不能因没有正文而被隐藏高度及角部手柄');
 assert.match(html, /\.child-unit\.summary-shifted\s*\{[\s\S]*?transform:\s*translateY\(var\(--summary-shift-y/,
     '总结避障应使用不参与 Flex 高度计算的分支位移');
 assert.doesNotMatch(html, /summary-space-before|summary-space-after/,
@@ -148,8 +152,8 @@ assert.match(mindMap, /function getMindMapSummarySeparationAnchor[\s\S]*?outermo
     '避障应锚定到成员与障碍发生分叉的完整子树边界');
 assert.doesNotMatch(mindMap, /labelXOffset|getMindMapSummaryHorizontalCollisionShift/,
     '横向总结卡片中心必须始终与大括号中心对齐');
-assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, candidate = null\)[\s\S]*?candidate\?\.editorRect[\s\S]*?rect\.top >= candidate\.braceY[\s\S]*?collisionRect/,
-    '总结应按编辑卡实际矩形查找障碍，完全位于大括号另侧的卡片不应移动');
+assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, candidate = null\)[\s\S]*?candidate\?\.editorRect[\s\S]*?rect\.top >= candidate\.braceY[\s\S]*?candidate\.collisionRect \|\|/,
+    '横向总结应优先按“大括号通道 + 总结卡片”的整体矩形查找障碍');
 assert.match(mindMap, /function getMindMapSummaryHorizontalBraceY\(bounds, placement\)[\s\S]*?bounds\.top - MINDMAP_SUMMARY_BRACE_OFFSET[\s\S]*?bounds\.bottom \+ MINDMAP_SUMMARY_BRACE_OFFSET/,
     '横向总结大括号必须贴近成员卡片，不能移到整张导图之外');
 assert.match(mindMap, /function getMindMapSummaryCollisionFreeHorizontalCandidate[\s\S]*?getMindMapSummaryCollisionOffset[\s\S]*?labelOffset \+= collisionOffset[\s\S]*?occupiedSummaryRects/,
@@ -166,6 +170,8 @@ assert.match(mindMap, /function renderMindMapSummaries\(\)\s*\{[\s\S]*?state\.mo
     '总结卡片缩放期间应暂停后台避障重排，松手后再执行最终布局');
 assert.match(mindMap, /function renderMindMapTreeConnectors\(\)[\s\S]*?getMindMapCanvasRect\(parentCard\)[\s\S]*?getMindMapCanvasRect\(card\)/,
     '父子连接线必须根据分支位移后的最终卡片矩形绘制');
+assert.match(mindMap, /function getMindMapSummaryTreeConnectorPath[\s\S]*?getMindMapRoundedOrthogonalPath\([\s\S]*?\], 10\)/,
+    '父子连接线应使用真实的 10px 正交圆角路径，不能只依赖描边拐角样式');
 assert.match(mindMap, /prepareMindMapSummaryEditorsForMeasurement\(summaries, labelLayer\);[\s\S]*?const layoutPlans = prepareMindMapSummaryLayout\(summaries\);\s*renderMindMapTreeConnectors\(\);/,
     '总结编辑器必须先恢复真实尺寸和正文，再执行避障与最终父子连线');
 assert.match(mindMap, /function prepareMindMapSummaryEditorsForMeasurement[\s\S]*?body\.style\.height[\s\S]*?body\.innerHTML = renderMarkdown\(summaryContent\)/,
@@ -576,6 +582,17 @@ assert.equal(
     vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, bottomLayoutCandidate)[0].direction", layoutAnchorContext),
     'before',
     '下方总结应在障碍分支之前留位，确保相邻卡片实际向下避让',
+);
+obstacleCard.rect = { left: 0, top: 120, right: 100, bottom: 145 };
+layoutAnchorContext.braceCollisionCandidate = {
+    braceY: 110,
+    editorRect: { left: -20, top: 160, right: 120, bottom: 300 },
+    collisionRect: { left: -34, top: 100, right: 134, bottom: 314 },
+};
+assert.equal(
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, braceCollisionCandidate)[0].anchor === obstacleUnit", layoutAnchorContext),
+    true,
+    '普通卡片只与横向大括号通道重叠时，也必须触发分支避让',
 );
 obstacleCard.rect = { left: 0, top: -80, right: 100, bottom: 70 };
 layoutAnchorContext.topLayoutCandidate = {

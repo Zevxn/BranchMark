@@ -73,6 +73,8 @@ assert.match(mindMap, /function autoFitMindMapEntity[\s\S]*?direction\.includes\
     '公共自适应逻辑应按手柄方向恢复自动宽高，且不排除便利贴');
 assert.match(mindMap, /function autoFitMindMapEntity\(target, kind = 'node', direction = 'wh'\) \{[\s\S]*?syncCurrentInput\(\);[\s\S]*?target\.widthMode = 'auto'/,
     '双击自适应前应同步正在编辑的 topic，避免局部更新丢失输入');
+assert.match(mindMap, /const resizeHandles = \(isSimple \|\| \(hasContent && !isContentCollapsed\)\)[\s\S]*?getMindMapResizeHandlesHTML\(\)/,
+    '只有 Topic 的标准卡片不应生成手柄，便利贴模式则必须始终保留完整尺寸调节能力');
 assert.match(mindMap, /function getMindMapEntityMinHeight[\s\S]*?window\.getComputedStyle\(heightElement\)\.minHeight[\s\S]*?Number\.isFinite\(minHeight\) \? minHeight : 0/,
     '拖拽和尺寸写回应统一读取实际高度元素的 CSS min-height');
 assert.match(mindMap, /function getMindMapEntityMinWidth[\s\S]*?window\.getComputedStyle\(element\)\.minWidth[\s\S]*?MINDMAP_CARD_MIN_WIDTH/,
