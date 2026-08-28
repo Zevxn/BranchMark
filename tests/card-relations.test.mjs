@@ -253,6 +253,29 @@ const avoidsObstacle = vm.runInContext(`
 `, routingContext);
 assert.equal(avoidsObstacle, true, '生成的每一段路线都不能穿过卡片障碍');
 
+routingContext.lateTurnStart = { x: 0, y: 1000 };
+routingContext.lateTurnEnd = { x: 100, y: 0 };
+routingContext.targetColumnObstacles = [
+    { id: 'target-column-1', left: 80, right: 120, top: 180, bottom: 260 },
+    { id: 'target-column-2', left: 80, right: 120, top: 420, bottom: 500 },
+    { id: 'target-column-3', left: 80, right: 120, top: 680, bottom: 760 }
+];
+const lateTurnRoute = vm.runInContext(`
+    findMindMapOrthogonalRoute(
+        lateTurnStart,
+        lateTurnEnd,
+        targetColumnObstacles,
+        [],
+        [],
+        2
+    )
+`, routingContext);
+assert.deepEqual(Array.from(lateTurnRoute.points, point => ({ x: point.x, y: point.y })), [
+    { x: 0, y: 1000 },
+    { x: 0, y: 0 },
+    { x: 100, y: 0 }
+], '目标中心列沿途受阻时应保持源侧直线，到目标附近再横移，不能提前横移后蛇形绕障碍');
+
 routingContext.foldButtonObstacle = vm.runInContext(`
     expandMindMapRelationObstacle({
         id: 'fold-button', left: 86, right: 102, top: 90, bottom: 110

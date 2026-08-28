@@ -4172,7 +4172,8 @@ function getMindMapRelationTerminalAlignmentPenalty(
     to,
     end,
     terminalDirection,
-    preferredChannels
+    preferredChannels,
+    isContinuingDirection = false
 ) {
     const epsilon = 0.1;
     const horizontal = Math.abs(from.y - to.y) < epsilon;
@@ -4180,6 +4181,21 @@ function getMindMapRelationTerminalAlignmentPenalty(
     if (!terminalDirection || moveDirection !== terminalDirection) return 0;
 
     const coordinate = horizontal ? from.y : from.x;
+    const segmentFrom = horizontal ? from.x : from.y;
+    const segmentTo = horizontal ? to.x : to.y;
+    const leavesPreferredChannel = isContinuingDirection && preferredChannels.some(channel => {
+        if (channel.axis !== (horizontal ? 'y' : 'x')) return false;
+        if (Math.abs(coordinate - channel.coordinate) >= epsilon) return false;
+        const channelMin = Number.isFinite(channel.min) ? channel.min : -Infinity;
+        const channelMax = Number.isFinite(channel.max) ? channel.max : Infinity;
+        const fromInside = segmentFrom >= channelMin - epsilon && segmentFrom <= channelMax + epsilon;
+        const toOutside = segmentTo < channelMin - epsilon || segmentTo > channelMax + epsilon;
+        return fromInside && toOutside;
+    });
+    // 网格中的障碍边界会把一条直线拆成许多小边。对连续小边重复计罚会迫使
+    // 路线过早横移到目标列，并在沿途障碍之间蛇形穿梭；每段直线只计一次。
+    if (isContinuingDirection && !leavesPreferredChannel) return 0;
+
     const targetCoordinate = horizontal ? end.y : end.x;
     if (Math.abs(coordinate - targetCoordinate) < epsilon) return 0;
 
@@ -4367,7 +4383,8 @@ function findMindMapOrthogonalRoute(
                 to,
                 end,
                 terminalDirection,
-                preferredChannels
+                preferredChannels,
+                current.direction === move.direction
             );
             const nextCost = current.cost
                 + length
