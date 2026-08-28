@@ -156,6 +156,8 @@ assert.match(mindMap, /let direction = placement === 'top' \? 'after' : 'before'
     '上方总结应在障碍子树之后留位，使障碍及其后代整体上移');
 assert.match(mindMap, /function getMindMapSummarySeparationAnchor[\s\S]*?outermostSeparateUnit[\s\S]*?!selectedCards\.some\(selectedCard => unit\.contains\(selectedCard\)\)/,
     '避障应锚定到成员与障碍发生分叉的完整子树边界');
+assert.match(mindMap, /function getMindMapSummaryDescendantSeparationAnchor[\s\S]*?placement === 'top' \? selectedUnits\[0\] : selectedUnits\[selectedUnits\.length - 1\][\s\S]*?placement === 'top' \? 'before' : 'after'/,
+    '祖先碰撞时应把成员分支推离祖先，不能让子树越过父节点');
 assert.doesNotMatch(mindMap, /labelXOffset|getMindMapSummaryHorizontalCollisionShift/,
     '横向总结卡片中心必须始终与大括号中心对齐');
 assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, candidate = null\)[\s\S]*?candidate\?\.editorRect[\s\S]*?rect\.top >= candidate\.braceY[\s\S]*?candidate\.collisionRect \|\|/,
@@ -650,8 +652,19 @@ assert.equal(
 );
 assert.equal(
     vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'top', selectionBounds, topLayoutCandidate)[0].direction", layoutAnchorContext),
+    'before',
+    '上方总结碰到祖先时应把成员子分支向下推离祖先',
+);
+ancestorObstacleCard.rect = { left: 0, top: 120, right: 100, bottom: 260 };
+assert.equal(
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, bottomLayoutCandidate)[0].anchor === selectedDescendantUnit", layoutAnchorContext),
+    true,
+    '下方总结碰到祖先时仍应使用直属成员后代作为位移边界',
+);
+assert.equal(
+    vm.runInContext("getMindMapSummaryLayoutAnchors(['selected'], 'bottom', selectionBounds, bottomLayoutCandidate)[0].direction", layoutAnchorContext),
     'after',
-    '祖先障碍应通过成员子分支与祖先拉开距离',
+    '下方总结碰到祖先时应把成员子分支向上推离祖先',
 );
 visibleLayoutCards = [selectedCard, obstacleCard];
 obstacleCard.rect = { left: 0, top: 90, right: 100, bottom: 200 };
@@ -751,6 +764,34 @@ assert.equal(parentUnit.style.values.has('--summary-shift-y'), false,
     '包含已移动后代的祖先单元不得重复叠加相同位移');
 assert.equal(outerLowerSibling.style.values.get('--summary-shift-y'), '80px',
     '祖先层后续分支应传播位移以避免父子树互相覆盖');
+const upperOfLowestMember = createShiftUnit();
+const lowestMemberBranch = createShiftUnit();
+const lowestMemberParent = createShiftUnit();
+const lowestMemberContainer = {
+    classList: { contains: name => name === 'children-container' },
+    children: [upperOfLowestMember, lowestMemberBranch],
+    closest: selector => selector === '.child-unit' ? lowestMemberParent : null,
+};
+const lowestMemberOuterContainer = {
+    classList: { contains: name => name === 'children-container' },
+    children: [lowestMemberParent],
+    closest: () => null,
+};
+[upperOfLowestMember, lowestMemberBranch].forEach(unit => { unit.parentElement = lowestMemberContainer; });
+lowestMemberParent.parentElement = lowestMemberOuterContainer;
+layoutAnchorContext.lowestMemberBranch = lowestMemberBranch;
+layoutAnchorContext.lowestMemberShiftMap = new Map();
+assert.equal(
+    vm.runInContext("applyMindMapSummaryBoundaryShift(lowestMemberBranch, 'before', 120, lowestMemberShiftMap)", layoutAnchorContext),
+    true,
+    '上方总结碰到祖先时，最下面的成员分支应能向下腾出空间',
+);
+assert.equal(upperOfLowestMember.style.values.has('--summary-shift-y'), false,
+    '最下面的成员分支向下避让时不得带动上方兄弟反向越序');
+assert.equal(lowestMemberBranch.style.values.get('--summary-shift-y'), '120px',
+    '最下面的成员分支及其后代应整体向下远离祖先');
+assert.equal(lowestMemberParent.style.values.has('--summary-shift-y'), false,
+    '成员父分支不得随子分支重复移动');
 const cleanupContext = vm.createContext({
     state: {
         data: {

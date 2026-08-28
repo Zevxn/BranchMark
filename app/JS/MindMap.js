@@ -5704,10 +5704,11 @@ function getMindMapSummaryDescendantSeparationAnchor(obstacleCard, selectedCards
     );
     if (selectedUnits.length === 0) return null;
     return {
-        // 障碍本身是成员祖先时，应把成员子分支推离祖先卡片：
-        // 上方总结将成员上移，下方总结将成员下移。
-        anchor: placement === 'top' ? selectedUnits[selectedUnits.length - 1] : selectedUnits[0],
-        direction: placement === 'top' ? 'after' : 'before'
+        // 障碍本身是成员祖先时，必须把成员子分支向总结的反方向推离祖先：
+        // 上方总结把成员及其后续兄弟下移，下方总结把成员及其前置兄弟上移。
+        // 旧方向会缩短成员与祖先的距离，使迭代缺口越来越大，最终让子树越过父节点。
+        anchor: placement === 'top' ? selectedUnits[0] : selectedUnits[selectedUnits.length - 1],
+        direction: placement === 'top' ? 'before' : 'after'
     };
 }
 
