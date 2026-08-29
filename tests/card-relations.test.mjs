@@ -72,14 +72,24 @@ assert.match(mindMap, /updateSelectedMindMapRelation\('direction'/,
     '方向编辑应更新关联数据并进入历史记录');
 assert.match(mindMap, /function findMindMapOrthogonalRoute\(/,
     '关联渲染应提供正交避障寻路');
-assert.match(mindMap, /MINDMAP_RELATION_OVERLAP_PENALTY\s*\+\s*overlap\s*\*\s*6/,
-    '路由评分应惩罚同通道重叠');
+assert.match(mindMap, /MINDMAP_RELATION_OVERLAP_PENALTY\s*\+\s*overlap\s*\*\s*6\s*\+\s*clearanceDeficit\s*\*\s*12/,
+    '路由评分应惩罚同通道重叠及平行安全间距不足');
+assert.match(mindMap, /parallelDistance >= MINDMAP_RELATION_PARALLEL_CLEARANCE/,
+    '占用线段应按可见宽度建立平行安全走廊，而不是只比较完全相同的坐标');
 assert.match(mindMap, /penalty \+= MINDMAP_RELATION_CROSSING_PENALTY/,
     '路由评分应惩罚关联线交叉');
+assert.match(mindMap, /const structuralTreeSegment = segment\.kind === 'tree'[\s\S]*?if \(structuralTreeSegment\) return/,
+    '父子树线应进入带类型的占用模型，阻止同向重叠但允许横向穿越');
+assert.match(mindMap, /function getMindMapRelationTreeSegments\(cardRects\)[\s\S]*?getMindMapTreeConnectorPoints[\s\S]*?'tree'/,
+    '关联寻路应复用父子连接线的真实几何生成结构占用线段');
 assert.match(mindMap, /relationRouteCache\s*=\s*\{\s*key:\s*cacheKey,\s*routes\s*\}/,
     '卡片几何未变化时应复用路由，避免编辑标签时重复寻路');
-assert.match(mindMap, /reservedSidePenalty\s*=\s*\(sourceReservedSides\.has\(sourceSide\)/,
-    '关系端点应避开已被树结构占用的卡片侧边');
+assert.match(mindMap, /getMindMapRelationPortContext\(rect\.id\)[\s\S]*?getMindMapRelationReservedSides\(rect\.id\)/,
+    '端口拓扑状态变化时应使关系路由缓存失效');
+assert.match(mindMap, /function getMindMapRelationPortUsage\([\s\S]*?usesStructuralAnchor[\s\S]*?return 'free'/,
+    '关系端点应按具体端口区分空闲、子树占用和父线保留状态');
+assert.match(mindMap, /left\.reservedPortCount - right\.reservedPortCount[\s\S]*?left\.occupiedPortCount - right\.occupiedPortCount/,
+    '关系寻路应先选择拓扑空闲层级，再在同层级内比较几何代价');
 assert.match(mindMap, /function getMindMapRelationPreferredAlong\(/,
     '关联线应根据父子连线占用情况调整卡片边缘端点');
 assert.match(mindMap, /document\.querySelectorAll\('\.fold-btn'\)[\s\S]*?MINDMAP_RELATION_FOLD_BUTTON_PADDING/,
@@ -229,10 +239,12 @@ vm.runInContext(`
     const MINDMAP_RELATION_TERMINAL_ALIGNMENT_PENALTY = 48;
     const MINDMAP_RELATION_LANE_GAP = 12;
     const MINDMAP_RELATION_TURN_PENALTY = 28;
+    const MINDMAP_RELATION_VISIBLE_TURN_PENALTY = MINDMAP_RELATION_SOURCE_CLEARANCE
+        + MINDMAP_RELATION_TARGET_APPROACH
+        + MINDMAP_RELATION_LANE_GAP * 2;
     const MINDMAP_RELATION_CROSSING_PENALTY = 420;
     const MINDMAP_RELATION_OVERLAP_PENALTY = 720;
-    const MINDMAP_RELATION_RESERVED_SIDE_PENALTY = 1200;
-    const MINDMAP_RELATION_ROUTE_CANDIDATES = 12;
+    const MINDMAP_RELATION_PARALLEL_CLEARANCE = 10;
     const MINDMAP_RELATION_PORT_PAIR_CANDIDATES = 4;
     const MINDMAP_RELATION_PORT_DEVIATION_PENALTY = 0.2;
     ${routingSource}
@@ -252,6 +264,60 @@ const avoidsObstacle = vm.runInContext(`
         .every(segment => isMindMapRelationSegmentClear(segment.from, segment.to, routeObstacles))
 `, routingContext);
 assert.equal(avoidsObstacle, true, '生成的每一段路线都不能穿过卡片障碍');
+
+routingContext.treeOverlapStart = { x: 0, y: 50 };
+routingContext.treeOverlapEnd = { x: 100, y: 50 };
+routingContext.horizontalTreeSegment = [{
+    from: { x: 20, y: 50 },
+    to: { x: 80, y: 50 },
+    kind: 'tree'
+}];
+const treeOverlapRoute = vm.runInContext(`
+    findMindMapOrthogonalRoute(
+        treeOverlapStart,
+        treeOverlapEnd,
+        [],
+        horizontalTreeSegment
+    )
+`, routingContext);
+assert.ok(treeOverlapRoute && treeOverlapRoute.points.some(point => Math.abs(point.y - 50) > 0.1),
+    '关系线与父子树线同轴重叠时应主动换到相邻通道');
+
+routingContext.treeNearOverlapStart = { x: 50, y: 0 };
+routingContext.treeNearOverlapEnd = { x: 50, y: 100 };
+routingContext.nearbyVerticalTreeSegment = [{
+    from: { x: 54, y: 20 },
+    to: { x: 54, y: 80 },
+    kind: 'tree'
+}];
+const treeNearOverlapRoute = vm.runInContext(`
+    findMindMapOrthogonalRoute(
+        treeNearOverlapStart,
+        treeNearOverlapEnd,
+        [],
+        nearbyVerticalTreeSegment
+    )
+`, routingContext);
+assert.ok(treeNearOverlapRoute && treeNearOverlapRoute.points.some(point => Math.abs(point.x - 50) > 0.1),
+    '关系线与父子树线相差数像素但视觉粘连时，也应离开树线安全走廊');
+
+routingContext.treeCrossingStart = { x: 0, y: 50 };
+routingContext.treeCrossingEnd = { x: 100, y: 50 };
+routingContext.verticalTreeSegment = [{
+    from: { x: 50, y: 0 },
+    to: { x: 50, y: 100 },
+    kind: 'tree'
+}];
+const treeCrossingRoute = vm.runInContext(`
+    findMindMapOrthogonalRoute(
+        treeCrossingStart,
+        treeCrossingEnd,
+        [],
+        verticalTreeSegment
+    )
+`, routingContext);
+assert.equal(treeCrossingRoute.points.length, 2,
+    '关系线垂直穿越父子树干时应保留直线路径，不为普通交叉额外绕行');
 
 routingContext.lateTurnStart = { x: 0, y: 1000 };
 routingContext.lateTurnEnd = { x: 100, y: 0 };
@@ -485,6 +551,54 @@ assert.equal(leafRightPorts[0].port.y, 200,
     '无子节点卡片的外侧关联线必须从中心连接');
 assert.equal(leafRightPorts[0].kinds.some(kind => kind.startsWith('quarter')), false,
     '无子节点卡片的外侧四分位不得进入候选集');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPortUsage(
+        'bottom',
+        { kinds: ['preferred', 'center'] },
+        new Set(['left']),
+        { branchSide: 'right', hasChildren: true, childSides: [] }
+    )
+`, routingContext), 'free', '有子节点的右支卡片底边仍应属于空闲端口');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPortUsage(
+        'right',
+        { kinds: ['center'] },
+        new Set(['left']),
+        { branchSide: 'right', hasChildren: true, childSides: [] }
+    )
+`, routingContext), 'occupied', '有子节点的右支卡片右边应属于子树共享端口');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPortUsage(
+        'left',
+        { kinds: ['center'] },
+        new Set(['left']),
+        { branchSide: 'right', hasChildren: true, childSides: [] }
+    )
+`, routingContext), 'reserved', '右支卡片左边应属于父线保留端口');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPortUsage(
+        'left',
+        { kinds: ['quarter-start'] },
+        new Set(['left']),
+        { branchSide: 'right', hasChildren: true, childSides: [] }
+    )
+`, routingContext), 'free', '父线只占左侧中点，未重叠的四分位端口应保持空闲');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPortUsage(
+        'left',
+        { kinds: ['quarter-start'] },
+        new Set(['left']),
+        { branchSide: 'right', hasChildren: false, childSides: [] }
+    )
+`, routingContext), 'reserved', '叶节点无需复用父线侧，左侧四分位端口应继续保留');
+assert.equal(vm.runInContext(`
+    getMindMapRelationPortUsage(
+        'right',
+        { kinds: ['quarter-start'] },
+        new Set(['left']),
+        { branchSide: 'right', hasChildren: true, childSides: [] }
+    )
+`, routingContext), 'occupied', '子树侧四分位端口仍应属于占用层级，避免重新产生绕行');
 const adaptiveTopPorts = vm.runInContext(`
     getMindMapRelationPortCandidates(
         adaptivePortRect,
@@ -700,10 +814,10 @@ const adaptiveEndpointRoute = vm.runInContext(`
 `, routingContext);
 assert.equal(adaptiveEndpointRoute.sourceSide, 'bottom',
     '当其他起点侧被树结构保留时，应从源卡片底边引出关联线');
-assert.equal(adaptiveEndpointRoute.targetSide, 'right',
-    '当其他终点侧被树结构保留时，应从目标卡片右侧进入');
+assert.equal(adaptiveEndpointRoute.targetSide, 'left',
+    '父线占用左侧中点时，仍应允许从更近的左侧四分位端口进入');
 assert.ok(adaptiveEndpointRoute.points.at(-1).y > 150,
-    '精确避障评分应最终选中比右侧中心更靠近下方卡片的端点');
+    '精确避障评分应最终选中左侧偏下且未被父线占用的端点');
 
 vm.runInContext(`
     getMindMapRelationPortContext = nodeId => nodeId === 'upper-target'
@@ -714,9 +828,9 @@ const leafEndpointRoute = vm.runInContext(`
     routeMindMapRelation(lowerSourceRect, upperTargetRect, [], [])
 `, routingContext);
 assert.equal(leafEndpointRoute.targetSide, 'right',
-    '无子节点卡片的右侧仍应可作为关联线终点侧');
+    '无子节点卡片应优先使用未被父线占用的外侧端口');
 assert.equal(leafEndpointRoute.points.at(-1).y, 115.5,
-    '无子节点卡片的最终关联线必须落在右侧中心');
+    '无子节点卡片的外侧关联线应落在右侧中心');
 
 routingContext.foldTargetRect = {
     id: 'fold-target', left: 0, right: 160, top: 100, bottom: 300, width: 160, height: 200
@@ -769,5 +883,167 @@ assert.equal(vm.runInContext(`
     getMindMapRelationSegments(foldSafeEndpointRoute.points)
         .every(segment => isMindMapRelationSegmentClear(segment.from, segment.to, [foldCenterObstacle]))
 `, routingContext), true, '包含最后进场段的完整关联线都应避开折叠按钮');
+
+routingContext.diagonalLowerSourceRect = {
+    id: 'diagonal-lower-source', left: 462, right: 562, top: 374, bottom: 455, width: 100, height: 81
+};
+routingContext.diagonalUpperTargetRect = {
+    id: 'diagonal-upper-target', left: 0, right: 197, top: 0, bottom: 115, width: 197, height: 115
+};
+routingContext.diagonalSourceColumnObstacle = {
+    id: 'diagonal-source-column', left: 500, right: 524, top: 180, bottom: 300
+};
+vm.runInContext(`
+    getMindMapRelationReservedSides = () => new Set(['left']);
+    getMindMapRelationPortContext = nodeId => nodeId === 'diagonal-upper-target'
+        ? { branchSide: 'right', hasChildren: true, childSides: [] }
+        : { branchSide: 'right', hasChildren: false, childSides: [] };
+`, routingContext);
+const diagonalBottomRoute = vm.runInContext(`
+    routeMindMapRelation(
+        diagonalLowerSourceRect,
+        diagonalUpperTargetRect,
+        [diagonalSourceColumnObstacle],
+        []
+    )
+`, routingContext);
+assert.equal(diagonalBottomRoute.sourceSide, 'top',
+    '右下方来源卡片应从上边中点引出关联线');
+assert.equal(diagonalBottomRoute.targetSide, 'bottom',
+    '右边进场需要额外终点折角时，应改从上方目标卡片底边进入');
+assert.equal(diagonalBottomRoute.points[0].x, 512,
+    '上边连接点必须保持在来源卡片中点');
+assert.equal(diagonalBottomRoute.points.at(-1).x, 98.5,
+    '底边连接点必须保持在目标卡片中点');
+
+routingContext.occupiedRightSourceRect = {
+    id: 'occupied-right-source', left: 0, right: 133, top: 0, bottom: 81, width: 133, height: 81
+};
+routingContext.freeTopTargetRect = {
+    id: 'free-top-target', left: 731, right: 864, top: 264, bottom: 379, width: 133, height: 115
+};
+vm.runInContext(`
+    getMindMapRelationReservedSides = () => new Set(['left']);
+    getMindMapRelationPortContext = nodeId => nodeId === 'occupied-right-source'
+        ? { branchSide: 'right', hasChildren: true, childSides: [] }
+        : { branchSide: 'right', hasChildren: false, childSides: [] };
+`, routingContext);
+const occupiedSourceBottomRoute = vm.runInContext(`
+    routeMindMapRelation(occupiedRightSourceRect, freeTopTargetRect, [], [])
+`, routingContext);
+assert.equal(occupiedSourceBottomRoute.sourceSide, 'bottom',
+    '来源右侧已有子树连接时，应优先从空闲的底边中点出线');
+assert.equal(occupiedSourceBottomRoute.targetSide, 'top',
+    '右下方目标卡片应从空闲的上边中点接入');
+assert.equal(occupiedSourceBottomRoute.points[0].x, 66.5,
+    '来源底边连接点必须保持在卡片中点');
+assert.equal(occupiedSourceBottomRoute.points.at(-1).x, 797.5,
+    '目标上边连接点必须保持在卡片中点');
+
+routingContext.internalSourceRect = {
+    id: 'internal-source', left: 983, right: 1399, top: 357, bottom: 539, width: 416, height: 182
+};
+routingContext.internalTargetRect = {
+    id: 'internal-target', left: 20, right: 327, top: 566, bottom: 751, width: 307, height: 185
+};
+routingContext.internalRouteObstacles = vm.runInContext(`[
+    expandMindMapRelationObstacle(internalSourceRect),
+    expandMindMapRelationObstacle(internalTargetRect),
+    expandMindMapRelationObstacle({
+        id: 'target-child', left: 446, right: 864, top: 566, bottom: 751
+    }),
+    expandMindMapRelationObstacle({
+        id: 'source-upper-sibling', left: 983, right: 1399, top: 113, bottom: 294
+    }),
+    expandMindMapRelationObstacle({
+        id: 'source-lower-sibling', left: 983, right: 1325, top: 604, bottom: 786
+    })
+]`, routingContext);
+vm.runInContext(`
+    getMindMapRelationReservedSides = () => new Set(['left']);
+    getMindMapRelationPortContext = () => ({
+        branchSide: 'right', hasChildren: true, childSides: []
+    });
+`, routingContext);
+const internalParentQuarterRoute = vm.runInContext(`
+    routeMindMapRelation(
+        internalSourceRect,
+        internalTargetRect,
+        internalRouteObstacles,
+        []
+    )
+`, routingContext);
+assert.equal(internalParentQuarterRoute.sourceSide, 'left',
+    '内部节点父线只占侧边中点时，应允许从更优的左侧四分位端口出线');
+assert.equal(internalParentQuarterRoute.points[0].y, 493.5,
+    '左侧连接点应选择避开父线中点且更接近目标的自上而下四分之三位置');
+assert.equal(internalParentQuarterRoute.targetSide, 'top',
+    '左下方目标卡片应从上边中点接入');
+assert.equal(internalParentQuarterRoute.points.at(-1).x, 173.5,
+    '目标上边连接点必须保持在卡片中点');
+
+routingContext.openUpperSourceRect = {
+    id: 'open-upper-source', left: 44, right: 180, top: 20, bottom: 138, width: 136, height: 118
+};
+routingContext.openLowerTargetRect = {
+    id: 'open-lower-target', left: 1224, right: 1448, top: 914, bottom: 1029, width: 224, height: 115
+};
+routingContext.openVerticalObstacles = vm.runInContext(`[
+    expandMindMapRelationObstacle(openUpperSourceRect),
+    expandMindMapRelationObstacle(openLowerTargetRect)
+]`, routingContext);
+const openVerticalRoute = vm.runInContext(`
+    routeMindMapRelation(
+        openUpperSourceRect,
+        openLowerTargetRect,
+        openVerticalObstacles,
+        []
+    )
+`, routingContext);
+assert.equal(openVerticalRoute.sourceSide, 'bottom',
+    '上方来源卡片存在开阔通道时，应从底边中点出线');
+assert.equal(openVerticalRoute.targetSide, 'top',
+    '顶边路线只比侧边路线多一个常规转弯时，应优先进入下方卡片顶边中点');
+assert.equal(openVerticalRoute.points[0].x, 112,
+    '来源底边连接点必须保持在卡片中点');
+assert.equal(openVerticalRoute.points.at(-1).x, 1336,
+    '目标顶边连接点必须保持在卡片中点');
+
+routingContext.snakeSourceRect = {
+    id: 'snake-source', left: 974, right: 1130, top: 160, bottom: 284, width: 156, height: 124
+};
+routingContext.snakeTargetRect = {
+    id: 'snake-target', left: 245, right: 528, top: 759, bottom: 874, width: 283, height: 115
+};
+routingContext.snakeObstacles = vm.runInContext(`[
+    expandMindMapRelationObstacle(snakeSourceRect),
+    expandMindMapRelationObstacle(snakeTargetRect),
+    expandMindMapRelationObstacle({ id: 'upper-card', left: 560, right: 716, top: 0, bottom: 120 }),
+    expandMindMapRelationObstacle({ id: 'source-parent', left: 610, right: 894, top: 231, bottom: 356 }),
+    expandMindMapRelationObstacle({ id: 'source-sibling', left: 974, right: 1130, top: 303, bottom: 427 }),
+    expandMindMapRelationObstacle({ id: 'source-lower-aunt', left: 610, right: 766, top: 453, bottom: 577 }),
+    expandMindMapRelationObstacle({ id: 'target-parent', left: 610, right: 870, top: 693, bottom: 816 }),
+    expandMindMapRelationObstacle({ id: 'target-cousin', left: 948, right: 1105, top: 620, bottom: 758 })
+]`, routingContext);
+vm.runInContext(`
+    getMindMapRelationReservedSides = () => new Set(['left']);
+    getMindMapRelationPortContext = nodeId => nodeId === 'snake-source'
+        ? { branchSide: 'right', hasChildren: false, childSides: [] }
+        : { branchSide: 'right', hasChildren: true, childSides: [] };
+`, routingContext);
+const snakeAvoidanceRoute = vm.runInContext(`
+    routeMindMapRelation(snakeSourceRect, snakeTargetRect, snakeObstacles, [])
+`, routingContext);
+assert.equal(snakeAvoidanceRoute.sourceSide, 'right',
+    '顶边方案因障碍增加额外折角时，叶节点应改从开阔的右侧中心出线');
+assert.equal(snakeAvoidanceRoute.targetSide, 'top',
+    '下方目标卡片仍应从上边中点接入');
+assert.equal(snakeAvoidanceRoute.points[0].y, 222,
+    '叶节点右侧连接点必须保持在卡片中点');
+assert.equal(snakeAvoidanceRoute.points.at(-1).x, 386.5,
+    '目标上边连接点必须保持在卡片中点');
+assert.equal(vm.runInContext(`
+    getMindMapRelationTurnCount(${JSON.stringify(snakeAvoidanceRoute.points)})
+`, routingContext), 3, '应选择三折角开阔路线，避免顶边方案产生额外蛇形折返');
 
 console.log('卡片关联校验通过：编辑、正交避障、分流防重叠、缓存与 Canvas 导出逻辑完整。');

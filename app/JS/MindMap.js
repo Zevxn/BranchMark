@@ -3348,10 +3348,12 @@ const MINDMAP_RELATION_CHANNEL_DEVIATION_PENALTY = 48;
 const MINDMAP_RELATION_TERMINAL_ALIGNMENT_PENALTY = 48;
 const MINDMAP_RELATION_LANE_GAP = 12;
 const MINDMAP_RELATION_TURN_PENALTY = 28;
+const MINDMAP_RELATION_VISIBLE_TURN_PENALTY = MINDMAP_RELATION_SOURCE_CLEARANCE
+    + MINDMAP_RELATION_TARGET_APPROACH
+    + MINDMAP_RELATION_LANE_GAP * 2;
 const MINDMAP_RELATION_CROSSING_PENALTY = 420;
 const MINDMAP_RELATION_OVERLAP_PENALTY = 720;
-const MINDMAP_RELATION_RESERVED_SIDE_PENALTY = 1200;
-const MINDMAP_RELATION_ROUTE_CANDIDATES = 12;
+const MINDMAP_RELATION_PARALLEL_CLEARANCE = 10;
 const MINDMAP_RELATION_PORT_PAIR_CANDIDATES = 4;
 const MINDMAP_RELATION_PORT_DEVIATION_PENALTY = 0.2;
 let relationRenderFrame = null;
@@ -3936,6 +3938,26 @@ function isMindMapRelationSideOccupied(side, portContext) {
     return side === parentSide || (side === childSide && portContext.hasChildren);
 }
 
+function getMindMapRelationPortUsage(side, portCandidate, reservedSides, portContext) {
+    const usesStructuralAnchor = portCandidate?.kinds?.includes('center');
+    if (reservedSides.has(side)) {
+        const internalNodeParentQuarter = !usesStructuralAnchor
+            && portContext?.branchSide !== 'root'
+            && portContext?.hasChildren;
+        return internalNodeParentQuarter ? 'free' : 'reserved';
+    }
+    if (isMindMapRelationSideOccupied(side, portContext)) return 'occupied';
+    return 'free';
+}
+
+function getMindMapRelationPortReuseCost(rect, side, portCandidate, reservedSides, portContext) {
+    const reusesInternalParentSide = reservedSides.has(side)
+        && !portCandidate?.kinds?.includes('center')
+        && portContext?.branchSide !== 'root'
+        && portContext?.hasChildren;
+    return reusesInternalParentSide ? Math.max(rect.width, rect.height) : 0;
+}
+
 function getMindMapRelationPreferredAlong(rect, side, otherRect, portContext = null) {
     const horizontalSide = side === 'left' || side === 'right';
     const centerAlong = horizontalSide ? rect.top + rect.height / 2 : rect.left + rect.width / 2;
@@ -3995,20 +4017,28 @@ function getMindMapRelationPortCandidates(
 }
 
 function selectMindMapRelationPortPairCandidates(candidates) {
-    if (candidates.length <= MINDMAP_RELATION_PORT_PAIR_CANDIDATES) {
-        return candidates.sort((left, right) => left.estimate - right.estimate);
-    }
+    const compareCandidates = (left, right) => left.reservedPortCount - right.reservedPortCount
+        || left.occupiedPortCount - right.occupiedPortCount
+        || left.estimate - right.estimate;
+    const sorted = [...candidates].sort(compareCandidates);
+    if (sorted.length <= MINDMAP_RELATION_PORT_PAIR_CANDIDATES) return sorted;
 
-    const sorted = [...candidates].sort((left, right) => left.estimate - right.estimate);
-    const preferred = sorted.find(candidate =>
-        candidate.sourcePort.preferred && candidate.targetPort.preferred
-    );
-    const selected = preferred ? [preferred] : [];
+    // 每个端口占用层级至少保留一个代表，避免某一侧的空闲四分位候选
+    // 将中心端口回退方案全部挤出；其余名额再按同层几何代价补齐。
+    const selected = [];
+    const selectedUsageLevels = new Set();
+    sorted.forEach(candidate => {
+        if (selected.length >= MINDMAP_RELATION_PORT_PAIR_CANDIDATES) return;
+        const usageLevel = `${candidate.reservedPortCount}:${candidate.occupiedPortCount}`;
+        if (selectedUsageLevels.has(usageLevel)) return;
+        selectedUsageLevels.add(usageLevel);
+        selected.push(candidate);
+    });
     sorted.forEach(candidate => {
         if (selected.length >= MINDMAP_RELATION_PORT_PAIR_CANDIDATES) return;
         if (!selected.includes(candidate)) selected.push(candidate);
     });
-    return selected.sort((left, right) => left.estimate - right.estimate);
+    return selected.sort(compareCandidates);
 }
 
 function getMindMapRelationSideCandidates(
@@ -4059,11 +4089,38 @@ function getMindMapRelationSideCandidates(
             const sourceAlignment = (sourceVector.x * dx + sourceVector.y * dy) / distance;
             const targetAlignment = (targetVector.x * -dx + targetVector.y * -dy) / distance;
             const alignmentPenalty = (2 - sourceAlignment - targetAlignment) * 100;
-            const reservedSidePenalty = (sourceReservedSides.has(sourceSide) ? MINDMAP_RELATION_RESERVED_SIDE_PENALTY : 0)
-                + (targetReservedSides.has(targetSide) ? MINDMAP_RELATION_RESERVED_SIDE_PENALTY : 0);
             const portPairs = [];
             sourcePorts.forEach(sourcePort => {
                 targetPorts.forEach(targetPort => {
+                    const sourcePortUsage = getMindMapRelationPortUsage(
+                        sourceSide,
+                        sourcePort,
+                        sourceReservedSides,
+                        sourcePortContext
+                    );
+                    const targetPortUsage = getMindMapRelationPortUsage(
+                        targetSide,
+                        targetPort,
+                        targetReservedSides,
+                        targetPortContext
+                    );
+                    const reservedPortCount = Number(sourcePortUsage === 'reserved')
+                        + Number(targetPortUsage === 'reserved');
+                    const occupiedPortCount = Number(sourcePortUsage === 'occupied')
+                        + Number(targetPortUsage === 'occupied');
+                    const portReuseCost = getMindMapRelationPortReuseCost(
+                        sourceRect,
+                        sourceSide,
+                        sourcePort,
+                        sourceReservedSides,
+                        sourcePortContext
+                    ) + getMindMapRelationPortReuseCost(
+                        targetRect,
+                        targetSide,
+                        targetPort,
+                        targetReservedSides,
+                        targetPortContext
+                    );
                     const estimatedDistance = Math.abs(sourcePort.routePoint.x - targetPort.routePoint.x)
                         + Math.abs(sourcePort.routePoint.y - targetPort.routePoint.y);
                     const portDeviationPenalty = sourcePort.deviationPenalty + targetPort.deviationPenalty;
@@ -4074,11 +4131,15 @@ function getMindMapRelationSideCandidates(
                         targetPort,
                         estimatedDistance,
                         alignmentPenalty,
-                        reservedSidePenalty,
+                        sourcePortUsage,
+                        targetPortUsage,
+                        reservedPortCount,
+                        occupiedPortCount,
+                        portReuseCost,
                         portDeviationPenalty,
                         estimate: estimatedDistance
                             + alignmentPenalty
-                            + reservedSidePenalty
+                            + portReuseCost
                             + portDeviationPenalty
                     });
                 });
@@ -4092,9 +4153,13 @@ function getMindMapRelationSideCandidates(
     });
 
     return sidePairCandidates
-        .sort((left, right) => left.estimate - right.estimate)
-        .slice(0, MINDMAP_RELATION_ROUTE_CANDIDATES)
-        .flatMap(group => group.candidates);
+        // 端口是有拓扑语义的资源，不能让一条较短的路线用距离优势“买走”
+        // 已被树结构占用的中心点。逐级尝试空闲、子树共享、父线保留端口；
+        // 只有较优层级完全不可达时，才回退到下一层级。
+        .flatMap(group => group.candidates)
+        .sort((left, right) => left.reservedPortCount - right.reservedPortCount
+            || left.occupiedPortCount - right.occupiedPortCount
+            || left.estimate - right.estimate);
 }
 
 function isMindMapRelationPointInsideObstacle(point, obstacle, epsilon = 0.1) {
@@ -4217,19 +4282,27 @@ function getMindMapRelationSegmentInteractionPenalty(from, to, occupiedSegments,
     let penalty = 0;
     occupiedSegments.forEach(segment => {
         const occupiedHorizontal = Math.abs(segment.from.y - segment.to.y) < epsilon;
+        const structuralTreeSegment = segment.kind === 'tree';
         if (horizontal === occupiedHorizontal) {
-            const sameLine = horizontal
-                ? Math.abs(from.y - segment.from.y) < epsilon
-                : Math.abs(from.x - segment.from.x) < epsilon;
-            if (!sameLine) return;
+            const parallelDistance = horizontal
+                ? Math.abs(from.y - segment.from.y)
+                : Math.abs(from.x - segment.from.x);
+            if (parallelDistance >= MINDMAP_RELATION_PARALLEL_CLEARANCE) return;
             const currentMin = horizontal ? Math.min(from.x, to.x) : Math.min(from.y, to.y);
             const currentMax = horizontal ? Math.max(from.x, to.x) : Math.max(from.y, to.y);
             const occupiedMin = horizontal ? Math.min(segment.from.x, segment.to.x) : Math.min(segment.from.y, segment.to.y);
             const occupiedMax = horizontal ? Math.max(segment.from.x, segment.to.x) : Math.max(segment.from.y, segment.to.y);
             const overlap = Math.min(currentMax, occupiedMax) - Math.max(currentMin, occupiedMin);
-            if (overlap > epsilon) penalty += MINDMAP_RELATION_OVERLAP_PENALTY + overlap * 6;
+            if (overlap > epsilon) {
+                const clearanceDeficit = MINDMAP_RELATION_PARALLEL_CLEARANCE - parallelDistance;
+                penalty += MINDMAP_RELATION_OVERLAP_PENALTY + overlap * 6 + clearanceDeficit * 12;
+            }
             return;
         }
+
+        // 父子树线是版面的结构骨架：关联线可以横穿树干，但不应侵入树干的平行安全走廊。
+        // 关联线之间仍同时惩罚交叉与重叠，避免多条关系线堆叠成一条线。
+        if (structuralTreeSegment) return;
 
         const horizontalSegment = horizontal ? { from, to } : segment;
         const verticalSegment = horizontal ? segment : { from, to };
@@ -4438,11 +4511,58 @@ function simplifyMindMapRelationPoints(points) {
     return simplified;
 }
 
-function getMindMapRelationSegments(points) {
+function getMindMapRelationTurnCount(points) {
+    if (!Array.isArray(points) || points.length < 3) return 0;
+    let turns = 0;
+    for (let index = 1; index < points.length - 1; index++) {
+        const previous = points[index - 1];
+        const current = points[index];
+        const next = points[index + 1];
+        const incomingHorizontal = Math.abs(previous.y - current.y) < 0.1;
+        const outgoingHorizontal = Math.abs(current.y - next.y) < 0.1;
+        if (incomingHorizontal !== outgoingHorizontal) turns++;
+    }
+    return turns;
+}
+
+function getMindMapRelationSegments(points, kind = 'relation') {
     const segments = [];
     for (let index = 1; index < points.length; index++) {
-        segments.push({ from: points[index - 1], to: points[index] });
+        const from = points[index - 1];
+        const to = points[index];
+        if (Math.hypot(to.x - from.x, to.y - from.y) < 0.1) continue;
+        segments.push({ from, to, kind });
     }
+    return segments;
+}
+
+function getMindMapTreeConnectorPoints(parentRect, childRect, side) {
+    const startX = side === 'left' ? parentRect.left : parentRect.right;
+    const endX = side === 'left' ? childRect.right : childRect.left;
+    const startY = (parentRect.top + parentRect.bottom) / 2;
+    const endY = (childRect.top + childRect.bottom) / 2;
+    const middleX = (startX + endX) / 2;
+    return [
+        { x: startX, y: startY },
+        { x: middleX, y: startY },
+        { x: middleX, y: endY },
+        { x: endX, y: endY }
+    ];
+}
+
+function getMindMapRelationTreeSegments(cardRects) {
+    const segments = [];
+    cardRects.forEach((childRect, nodeId) => {
+        if (!nodeId || nodeId === state.data.id) return;
+        const parent = findParent(state.data, nodeId);
+        const parentRect = parent ? cardRects.get(parent.id) : null;
+        const side = getMindMapNodeBranchSide(nodeId);
+        if (!parentRect || !side) return;
+        segments.push(...getMindMapRelationSegments(
+            getMindMapTreeConnectorPoints(parentRect, childRect, side),
+            'tree'
+        ));
+    });
     return segments;
 }
 
@@ -4546,24 +4666,35 @@ function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegment
             ? channel.coordinate >= routingBounds.left && channel.coordinate <= routingBounds.right
             : channel.coordinate >= routingBounds.top && channel.coordinate <= routingBounds.bottom
     );
+    const routingOccupiedSegments = occupiedSegments.filter(segment => {
+        const left = Math.min(segment.from.x, segment.to.x);
+        const right = Math.max(segment.from.x, segment.to.x);
+        const top = Math.min(segment.from.y, segment.to.y);
+        const bottom = Math.max(segment.from.y, segment.to.y);
+        return right >= routingBounds.left
+            && left <= routingBounds.right
+            && bottom >= routingBounds.top
+            && top <= routingBounds.bottom;
+    });
     let bestRoute = null;
 
-    candidates.forEach(candidate => {
+    for (const candidate of candidates) {
+        if (bestRoute && (
+            candidate.reservedPortCount > bestRoute.reservedPortCount
+            || (
+                candidate.reservedPortCount === bestRoute.reservedPortCount
+                && candidate.occupiedPortCount > bestRoute.occupiedPortCount
+            )
+        )) break;
         const route = findMindMapOrthogonalRoute(
             candidate.sourcePort.routePoint,
             candidate.targetPort.routePoint,
             routingObstacles,
-            occupiedSegments,
+            routingOccupiedSegments,
             routingChannels,
             candidate.targetSide === 'left' || candidate.targetSide === 'right' ? 1 : 2
         );
-        if (!route) return;
-        const totalCost = route.cost
-            + candidate.alignmentPenalty
-            + candidate.reservedSidePenalty
-            + candidate.portDeviationPenalty
-            + candidate.estimatedDistance * 0.06;
-        if (bestRoute && bestRoute.cost <= totalCost) return;
+        if (!route) continue;
         const points = simplifyMindMapRelationPoints([
             candidate.sourcePort.port,
             candidate.sourcePort.routePoint,
@@ -4571,14 +4702,30 @@ function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegment
             candidate.targetPort.routePoint,
             candidate.targetPort.port
         ]);
+        const terminalTurnPenalty = Math.max(
+            0,
+            getMindMapRelationTurnCount(points) - getMindMapRelationTurnCount(route.points)
+        ) * MINDMAP_RELATION_TURN_PENALTY;
+        const visibleTurnPenalty = getMindMapRelationTurnCount(points)
+            * (MINDMAP_RELATION_VISIBLE_TURN_PENALTY - MINDMAP_RELATION_TURN_PENALTY);
+        const totalCost = route.cost
+            + candidate.alignmentPenalty
+            + candidate.portDeviationPenalty
+            + candidate.estimatedDistance * 0.06
+            + candidate.portReuseCost
+            + terminalTurnPenalty
+            + visibleTurnPenalty;
+        if (bestRoute && bestRoute.cost <= totalCost) continue;
         bestRoute = {
             cost: totalCost,
             points,
             path: getMindMapRoundedOrthogonalPath(points),
             sourceSide: candidate.sourceSide,
-            targetSide: candidate.targetSide
+            targetSide: candidate.targetSide,
+            reservedPortCount: candidate.reservedPortCount,
+            occupiedPortCount: candidate.occupiedPortCount
         };
-    });
+    }
 
     return bestRoute;
 }
@@ -4655,13 +4802,21 @@ function getMindMapRelationRouteFoldCorridors(route, corridors = []) {
 }
 
 function getMindMapRelationRoutingKey(relations, cardRects, controlObstacles = [], preferredChannels = []) {
-    const geometry = Array.from(cardRects.values()).map(rect => [
-        rect.id,
-        Math.round(rect.left * 10),
-        Math.round(rect.top * 10),
-        Math.round(rect.right * 10),
-        Math.round(rect.bottom * 10)
-    ]);
+    const geometry = Array.from(cardRects.values()).map(rect => {
+        const portContext = getMindMapRelationPortContext(rect.id);
+        return [
+            rect.id,
+            Math.round(rect.left * 10),
+            Math.round(rect.top * 10),
+            Math.round(rect.right * 10),
+            Math.round(rect.bottom * 10),
+            [...getMindMapRelationReservedSides(rect.id)].sort(),
+            findParent(state.data, rect.id)?.id || '',
+            portContext?.branchSide || '',
+            Boolean(portContext?.hasChildren),
+            [...(portContext?.childSides || [])].sort()
+        ];
+    });
     const relationState = relations.map(relation => [
         relation.id,
         relation.sourceId,
@@ -4722,7 +4877,7 @@ function buildMindMapRelationRoutes(relations, cardRects, controlObstacles = [],
         ...cardObstacles.values(),
         ...controlObstacles
     ];
-    const occupiedSegments = [];
+    const occupiedSegments = getMindMapRelationTreeSegments(cardRects);
     const routes = new Map();
     relations.forEach(relation => {
         const direction = getMindMapRelationDirection(relation);
@@ -5845,17 +6000,10 @@ function applyMindMapSummaryBoundaryShift(anchor, direction, distance, shiftByUn
 }
 
 function getMindMapSummaryTreeConnectorPath(parentRect, childRect, side) {
-    const startX = side === 'left' ? parentRect.left : parentRect.right;
-    const endX = side === 'left' ? childRect.right : childRect.left;
-    const startY = (parentRect.top + parentRect.bottom) / 2;
-    const endY = (childRect.top + childRect.bottom) / 2;
-    const middleX = (startX + endX) / 2;
-    return getMindMapRoundedOrthogonalPath([
-        { x: startX, y: startY },
-        { x: middleX, y: startY },
-        { x: middleX, y: endY },
-        { x: endX, y: endY }
-    ], 10);
+    return getMindMapRoundedOrthogonalPath(
+        getMindMapTreeConnectorPoints(parentRect, childRect, side),
+        10
+    );
 }
 
 function renderMindMapTreeConnectors() {

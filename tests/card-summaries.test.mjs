@@ -178,8 +178,10 @@ assert.match(mindMap, /function renderMindMapSummaries\(\)\s*\{[\s\S]*?state\.mo
     '总结卡片缩放期间应暂停后台避障重排，松手后再执行最终布局');
 assert.match(mindMap, /function renderMindMapTreeConnectors\(\)[\s\S]*?getMindMapCanvasRect\(parentCard\)[\s\S]*?getMindMapCanvasRect\(card\)/,
     '父子连接线必须根据分支位移后的最终卡片矩形绘制');
-assert.match(mindMap, /function getMindMapSummaryTreeConnectorPath[\s\S]*?getMindMapRoundedOrthogonalPath\([\s\S]*?\], 10\)/,
-    '父子连接线应使用真实的 10px 正交圆角路径，不能只依赖描边拐角样式');
+assert.match(mindMap, /function getMindMapTreeConnectorPoints\(parentRect, childRect, side\)[\s\S]*?return \[[\s\S]*?\];/,
+    '父子连接线应通过统一函数计算真实的正交连接点');
+assert.match(mindMap, /function getMindMapSummaryTreeConnectorPath\(parentRect, childRect, side\)[\s\S]*?getMindMapRoundedOrthogonalPath\(\s*getMindMapTreeConnectorPoints\(parentRect, childRect, side\),\s*10\s*\)/,
+    '父子连接线应复用统一几何并绘制真实的 10px 正交圆角路径');
 assert.match(mindMap, /prepareMindMapSummaryEditorsForMeasurement\(summaries, labelLayer\);[\s\S]*?const layoutPlans = prepareMindMapSummaryLayout\(summaries\);\s*renderMindMapTreeConnectors\(\);/,
     '总结编辑器必须先恢复真实尺寸和正文，再执行避障与最终父子连线');
 assert.match(mindMap, /function prepareMindMapSummaryEditorsForMeasurement[\s\S]*?body\.style\.height[\s\S]*?body\.innerHTML = renderMarkdown\(summaryContent\)/,
