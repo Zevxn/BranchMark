@@ -2734,7 +2734,7 @@ function initializeMapMouseEvents() {
         // --- 2. 内部滚动检查 ---
         // 只有在【没有】按下任何导航键时，才检查鼠标是否在卡片滚动区
         if (!isGlobalNav) {
-            const scrollable = e.target.closest('.card-body') || 
+            const scrollable = e.target.closest('.card-body, .summary-card-body') || 
                                (e.target.closest('.node-card.simple') && e.target.closest('.card-header'));
             
             // 如果在这些区域内，且内容确实溢出，则允许默认滚动
@@ -5326,6 +5326,157 @@ function getMindMapSummaryHorizontalBracePath(bounds, placement, braceY = null) 
     ].join(' ');
 }
 
+function getMindMapSummaryExpandedCollisionRegion(rect) {
+    return {
+        left: rect.left - MINDMAP_SUMMARY_COLLISION_GAP,
+        right: rect.right + MINDMAP_SUMMARY_COLLISION_GAP,
+        top: rect.top - MINDMAP_SUMMARY_COLLISION_GAP,
+        bottom: rect.bottom + MINDMAP_SUMMARY_COLLISION_GAP
+    };
+}
+
+function appendMindMapSummaryCollisionCurveSegments(segments, from, control1, control2, to, steps = 8) {
+    const pointAt = t => {
+        const inverse = 1 - t;
+        return {
+            x: inverse ** 3 * from.x
+                + 3 * inverse ** 2 * t * control1.x
+                + 3 * inverse * t ** 2 * control2.x
+                + t ** 3 * to.x,
+            y: inverse ** 3 * from.y
+                + 3 * inverse ** 2 * t * control1.y
+                + 3 * inverse * t ** 2 * control2.y
+                + t ** 3 * to.y
+        };
+    };
+    let previous = from;
+    for (let index = 1; index <= steps; index++) {
+        const next = pointAt(index / steps);
+        segments.push({
+            left: Math.min(previous.x, next.x) - MINDMAP_SUMMARY_COLLISION_GAP,
+            right: Math.max(previous.x, next.x) + MINDMAP_SUMMARY_COLLISION_GAP,
+            top: Math.min(previous.y, next.y) - MINDMAP_SUMMARY_COLLISION_GAP,
+            bottom: Math.max(previous.y, next.y) + MINDMAP_SUMMARY_COLLISION_GAP
+        });
+        previous = next;
+    }
+}
+
+function appendMindMapSummaryCollisionLineSegment(segments, from, to) {
+    segments.push({
+        left: Math.min(from.x, to.x) - MINDMAP_SUMMARY_COLLISION_GAP,
+        right: Math.max(from.x, to.x) + MINDMAP_SUMMARY_COLLISION_GAP,
+        top: Math.min(from.y, to.y) - MINDMAP_SUMMARY_COLLISION_GAP,
+        bottom: Math.max(from.y, to.y) + MINDMAP_SUMMARY_COLLISION_GAP
+    });
+}
+
+function getMindMapSummaryVerticalBraceCollisionRegions(bounds, side, braceX) {
+    const direction = side === 'left' ? -1 : 1;
+    const top = bounds.top - 8;
+    const bottom = bounds.bottom + 8;
+    const middle = (top + bottom) / 2;
+    const height = Math.max(80, bottom - top);
+    const shoulder = Math.min(22, height * 0.18);
+    const depth = Math.min(18, Math.max(12, height * 0.08));
+    const outerX = braceX + direction * depth;
+    const tipX = braceX + direction * depth * 1.55;
+    const segments = [];
+
+    appendMindMapSummaryCollisionCurveSegments(
+        segments,
+        { x: braceX, y: top },
+        { x: outerX, y: top },
+        { x: outerX, y: top + 4 },
+        { x: outerX, y: top + shoulder }
+    );
+    appendMindMapSummaryCollisionLineSegment(
+        segments,
+        { x: outerX, y: top + shoulder },
+        { x: outerX, y: middle - shoulder }
+    );
+    appendMindMapSummaryCollisionCurveSegments(
+        segments,
+        { x: outerX, y: middle - shoulder },
+        { x: outerX, y: middle - 5 },
+        { x: tipX, y: middle - 4 },
+        { x: tipX, y: middle }
+    );
+    appendMindMapSummaryCollisionCurveSegments(
+        segments,
+        { x: tipX, y: middle },
+        { x: tipX, y: middle + 4 },
+        { x: outerX, y: middle + 5 },
+        { x: outerX, y: middle + shoulder }
+    );
+    appendMindMapSummaryCollisionLineSegment(
+        segments,
+        { x: outerX, y: middle + shoulder },
+        { x: outerX, y: bottom - shoulder }
+    );
+    appendMindMapSummaryCollisionCurveSegments(
+        segments,
+        { x: outerX, y: bottom - shoulder },
+        { x: outerX, y: bottom - 4 },
+        { x: outerX, y: bottom },
+        { x: braceX, y: bottom }
+    );
+    return segments;
+}
+
+function getMindMapSummaryHorizontalBraceCollisionRegions(bounds, placement, braceY) {
+    const direction = placement === 'top' ? -1 : 1;
+    const left = bounds.left - 8;
+    const right = bounds.right + 8;
+    const middle = (left + right) / 2;
+    const width = Math.max(80, right - left);
+    const shoulder = Math.min(22, width * 0.18);
+    const depth = Math.min(18, Math.max(12, width * 0.08));
+    const outerY = braceY + direction * depth;
+    const tipY = braceY + direction * depth * 1.55;
+    const segments = [];
+
+    appendMindMapSummaryCollisionCurveSegments(
+        segments,
+        { x: left, y: braceY },
+        { x: left, y: outerY },
+        { x: left + 4, y: outerY },
+        { x: left + shoulder, y: outerY }
+    );
+    appendMindMapSummaryCollisionLineSegment(
+        segments,
+        { x: left + shoulder, y: outerY },
+        { x: middle - shoulder, y: outerY }
+    );
+    appendMindMapSummaryCollisionCurveSegments(
+        segments,
+        { x: middle - shoulder, y: outerY },
+        { x: middle - 5, y: outerY },
+        { x: middle - 4, y: tipY },
+        { x: middle, y: tipY }
+    );
+    appendMindMapSummaryCollisionCurveSegments(
+        segments,
+        { x: middle, y: tipY },
+        { x: middle + 4, y: tipY },
+        { x: middle + 5, y: outerY },
+        { x: middle + shoulder, y: outerY }
+    );
+    appendMindMapSummaryCollisionLineSegment(
+        segments,
+        { x: middle + shoulder, y: outerY },
+        { x: right - shoulder, y: outerY }
+    );
+    appendMindMapSummaryCollisionCurveSegments(
+        segments,
+        { x: right - shoulder, y: outerY },
+        { x: right - 4, y: outerY },
+        { x: right, y: outerY },
+        { x: right, y: braceY }
+    );
+    return segments;
+}
+
 function getMindMapSummaryHorizontalPlacement(bounds, rootRect) {
     const rootCenterY = rootRect
         ? rootRect.top + rootRect.height / 2
@@ -5367,6 +5518,10 @@ function getMindMapSummaryHorizontalCandidate(
         top: placement === 'top' ? labelY - editorHeight : labelY,
         bottom: placement === 'top' ? labelY : labelY + editorHeight
     };
+    const collisionRegions = [
+        getMindMapSummaryExpandedCollisionRegion(editorRect),
+        ...getMindMapSummaryHorizontalBraceCollisionRegions(bounds, placement, braceY)
+    ];
     const footprint = {
         left: Math.min(bounds.left - 8, editorRect.left) - MINDMAP_SUMMARY_COLLISION_GAP,
         right: Math.max(bounds.right + 8, editorRect.right) + MINDMAP_SUMMARY_COLLISION_GAP
@@ -5378,13 +5533,22 @@ function getMindMapSummaryHorizontalCandidate(
             ? editorRect.top - MINDMAP_SUMMARY_COLLISION_GAP
             : bounds.bottom,
         bottom: placement === 'top'
-            ? bounds.top
-            : editorRect.bottom + MINDMAP_SUMMARY_COLLISION_GAP
+        ? bounds.top
+        : editorRect.bottom + MINDMAP_SUMMARY_COLLISION_GAP
     };
     const requiredSpace = placement === 'top'
         ? bounds.top - editorRect.top + MINDMAP_SUMMARY_COLLISION_GAP
         : editorRect.bottom - bounds.bottom + MINDMAP_SUMMARY_COLLISION_GAP;
-    return { braceY, labelY, editorRect, footprint, collisionRect, requiredSpace, braceOffset };
+    return {
+        braceY,
+        labelY,
+        editorRect,
+        footprint,
+        collisionRect,
+        collisionRegions,
+        requiredSpace,
+        braceOffset
+    };
 }
 
 function getMindMapSummaryHorizontalBraceLane(bounds, placement, editorSize, occupiedGroups = []) {
@@ -5456,6 +5620,10 @@ function getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffse
         top: labelY - editorHeight / 2,
         bottom: labelY + editorHeight / 2
     };
+    const collisionRegions = [
+        getMindMapSummaryExpandedCollisionRegion(editorRect),
+        ...getMindMapSummaryVerticalBraceCollisionRegions(bounds, side, braceX)
+    ];
     const braceOuterX = braceX + direction * depth * 1.55;
     const collisionRect = {
         left: Math.min(braceX, braceOuterX, editorRect.left) - MINDMAP_SUMMARY_COLLISION_GAP,
@@ -5463,7 +5631,7 @@ function getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffse
         top: Math.min(bounds.top - 8, editorRect.top) - MINDMAP_SUMMARY_COLLISION_GAP,
         bottom: Math.max(bounds.bottom + 8, editorRect.bottom) + MINDMAP_SUMMARY_COLLISION_GAP
     };
-    return { braceX, labelX, labelY, editorRect, collisionRect, braceOffset };
+    return { braceX, labelX, labelY, editorRect, collisionRect, collisionRegions, braceOffset };
 }
 
 function getMindMapSummaryVisibleObstacleRects(nodeIds) {
@@ -5483,14 +5651,16 @@ function getMindMapSummaryVerticalEvaluation(bounds, side, editorSize, nodeIds, 
     for (let index = 0; index <= obstacles.length; index++) {
         let outwardShift = 0;
         obstacles.forEach(rect => {
-            const intersects = rect.left < candidate.collisionRect.right
-                && rect.right > candidate.collisionRect.left
-                && rect.top < candidate.collisionRect.bottom
-                && rect.bottom > candidate.collisionRect.top;
-            if (!intersects) return;
-            outwardShift = Math.max(outwardShift, side === 'left'
-                ? candidate.collisionRect.right - rect.left
-                : rect.right - candidate.collisionRect.left);
+            (candidate.collisionRegions || [candidate.collisionRect]).forEach(region => {
+                const intersects = rect.left < region.right
+                    && rect.right > region.left
+                    && rect.top < region.bottom
+                    && rect.bottom > region.top;
+                if (!intersects) return;
+                outwardShift = Math.max(outwardShift, side === 'left'
+                    ? region.right - rect.left
+                    : rect.right - region.left);
+            });
         });
         if (outwardShift <= 0) break;
         braceOffset += outwardShift;
@@ -5909,16 +6079,18 @@ function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = 
         const rect = getMindMapCanvasRect(card);
         if (placement === 'top' && rect.top >= candidate.braceY) return;
         if (placement === 'bottom' && rect.bottom <= candidate.braceY) return;
-        const collisionRect = candidate.collisionRect || {
+        const collisionRegions = candidate.collisionRegions || [candidate.collisionRect || {
             left: candidate.editorRect.left - MINDMAP_SUMMARY_COLLISION_GAP,
             right: candidate.editorRect.right + MINDMAP_SUMMARY_COLLISION_GAP,
             top: candidate.editorRect.top - MINDMAP_SUMMARY_COLLISION_GAP,
             bottom: candidate.editorRect.bottom + MINDMAP_SUMMARY_COLLISION_GAP
-        };
-        const intersects = rect.left < collisionRect.right
-            && rect.right > collisionRect.left
-            && rect.top < collisionRect.bottom
-            && rect.bottom > collisionRect.top;
+        }];
+        const intersects = collisionRegions.some(region =>
+            rect.left < region.right
+            && rect.right > region.left
+            && rect.top < region.bottom
+            && rect.bottom > region.top
+        );
         if (!intersects) return;
 
         let anchor = getMindMapSummarySeparationAnchor(card, selectedCards);

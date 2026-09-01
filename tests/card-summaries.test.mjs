@@ -61,6 +61,8 @@ assert.doesNotMatch(html, /summary-space-before|summary-space-after/,
     '总结避障不得再通过 margin 撑高祖先布局');
 assert.match(html, /\.root-locator\.tree-connectors-active[\s\S]*?\.child-unit::before[\s\S]*?display:\s*none/,
     '启用 SVG 父子连接线后应停用依赖 Flex 中心的伪元素连接线');
+assert.match(html, /\.root-locator\.tree-connectors-active[\s\S]*?\.fold-btn\.has-children::before[\s\S]*?display:\s*none/,
+    '展开状态下应停用折叠按钮短线，避免与 SVG 父子连接线重复绘制');
 assert.match(html, /\.card-floating-tools\s*\{[\s\S]*?opacity:\s*0/,
     '总结框与普通卡片应复用默认隐藏的悬浮工具栏');
 assert.match(html, /\.summary-brace\s*\{[\s\S]*?vector-effect:\s*non-scaling-stroke/,
@@ -160,8 +162,10 @@ assert.match(mindMap, /function getMindMapSummaryDescendantSeparationAnchor[\s\S
     '祖先碰撞时应把成员分支推离祖先，不能让子树越过父节点');
 assert.doesNotMatch(mindMap, /labelXOffset|getMindMapSummaryHorizontalCollisionShift/,
     '横向总结卡片中心必须始终与大括号中心对齐');
-assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, candidate = null\)[\s\S]*?candidate\?\.editorRect[\s\S]*?rect\.top >= candidate\.braceY[\s\S]*?candidate\.collisionRect \|\|/,
-    '横向总结应优先按“大括号通道 + 总结卡片”的整体矩形查找障碍');
+assert.match(mindMap, /function getMindMapSummaryVerticalBraceCollisionRegions[\s\S]*?appendMindMapSummaryCollisionCurveSegments[\s\S]*?function getMindMapSummaryHorizontalBraceCollisionRegions/,
+    '总结大括号应按实际路径分段建立精细避障区域');
+assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, candidate = null\)[\s\S]*?candidate\?\.editorRect[\s\S]*?rect\.top >= candidate\.braceY[\s\S]*?candidate\.collisionRegions \|\|/,
+    '横向总结应按“大括号路径分段 + 总结卡片矩形”查找障碍，避免使用空白包围区域误判');
 assert.match(mindMap, /function getMindMapSummaryHorizontalBraceY\(bounds, placement\)[\s\S]*?bounds\.top - MINDMAP_SUMMARY_BRACE_OFFSET[\s\S]*?bounds\.bottom \+ MINDMAP_SUMMARY_BRACE_OFFSET/,
     '横向总结大括号必须贴近成员卡片，不能移到整张导图之外');
 assert.match(mindMap, /function getMindMapSummaryCollisionFreeHorizontalCandidate[\s\S]*?getMindMapSummaryCollisionOffset[\s\S]*?labelOffset \+= collisionOffset[\s\S]*?occupiedSummaryRects/,
@@ -398,6 +402,20 @@ assert.ok(shiftedVerticalEvaluation.cost > 0,
     '纵向大括号与普通卡片重叠时应计算向外移动距离');
 assert.ok(shiftedVerticalEvaluation.candidate.collisionRect.left >= verticalObstacleCard.rect.right,
     '移动后的纵向大括号和总结卡片应整体越过障碍卡片');
+const blankSpaceObstacleCard = {
+    dataset: { nodeId: 'blank-space-obstacle' },
+    getClientRects: () => [{}],
+    rect: { left: 390, top: 45, right: 450, bottom: 90 },
+};
+pathContext.document = {
+    querySelectorAll: selector => selector === '.node-card' ? [blankSpaceObstacleCard] : []
+};
+const blankSpaceVerticalEvaluation = vm.runInContext(
+    "getMindMapSummaryVerticalEvaluation(bounds, 'right', verticalEditorSize, verticalNodeIds)",
+    pathContext,
+);
+assert.equal(blankSpaceVerticalEvaluation.cost, 0,
+    '只进入成员范围空白区域、未接触总结卡片或大括号路径的障碍不得触发纵向总结外移');
 pathContext.editorSize = { width: 140, height: 80 };
 const localBottomCandidate = vm.runInContext(
     "getMindMapSummaryHorizontalCandidate(bounds, 'bottom', editorSize)",

@@ -384,6 +384,7 @@ imgStyleSheet.textContent = `
     .md-content img { max-width: 100%; border-radius: 4px; }
     .md-content table { border-collapse: collapse; width: 100%; margin: 8px 0; display: table; }
     .md-content th, .md-content td { border: 1px solid var(--code-block-border); padding: 6px 13px; color: var(--text-color); }
+
     .md-content th,
     .md-content table thead > tr,
     .md-content table thead > tr > th,
@@ -393,6 +394,13 @@ imgStyleSheet.textContent = `
         font-weight: 600;
     }
     .md-content tr:nth-child(2n) { background-color: rgba(127,127,127,0.05); }
+
+    .md-content table thead > tr > th {
+        text-align: center;
+    }
+    .md-content table tbody td {
+        text-align: center;
+    }
 
 
     .md-content blockquote {

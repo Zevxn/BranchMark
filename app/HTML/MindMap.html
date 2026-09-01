@@ -1290,6 +1290,11 @@
         .root-locator.tree-connectors-active .child-cross-line {
             display: none !important;
         }
+        /* 展开时父子关系由 SVG 统一绘制，避免折叠按钮再叠加一条短线。
+           折叠后按钮没有 has-children，仍保留短线提示其后方存在子树。 */
+        .root-locator.tree-connectors-active .fold-btn.has-children::before {
+            display: none !important;
+        }
         .child-unit::before { content:''; position:absolute; left: -30px; width: 30px; height: calc(50% + var(--line-width) / 2); border-left: var(--line-width) solid var(--line-color); top: calc(50% - var(--line-width) / 2); }
         .child-unit::after { content:''; position:absolute; left: -30px; top: 0; bottom: 0;width: 0; border-left: var(--line-width) solid var(--line-color); }
         .child-unit:first-child::before { top: calc(50% - var(--line-width) / 2); border-top: var(--line-width) solid var(--line-color); border-top-left-radius:var(--radius); border-bottom:none; }
