@@ -53,7 +53,7 @@
             --shadow-color-hover: rgba(0, 0, 0, 0.219);
             --shadow-color-active: rgba(24,144,255,0.15);
             --node-default-color: rgba(0,0,0,0.15);
-            --node-card-min-width: 100px;
+            --node-card-min-width: 80px;
             --node-card-max-width: 600px;
             --node-card-max-body-height: 600px;
             --node-card-topic-only-min-height: 43px;
@@ -2334,6 +2334,17 @@
             </span>
             <span class="mindmap-setting-toggle">
                 <input id="settingCardToolbarHoverToggle" type="checkbox" checked>
+                <span class="mindmap-setting-switch" aria-hidden="true"></span>
+            </span>
+        </label>
+        <label class="mindmap-setting-row" for="settingCardContentHoverToggle">
+            <span class="mindmap-setting-icon"><i class="ri-file-text-line"></i></i></span>
+            <span class="mindmap-setting-copy">
+                <span class="mindmap-setting-name">悬停预览卡片折叠内容</span>
+                <span class="mindmap-setting-value" id="settingCardContentHoverValue">悬停时预览</span>
+            </span>
+            <span class="mindmap-setting-toggle">
+                <input id="settingCardContentHoverToggle" type="checkbox" checked>
                 <span class="mindmap-setting-switch" aria-hidden="true"></span>
             </span>
         </label>

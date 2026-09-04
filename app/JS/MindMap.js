@@ -6,10 +6,12 @@ if (typeof marked !== 'undefined') marked.use({ breaks: true, gfm: true });
 
 const MINDMAP_THEME_STORAGE_KEY = 'mindmap_theme';
 const MINDMAP_CARD_TOOLBAR_HOVER_STORAGE_KEY = 'mindmap_card_toolbar_hover';
+const MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY = 'mindmap_card_content_hover';
 const MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY = 'mindmap_node_stats_visible';
 const MINDMAP_CARD_MIN_WIDTH = 100;
 const mindMapSettings = {
     cardToolbarHover: true,
+    cardContentHover: true,
     nodeStatsVisible: true,
 };
 
@@ -38,6 +40,16 @@ function applyMindMapCardToolbarHover(enabled) {
     if (toggle) toggle.checked = mindMapSettings.cardToolbarHover;
     const value = $('#settingCardToolbarHoverValue');
     if (value) value.textContent = mindMapSettings.cardToolbarHover ? '悬停时显示' : '悬停时隐藏';
+    hideMindMapContentPreview();
+}
+
+function applyMindMapCardContentHover(enabled) {
+    mindMapSettings.cardContentHover = enabled !== false;
+    document.documentElement.dataset.cardContentHover = String(mindMapSettings.cardContentHover);
+    const toggle = $('#settingCardContentHoverToggle');
+    if (toggle) toggle.checked = mindMapSettings.cardContentHover;
+    const value = $('#settingCardContentHoverValue');
+    if (value) value.textContent = mindMapSettings.cardContentHover ? '悬停时预览' : '悬停时隐藏';
     hideMindMapContentPreview();
 }
 
@@ -110,6 +122,11 @@ async function initializeMindMapTheme() {
         const enabled = event.currentTarget.checked;
         applyMindMapCardToolbarHover(enabled);
         await chrome.storage.local.set({ [MINDMAP_CARD_TOOLBAR_HOVER_STORAGE_KEY]: enabled });
+    });
+    $('#settingCardContentHoverToggle')?.addEventListener('change', async event => {
+        const enabled = event.currentTarget.checked;
+        applyMindMapCardContentHover(enabled);
+        await chrome.storage.local.set({ [MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY]: enabled });
     });
     $('#settingNodeStatsToggle')?.addEventListener('change', async event => {
         const visible = event.currentTarget.checked;
@@ -386,8 +403,8 @@ const MINDMAP_CONTENT_PREVIEW_MARGIN = 12;
 const MINDMAP_CONTENT_PREVIEW_ARROW_INSET = 8;
 const MINDMAP_CONTENT_PREVIEW_ARROW_CORNER_CLEARANCE = 24;
 const MINDMAP_CONTENT_PREVIEW_BOTTOM_COMFORT_HEIGHT = 160;
-const MINDMAP_CONTENT_PREVIEW_MIN_HEIGHT = 52;
-const MINDMAP_CONTENT_PREVIEW_MIN_WIDTH = 120;
+const MINDMAP_CONTENT_PREVIEW_MIN_HEIGHT = 200; // 预览最小可读高度
+const MINDMAP_CONTENT_PREVIEW_MIN_WIDTH = 400;  // 预览最小可读宽度
 const mindMapContentPreviewState = {
     card: null,
     el: null,
@@ -2641,6 +2658,7 @@ function canShowMindMapContentPreview(card) {
 }
 
 function showMindMapContentPreview(card) {
+    if (!mindMapSettings.cardContentHover) return;
     clearMindMapContentPreviewTimer('showTimer');
     clearMindMapContentPreviewTimer('hideTimer');
     if (!canShowMindMapContentPreview(card)) return;
