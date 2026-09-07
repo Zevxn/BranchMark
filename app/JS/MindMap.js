@@ -3369,7 +3369,8 @@ const MINDMAP_RELATION_TURN_PENALTY = 28;
 const MINDMAP_RELATION_VISIBLE_TURN_PENALTY = MINDMAP_RELATION_SOURCE_CLEARANCE
     + MINDMAP_RELATION_TARGET_APPROACH
     + MINDMAP_RELATION_LANE_GAP * 2;
-const MINDMAP_RELATION_CROSSING_PENALTY = 420;
+const MINDMAP_RELATION_CROSSING_PENALTY = 300;
+const MINDMAP_RELATION_TREE_CROSSING_PENALTY = 160;
 const MINDMAP_RELATION_OVERLAP_PENALTY = 720;
 const MINDMAP_RELATION_PARALLEL_CLEARANCE = 10;
 const MINDMAP_RELATION_PORT_PAIR_CANDIDATES = 4;
@@ -3994,7 +3995,8 @@ function getMindMapRelationPortCandidates(
     side,
     otherRect,
     padding,
-    portContext = null
+    portContext = null,
+    assignedAlong = null
 ) {
     const horizontalSide = side === 'left' || side === 'right';
     const start = horizontalSide ? rect.top : rect.left;
@@ -4002,14 +4004,16 @@ function getMindMapRelationPortCandidates(
     const centerAlong = start + length / 2;
     const preferredAlong = getMindMapRelationPreferredAlong(rect, side, otherRect, portContext);
     const allowQuarterPorts = horizontalSide && isMindMapRelationSideOccupied(side, portContext);
-    const rawCandidates = [
-        { kind: 'preferred', along: preferredAlong, preferred: true },
-        { kind: 'center', along: centerAlong },
-        ...(allowQuarterPorts ? [
-            { kind: 'quarter-start', along: start + length / 4 },
-            { kind: 'quarter-end', along: start + length * 3 / 4 }
-        ] : [])
-    ];
+    const rawCandidates = Number.isFinite(assignedAlong)
+        ? [{ kind: 'assigned', along: assignedAlong, preferred: true }]
+        : [
+            { kind: 'preferred', along: preferredAlong, preferred: true },
+            { kind: 'center', along: centerAlong },
+            ...(allowQuarterPorts ? [
+                { kind: 'quarter-start', along: start + length / 4 },
+                { kind: 'quarter-end', along: start + length * 3 / 4 }
+            ] : [])
+        ];
     const candidates = [];
 
     rawCandidates.forEach(rawCandidate => {
@@ -4066,9 +4070,13 @@ function getMindMapRelationSideCandidates(
     targetReservedSides = new Set(),
     sourcePortContext = null,
     targetPortContext = null,
-    terminalObstacles = []
+    terminalObstacles = [],
+    sourcePortAssignment = null,
+    targetPortAssignment = null
 ) {
     const sides = ['left', 'right', 'top', 'bottom'];
+    const sourceSides = sourcePortAssignment?.side ? [sourcePortAssignment.side] : sides;
+    const targetSides = targetPortAssignment?.side ? [targetPortAssignment.side] : sides;
     const sourceCenter = { x: sourceRect.left + sourceRect.width / 2, y: sourceRect.top + sourceRect.height / 2 };
     const targetCenter = { x: targetRect.left + targetRect.width / 2, y: targetRect.top + targetRect.height / 2 };
     const dx = targetCenter.x - sourceCenter.x;
@@ -4078,14 +4086,15 @@ function getMindMapRelationSideCandidates(
     const sourceTerminalObstacles = terminalObstacles.filter(obstacle => obstacle.id !== sourceRect.id);
     const targetTerminalObstacles = terminalObstacles.filter(obstacle => obstacle.id !== targetRect.id);
 
-    sides.forEach(sourceSide => {
-        sides.forEach(targetSide => {
+    sourceSides.forEach(sourceSide => {
+        targetSides.forEach(targetSide => {
             const sourcePorts = getMindMapRelationPortCandidates(
                 sourceRect,
                 sourceSide,
                 targetRect,
                 MINDMAP_RELATION_SOURCE_CLEARANCE,
-                sourcePortContext
+                sourcePortContext,
+                sourcePortAssignment?.along
             ).filter(candidate => isMindMapRelationSegmentClear(
                 candidate.port,
                 candidate.routePoint,
@@ -4096,7 +4105,8 @@ function getMindMapRelationSideCandidates(
                 targetSide,
                 sourceRect,
                 MINDMAP_RELATION_TARGET_APPROACH,
-                targetPortContext
+                targetPortContext,
+                targetPortAssignment?.along
             ).filter(candidate => isMindMapRelationSegmentClear(
                 candidate.port,
                 candidate.routePoint,
@@ -4298,6 +4308,7 @@ function getMindMapRelationSegmentInteractionPenalty(from, to, occupiedSegments,
     const epsilon = 0.1;
     const horizontal = Math.abs(from.y - to.y) < epsilon;
     let penalty = 0;
+    const countedCrossings = new Set();
     occupiedSegments.forEach(segment => {
         const occupiedHorizontal = Math.abs(segment.from.y - segment.to.y) < epsilon;
         const structuralTreeSegment = segment.kind === 'tree';
@@ -4318,10 +4329,6 @@ function getMindMapRelationSegmentInteractionPenalty(from, to, occupiedSegments,
             return;
         }
 
-        // 父子树线是版面的结构骨架：关联线可以横穿树干，但不应侵入树干的平行安全走廊。
-        // 关联线之间仍同时惩罚交叉与重叠，避免多条关系线堆叠成一条线。
-        if (structuralTreeSegment) return;
-
         const horizontalSegment = horizontal ? { from, to } : segment;
         const verticalSegment = horizontal ? segment : { from, to };
         const horizontalMin = Math.min(horizontalSegment.from.x, horizontalSegment.to.x);
@@ -4334,10 +4341,29 @@ function getMindMapRelationSegmentInteractionPenalty(from, to, occupiedSegments,
             && crossingX <= horizontalMax + epsilon
             && crossingY >= verticalMin - epsilon
             && crossingY <= verticalMax + epsilon;
-        const nearTerminal = routeTerminals.some(point =>
-            Math.hypot(crossingX - point.x, crossingY - point.y) <= MINDMAP_RELATION_LANE_GAP * 1.5
+        if (!intersects) return;
+        const sharedTerminal = routeTerminals.some(point =>
+            Math.hypot(crossingX - point.x, crossingY - point.y) <= epsilon
+        ) && [segment.from, segment.to].some(point =>
+            Math.hypot(crossingX - point.x, crossingY - point.y) <= epsilon
         );
-        if (intersects && !nearTerminal) penalty += MINDMAP_RELATION_CROSSING_PENALTY;
+        if (sharedTerminal) return;
+        const crossingAtFrom = Math.hypot(crossingX - from.x, crossingY - from.y) <= epsilon;
+        const fromIsRouteTerminal = routeTerminals.some(point =>
+            Math.hypot(from.x - point.x, from.y - point.y) <= epsilon
+        );
+        // 占用线坐标会被加入寻路网格，同一个交点通常分别位于前后两条小边的
+        // 终点和起点。只在抵达交点时计费，避免把一次视觉交叉重复算成两次。
+        if (crossingAtFrom && !fromIsRouteTerminal) return;
+
+        // 多个父子边会复用同一段可见树干；同一位置只算一次视觉交叉，避免按子节点数
+        // 重复放大树线代价。单次树线交叉可以接受，但两次树线交叉应比一次关系线交叉更差。
+        const crossingKey = `${structuralTreeSegment ? 'tree' : 'relation'}:${crossingX.toFixed(1)}:${crossingY.toFixed(1)}`;
+        if (countedCrossings.has(crossingKey)) return;
+        countedCrossings.add(crossingKey);
+        penalty += structuralTreeSegment
+            ? MINDMAP_RELATION_TREE_CROSSING_PENALTY
+            : MINDMAP_RELATION_CROSSING_PENALTY;
     });
     return penalty;
 }
@@ -4662,7 +4688,14 @@ function getMindMapRoundedOrthogonalPath(points, radius = 16) {
     return path;
 }
 
-function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegments, preferredChannels = []) {
+function routeMindMapRelation(
+    sourceRect,
+    targetRect,
+    obstacles,
+    occupiedSegments,
+    preferredChannels = [],
+    portAssignment = null
+) {
     const candidates = getMindMapRelationSideCandidates(
         sourceRect,
         targetRect,
@@ -4670,7 +4703,9 @@ function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegment
         getMindMapRelationReservedSides(targetRect.id),
         getMindMapRelationPortContext(sourceRect.id),
         getMindMapRelationPortContext(targetRect.id),
-        obstacles
+        obstacles,
+        portAssignment?.source,
+        portAssignment?.target
     );
     const centerDistance = Math.hypot(
         (targetRect.left + targetRect.width / 2) - (sourceRect.left + sourceRect.width / 2),
@@ -4726,6 +4761,35 @@ function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegment
             ...verticalBlockers.map(obstacle => obstacle.bottom + MINDMAP_RELATION_LANE_GAP)
         )
     };
+    const nearbyRelationSegments = portAssignment ? occupiedSegments.filter(segment => {
+        if (segment.kind === 'tree') return false;
+        const left = Math.min(segment.from.x, segment.to.x);
+        const right = Math.max(segment.from.x, segment.to.x);
+        const top = Math.min(segment.from.y, segment.to.y);
+        const bottom = Math.max(segment.from.y, segment.to.y);
+        return right >= routingBounds.left
+            && left <= routingBounds.right
+            && bottom >= routingBounds.top
+            && top <= routingBounds.bottom;
+    }) : [];
+    nearbyRelationSegments.forEach(segment => {
+        routingBounds.left = Math.min(
+            routingBounds.left,
+            Math.min(segment.from.x, segment.to.x) - MINDMAP_RELATION_LANE_GAP
+        );
+        routingBounds.right = Math.max(
+            routingBounds.right,
+            Math.max(segment.from.x, segment.to.x) + MINDMAP_RELATION_LANE_GAP
+        );
+        routingBounds.top = Math.min(
+            routingBounds.top,
+            Math.min(segment.from.y, segment.to.y) - MINDMAP_RELATION_LANE_GAP
+        );
+        routingBounds.bottom = Math.max(
+            routingBounds.bottom,
+            Math.max(segment.from.y, segment.to.y) + MINDMAP_RELATION_LANE_GAP
+        );
+    });
     const routingObstacles = obstacles.filter(obstacle =>
         obstacle.right >= routingBounds.left
         && obstacle.left <= routingBounds.right
@@ -4923,6 +4987,141 @@ function getMindMapRelationRoutingKey(relations, cardRects, controlObstacles = [
     return JSON.stringify([geometry, controlGeometry, channelGeometry, relationState]);
 }
 
+function getMindMapRelationPortPlan(relations, cardRects, routes) {
+    const endpointGroups = new Map();
+    const relationIndexes = new Map(relations.map((relation, index) => [relation.id, index]));
+    const addEndpoint = (relationId, role, nodeId, otherId, side) => {
+        const rect = cardRects.get(nodeId);
+        const otherRect = cardRects.get(otherId);
+        if (!rect || !otherRect || !side) return;
+        const horizontalSide = side === 'left' || side === 'right';
+        const otherAlong = horizontalSide
+            ? otherRect.top + otherRect.height / 2
+            : otherRect.left + otherRect.width / 2;
+        const alongStart = horizontalSide ? rect.top : rect.left;
+        const alongEnd = horizontalSide ? rect.bottom : rect.right;
+        const otherAlongStart = horizontalSide ? otherRect.top : otherRect.left;
+        const otherAlongEnd = horizontalSide ? otherRect.bottom : otherRect.right;
+        const alongGap = otherAlongEnd < alongStart
+            ? alongStart - otherAlongEnd
+            : (otherAlongStart > alongEnd ? otherAlongStart - alongEnd : 0);
+        // 嵌套顺序只由连接边方向上的区间距离决定。卡片在垂直于边方向上的
+        // 宽度或横向偏移不应改变谁先占内侧车道，否则宽卡片会被误判为远线。
+        const nestingDistance = alongGap;
+        const key = `${nodeId}:${side}`;
+        if (!endpointGroups.has(key)) endpointGroups.set(key, []);
+        endpointGroups.get(key).push({
+            relationId,
+            role,
+            nodeId,
+            side,
+            otherAlong,
+            nestingDistance
+        });
+    };
+
+    relations.forEach(relation => {
+        const route = routes.get(relation.id);
+        if (!route) return;
+        const direction = getMindMapRelationDirection(relation);
+        const sourceId = direction === 'reverse' ? relation.targetId : relation.sourceId;
+        const targetId = direction === 'reverse' ? relation.sourceId : relation.targetId;
+        addEndpoint(relation.id, 'source', sourceId, targetId, route.sourceSide);
+        addEndpoint(relation.id, 'target', targetId, sourceId, route.targetSide);
+    });
+
+    const assignments = new Map();
+    const routeFollowers = new Map(relations.map(relation => [relation.id, new Set()]));
+    const routeIndegrees = new Map(relations.map(relation => [relation.id, 0]));
+    endpointGroups.forEach(group => {
+        if (group.length < 2) return;
+        const { nodeId, side } = group[0];
+        const rect = cardRects.get(nodeId);
+        if (!rect) return;
+        const horizontalSide = side === 'left' || side === 'right';
+        const start = horizontalSide ? rect.top : rect.left;
+        const length = horizontalSide ? rect.height : rect.width;
+        const minAlong = start;
+        const maxAlong = start + length;
+        const centerAlong = start + length / 2;
+        const getEndpointRegion = endpoint => endpoint.otherAlong < minAlong
+            ? 0
+            : (endpoint.otherAlong > maxAlong ? 2 : 1);
+        group.sort((left, right) => getEndpointRegion(left) - getEndpointRegion(right)
+            || (getEndpointRegion(left) === 1
+                ? left.otherAlong - right.otherAlong
+                : right.otherAlong - left.otherAlong)
+            || String(left.relationId).localeCompare(String(right.relationId))
+            || left.role.localeCompare(right.role));
+
+        const nearToFar = [...group].sort((left, right) =>
+            left.nestingDistance - right.nestingDistance
+            || relationIndexes.get(left.relationId) - relationIndexes.get(right.relationId));
+        nearToFar.forEach((endpoint, index) => {
+            const follower = nearToFar[index + 1];
+            if (!follower || endpoint.relationId === follower.relationId) return;
+            const followers = routeFollowers.get(endpoint.relationId);
+            if (followers.has(follower.relationId)) return;
+            followers.add(follower.relationId);
+            routeIndegrees.set(follower.relationId, routeIndegrees.get(follower.relationId) + 1);
+        });
+
+        let positions = group.map((_, index) =>
+            minAlong + (index + 1) / (group.length + 1) * (maxAlong - minAlong)
+        );
+        const portContext = getMindMapRelationPortContext(nodeId);
+        const centerReserved = getMindMapRelationReservedSides(nodeId).has(side)
+            || isMindMapRelationSideOccupied(side, portContext);
+        if (centerReserved) {
+            const centerClearance = MINDMAP_RELATION_ARROW_SIZE / 2 + 2;
+            const nearestDistance = Math.min(...positions.map(position => Math.abs(position - centerAlong)));
+            if (nearestDistance < centerClearance) {
+                const shiftMagnitude = centerClearance - nearestDistance;
+                const averageOtherAlong = group.reduce((sum, endpoint) => sum + endpoint.otherAlong, 0)
+                    / group.length;
+                const preferredShift = averageOtherAlong >= centerAlong ? shiftMagnitude : -shiftMagnitude;
+                const canShift = shift => positions[0] + shift >= minAlong
+                    && positions[positions.length - 1] + shift <= maxAlong;
+                const shift = canShift(preferredShift)
+                    ? preferredShift
+                    : (canShift(-preferredShift) ? -preferredShift : 0);
+                positions = positions.map(position => position + shift);
+            }
+        }
+
+        group.forEach((endpoint, index) => {
+            const relationAssignment = assignments.get(endpoint.relationId) || {};
+            relationAssignment[endpoint.role] = { side, along: positions[index] };
+            assignments.set(endpoint.relationId, relationAssignment);
+        });
+    });
+
+    const ready = relations
+        .filter(relation => routeIndegrees.get(relation.id) === 0)
+        .map(relation => relation.id);
+    const relationOrder = [];
+    const sortReady = () => ready.sort((left, right) => relationIndexes.get(left) - relationIndexes.get(right));
+    sortReady();
+    while (ready.length > 0) {
+        const relationId = ready.shift();
+        relationOrder.push(relationId);
+        routeFollowers.get(relationId).forEach(followerId => {
+            const nextIndegree = routeIndegrees.get(followerId) - 1;
+            routeIndegrees.set(followerId, nextIndegree);
+            if (nextIndegree === 0) {
+                ready.push(followerId);
+                sortReady();
+            }
+        });
+    }
+    if (relationOrder.length < relations.length) {
+        relations.forEach(relation => {
+            if (!relationOrder.includes(relation.id)) relationOrder.push(relation.id);
+        });
+    }
+    return { assignments, relationOrder };
+}
+
 function buildMindMapRelationRoutes(relations, cardRects, controlObstacles = [], preferredChannels = []) {
     const cacheKey = getMindMapRelationRoutingKey(relations, cardRects, controlObstacles, preferredChannels);
     if (cacheKey === relationRouteCache.key) return relationRouteCache.routes;
@@ -4953,37 +5152,75 @@ function buildMindMapRelationRoutes(relations, cardRects, controlObstacles = [],
         ...cardObstacles.values(),
         ...controlObstacles
     ];
-    const occupiedSegments = getMindMapRelationTreeSegments(cardRects);
-    const routes = new Map();
-    relations.forEach(relation => {
+    const treeSegments = getMindMapRelationTreeSegments(cardRects);
+    const buildRoute = (
+        relation,
+        occupiedSegments,
+        portAssignment = null
+    ) => {
         const direction = getMindMapRelationDirection(relation);
         const sourceId = direction === 'reverse' ? relation.targetId : relation.sourceId;
         const targetId = direction === 'reverse' ? relation.sourceId : relation.targetId;
         const sourceRect = cardRects.get(sourceId);
         const targetRect = cardRects.get(targetId);
-        if (!sourceRect || !targetRect) return;
+        if (!sourceRect || !targetRect) return null;
         const naturalRoute = routeMindMapRelation(
             sourceRect,
             targetRect,
             obstacles,
             occupiedSegments,
-            []
+            [],
+            portAssignment
         );
-        if (!naturalRoute) return;
+        if (!naturalRoute) return null;
         const relationChannels = getMindMapRelationRouteFoldCorridors(naturalRoute, preferredChannels);
-        const route = relationChannels.length > 0
+        return relationChannels.length > 0
             ? routeMindMapRelation(
                 sourceRect,
                 targetRect,
                 obstacles,
                 occupiedSegments,
-                relationChannels
+                relationChannels,
+                portAssignment
             ) || naturalRoute
             : naturalRoute;
-        if (!route) return;
-        routes.set(relation.id, route);
-        occupiedSegments.push(...getMindMapRelationSegments(route.points));
-    });
+    };
+    const buildPass = (
+        portAssignments = null,
+        relationOrder = null,
+        includeRelationOccupancy = true
+    ) => {
+        const occupiedSegments = [...treeSegments];
+        const routes = new Map();
+        const relationsById = new Map(relations.map(relation => [relation.id, relation]));
+        const orderedRelations = relationOrder
+            ? relationOrder.map(relationId => relationsById.get(relationId)).filter(Boolean)
+            : relations;
+        orderedRelations.forEach(relation => {
+            const portAssignment = portAssignments?.get(relation.id) || null;
+            const route = buildRoute(
+                relation,
+                occupiedSegments,
+                portAssignment
+            ) || (portAssignment
+                ? buildRoute(relation, occupiedSegments, null)
+                : null);
+            if (!route) return;
+            routes.set(relation.id, route);
+            if (includeRelationOccupancy) {
+                occupiedSegments.push(...getMindMapRelationSegments(route.points));
+            }
+        });
+        return routes;
+    };
+
+    // 预规划只负责确定每条关系天然应连接哪一侧。此阶段若让先处理的关系占道，
+    // 后续关系会在端口尚未均分前被挤到其他边，最终规划也无法再纠正选边结果。
+    const naturalRoutes = buildPass(null, null, false);
+    const portPlan = getMindMapRelationPortPlan(relations, cardRects, naturalRoutes);
+    const routes = relations.length > 1
+        ? buildPass(portPlan.assignments, portPlan.relationOrder, true)
+        : naturalRoutes;
     relationRouteCache = { key: cacheKey, routes };
     return routes;
 }

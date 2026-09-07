@@ -76,10 +76,12 @@ assert.match(mindMap, /MINDMAP_RELATION_OVERLAP_PENALTY\s*\+\s*overlap\s*\*\s*6\
     '路由评分应惩罚同通道重叠及平行安全间距不足');
 assert.match(mindMap, /parallelDistance >= MINDMAP_RELATION_PARALLEL_CLEARANCE/,
     '占用线段应按可见宽度建立平行安全走廊，而不是只比较完全相同的坐标');
-assert.match(mindMap, /penalty \+= MINDMAP_RELATION_CROSSING_PENALTY/,
+assert.match(mindMap, /\? MINDMAP_RELATION_TREE_CROSSING_PENALTY\s*:\s*MINDMAP_RELATION_CROSSING_PENALTY/,
     '路由评分应惩罚关联线交叉');
-assert.match(mindMap, /const structuralTreeSegment = segment\.kind === 'tree'[\s\S]*?if \(structuralTreeSegment\) return/,
-    '父子树线应进入带类型的占用模型，阻止同向重叠但允许横向穿越');
+assert.match(mindMap, /MINDMAP_RELATION_TREE_CROSSING_PENALTY[\s\S]*?MINDMAP_RELATION_CROSSING_PENALTY/,
+    '父子树线与关联线交叉应使用不同的有限代价，不能将任一类交叉设为硬约束');
+assert.doesNotMatch(mindMap, /forbidRelationCrossings|doesMindMapRelationSegmentCrossOccupiedRelation/,
+    '关系线交叉不得作为硬约束，否则会迫使路线反复穿越父子树线');
 assert.match(mindMap, /function getMindMapRelationTreeSegments\(cardRects\)[\s\S]*?getMindMapTreeConnectorPoints[\s\S]*?'tree'/,
     '关联寻路应复用父子连接线的真实几何生成结构占用线段');
 assert.match(mindMap, /relationRouteCache\s*=\s*\{\s*key:\s*cacheKey,\s*routes\s*\}/,
@@ -92,6 +94,10 @@ assert.match(mindMap, /left\.reservedPortCount - right\.reservedPortCount[\s\S]*
     '关系寻路应先选择拓扑空闲层级，再在同层级内比较几何代价');
 assert.match(mindMap, /function getMindMapRelationPreferredAlong\(/,
     '关联线应根据父子连线占用情况调整卡片边缘端点');
+assert.match(mindMap, /function getMindMapRelationPortPlan\([\s\S]*?nestingDistance[\s\S]*?positions/,
+    '多条关联线应先按对端位置排序并批量分配卡片边缘端口');
+assert.match(mindMap, /const naturalRoutes = buildPass\(null, null, false\)[\s\S]*?buildPass\(portPlan\.assignments, portPlan\.relationOrder, true\)/,
+    '关联线应先在不受其他关系占道影响时确定自然连接边，再统一分配端口并按冲突代价寻路');
 assert.match(mindMap, /document\.querySelectorAll\('\.fold-btn'\)[\s\S]*?MINDMAP_RELATION_FOLD_BUTTON_PADDING/,
     '可见折叠按钮应作为带安全间距的路由障碍');
 assert.match(mindMap, /function getMindMapRelationFoldCorridors\(cardRects\)/,
@@ -242,7 +248,8 @@ vm.runInContext(`
     const MINDMAP_RELATION_VISIBLE_TURN_PENALTY = MINDMAP_RELATION_SOURCE_CLEARANCE
         + MINDMAP_RELATION_TARGET_APPROACH
         + MINDMAP_RELATION_LANE_GAP * 2;
-    const MINDMAP_RELATION_CROSSING_PENALTY = 420;
+    const MINDMAP_RELATION_CROSSING_PENALTY = 300;
+    const MINDMAP_RELATION_TREE_CROSSING_PENALTY = 160;
     const MINDMAP_RELATION_OVERLAP_PENALTY = 720;
     const MINDMAP_RELATION_PARALLEL_CLEARANCE = 10;
     const MINDMAP_RELATION_PORT_PAIR_CANDIDATES = 4;
@@ -454,6 +461,57 @@ const crossingAvoidedRoute = vm.runInContext(
 );
 assert.ok(crossingAvoidedRoute.points.some(point => Math.abs(point.y) > 50),
     '存在可用绕行空间时，新关系应绕过已有关系而不是直接交叉');
+
+routingContext.longCrossingStart = { x: 0, y: 0 };
+routingContext.longCrossingEnd = { x: 2000, y: 0 };
+routingContext.longCrossingOccupied = [{
+    from: { x: 1000, y: -1000 },
+    to: { x: 1000, y: 1000 },
+}];
+const longCrossingAvoidedRoute = vm.runInContext(
+    'findMindMapOrthogonalRoute(longCrossingStart, longCrossingEnd, [], longCrossingOccupied)',
+    routingContext,
+);
+assert.ok(longCrossingAvoidedRoute.points.every(point => Math.abs(point.y) < 0.1),
+    '避让距离极大时应允许一次关系线交叉，不能因硬约束产生失控绕行');
+
+routingContext.nearTerminalCrossingStart = { x: 0, y: 0 };
+routingContext.nearTerminalCrossingEnd = { x: 100, y: 0 };
+routingContext.nearTerminalCrossingOccupied = [{
+    from: { x: 2, y: -50 },
+    to: { x: 2, y: 50 },
+}];
+const nearTerminalCrossingRoute = vm.runInContext(
+    'findMindMapOrthogonalRoute(nearTerminalCrossingStart, nearTerminalCrossingEnd, [], nearTerminalCrossingOccupied)',
+    routingContext,
+);
+assert.ok(nearTerminalCrossingRoute.points.some(point => Math.abs(point.y) > 50),
+    '既有关系线即使距离当前出线路由点不足一个车道间距，也不能被当作共享端点直接穿越');
+
+routingContext.weightedCrossingRoute = [{ from: { x: 0, y: 0 }, to: { x: 100, y: 0 } }];
+routingContext.oneRelationCrossing = [{
+    from: { x: 50, y: -20 }, to: { x: 50, y: 20 }, kind: 'relation'
+}];
+routingContext.twoTreeCrossings = [
+    { from: { x: 30, y: -20 }, to: { x: 30, y: 20 }, kind: 'tree' },
+    { from: { x: 70, y: -20 }, to: { x: 70, y: 20 }, kind: 'tree' },
+];
+const oneRelationCrossingPenalty = vm.runInContext(`
+    getMindMapRelationSegmentInteractionPenalty(
+        weightedCrossingRoute[0].from,
+        weightedCrossingRoute[0].to,
+        oneRelationCrossing
+    )
+`, routingContext);
+const twoTreeCrossingsPenalty = vm.runInContext(`
+    getMindMapRelationSegmentInteractionPenalty(
+        weightedCrossingRoute[0].from,
+        weightedCrossingRoute[0].to,
+        twoTreeCrossings
+    )
+`, routingContext);
+assert.ok(oneRelationCrossingPenalty < twoTreeCrossingsPenalty,
+    '一次关联线交叉应优于两次父子树线交叉，避免路线为零关联交叉而穿越多段树干');
 
 const roundedPath = vm.runInContext(`
     getMindMapRoundedOrthogonalPath([
@@ -1045,6 +1103,265 @@ assert.equal(snakeAvoidanceRoute.points.at(-1).x, 386.5,
 assert.equal(vm.runInContext(`
     getMindMapRelationTurnCount(${JSON.stringify(snakeAvoidanceRoute.points)})
 `, routingContext), 3, '应选择三折角开阔路线，避免顶边方案产生额外蛇形折返');
+
+routingContext.multiPortRelations = [
+    { id: 'multi-upper', sourceId: 'multi-source', targetId: 'multi-target-upper' },
+    { id: 'multi-middle', sourceId: 'multi-source', targetId: 'multi-target-middle' },
+    { id: 'multi-lower', sourceId: 'multi-source', targetId: 'multi-target-lower' },
+];
+routingContext.multiPortCardRects = new Map([
+    ['multi-source', {
+        id: 'multi-source', left: 0, right: 160, top: 100, bottom: 300, width: 160, height: 200
+    }],
+    ['multi-target-upper', {
+        id: 'multi-target-upper', left: 400, right: 560, top: -100, bottom: 0, width: 160, height: 100
+    }],
+    ['multi-target-middle', {
+        id: 'multi-target-middle', left: 400, right: 560, top: 180, bottom: 280, width: 160, height: 100
+    }],
+    ['multi-target-lower', {
+        id: 'multi-target-lower', left: 400, right: 560, top: 500, bottom: 600, width: 160, height: 100
+    }],
+]);
+routingContext.multiPortNaturalRoutes = new Map(routingContext.multiPortRelations.map(relation => [
+    relation.id,
+    { sourceSide: 'right', targetSide: 'left' },
+]));
+vm.runInContext(`
+    getMindMapRelationDirection = relation => relation.direction || 'none';
+    getMindMapRelationReservedSides = nodeId => nodeId === 'multi-source'
+        ? new Set(['right'])
+        : new Set();
+    getMindMapRelationPortContext = () => null;
+`, routingContext);
+const multiPortPlan = vm.runInContext(`
+    getMindMapRelationPortPlan(
+        multiPortRelations,
+        multiPortCardRects,
+        multiPortNaturalRoutes
+    )
+`, routingContext);
+const multiPortAssignments = multiPortPlan.assignments;
+routingContext.multiPortAssignments = multiPortAssignments;
+const multiPortSourceAssignments = routingContext.multiPortRelations.map(relation =>
+    multiPortAssignments.get(relation.id).source
+);
+assert.deepEqual(multiPortSourceAssignments.map(assignment => assignment.side),
+    ['right', 'right', 'right'], '同边多条关联应保持自然路线选出的连接边');
+assert.ok(
+    multiPortSourceAssignments[0].along < multiPortSourceAssignments[1].along
+        && multiPortSourceAssignments[1].along < multiPortSourceAssignments[2].along,
+    '同边端口顺序应与对端卡片的投影顺序一致，避免线路在出线后交叉',
+);
+assert.equal(new Set(multiPortSourceAssignments.map(assignment => assignment.along)).size, 3,
+    '同边多条关联必须获得互不重叠的连接点');
+assert.ok(multiPortSourceAssignments.every(assignment => Math.abs(assignment.along - 200) >= 8),
+    '父子树线占用边缘中点时，批量关联端口应为结构连接点保留安全距离');
+assert.deepEqual([...multiPortPlan.relationOrder],
+    ['multi-middle', 'multi-upper', 'multi-lower'],
+    '共享端口组应让距离卡片最近的关系先占用内侧车道');
+const assignedPortCandidates = vm.runInContext(`
+    getMindMapRelationPortCandidates(
+        multiPortCardRects.get('multi-source'),
+        'right',
+        multiPortCardRects.get('multi-target-upper'),
+        MINDMAP_RELATION_SOURCE_CLEARANCE,
+        null,
+        multiPortAssignments.get('multi-upper').source.along
+    )
+`, routingContext);
+assert.deepEqual([...assignedPortCandidates[0].kinds], ['assigned'],
+    '统一寻路时应只使用预先分配的精确端口');
+assert.equal(assignedPortCandidates[0].port.y, multiPortSourceAssignments[0].along,
+    '预分配端口坐标必须准确传递到最终连接点');
+
+routingContext.nestedRelations = [
+    { id: 'nested-far', sourceId: 'nested-source-far', targetId: 'nested-target' },
+    { id: 'nested-near', sourceId: 'nested-source-near', targetId: 'nested-target' },
+];
+routingContext.nestedCardRects = new Map([
+    ['nested-target', {
+        id: 'nested-target', left: 0, right: 300, top: 500, bottom: 800, width: 300, height: 300
+    }],
+    ['nested-source-far', {
+        id: 'nested-source-far', left: 500, right: 660, top: 50, bottom: 150, width: 160, height: 100
+    }],
+    ['nested-source-near', {
+        id: 'nested-source-near', left: 500, right: 1300, top: 300, bottom: 400, width: 800, height: 100
+    }],
+]);
+routingContext.nestedNaturalRoutes = new Map(routingContext.nestedRelations.map(relation => [
+    relation.id,
+    { sourceSide: 'right', targetSide: 'right' },
+]));
+vm.runInContext(`
+    getMindMapRelationReservedSides = nodeId => nodeId === 'nested-target'
+        ? new Set(['right'])
+        : new Set();
+    getMindMapRelationPortContext = () => null;
+`, routingContext);
+const nestedPortPlan = vm.runInContext(`
+    getMindMapRelationPortPlan(nestedRelations, nestedCardRects, nestedNaturalRoutes)
+`, routingContext);
+assert.ok(
+    nestedPortPlan.assignments.get('nested-near').target.along
+        < nestedPortPlan.assignments.get('nested-far').target.along,
+    '多个上方卡片连接同一侧时，距离较近的卡片应连接更靠上的端口',
+);
+assert.deepEqual([...nestedPortPlan.relationOrder], ['nested-near', 'nested-far'],
+    '嵌套绕行应由近到远占用车道，避免远路线截断近路线');
+routingContext.nestedPortPlan = nestedPortPlan;
+routingContext.nestedObstacles = vm.runInContext(`
+    [...nestedCardRects.values()].map(rect => expandMindMapRelationObstacle(rect))
+`, routingContext);
+const nestedNearRoute = vm.runInContext(`
+    routeMindMapRelation(
+        nestedCardRects.get('nested-source-near'),
+        nestedCardRects.get('nested-target'),
+        nestedObstacles,
+        [],
+        [],
+        nestedPortPlan.assignments.get('nested-near')
+    )
+`, routingContext);
+routingContext.nestedOccupiedSegments = vm.runInContext(`
+    getMindMapRelationSegments(${JSON.stringify(nestedNearRoute.points)})
+`, routingContext);
+const nestedFarRoute = vm.runInContext(`
+    routeMindMapRelation(
+        nestedCardRects.get('nested-source-far'),
+        nestedCardRects.get('nested-target'),
+        nestedObstacles,
+        nestedOccupiedSegments,
+        [],
+        nestedPortPlan.assignments.get('nested-far'),
+        true
+    )
+`, routingContext);
+routingContext.nestedFarRoute = nestedFarRoute;
+const nestedRouteInteractionPenalty = vm.runInContext(`
+    getMindMapRelationSegments(nestedFarRoute.points).reduce((sum, segment) =>
+        sum + getMindMapRelationSegmentInteractionPenalty(
+            segment.from,
+            segment.to,
+            nestedOccupiedSegments,
+            [nestedFarRoute.points[0], nestedFarRoute.points.at(-1)]
+        ),
+    0)
+`, routingContext);
+assert.equal(nestedRouteInteractionPenalty, 300,
+    '宽卡片封死相邻外侧车道时允许一次关系线交叉，不能为追求零交叉绕过整张宽卡片');
+assert.ok(Math.max(...nestedFarRoute.points.map(point => point.x)) <= 660,
+    '允许一次关系线交叉后，嵌套远线仍应留在端点附近的局部区域');
+
+routingContext.fanoutRelations = [
+    { id: 'fanout-upper', sourceId: 'fanout-source', targetId: 'fanout-target-upper' },
+    { id: 'fanout-middle', sourceId: 'fanout-source', targetId: 'fanout-target-middle' },
+    { id: 'fanout-lower', sourceId: 'fanout-source', targetId: 'fanout-target-lower' },
+];
+routingContext.fanoutCardRects = new Map([
+    ['fanout-source', {
+        id: 'fanout-source', left: 0, right: 160, top: 0, bottom: 300, width: 160, height: 300
+    }],
+    ['fanout-target-upper', {
+        id: 'fanout-target-upper', left: 500, right: 660, top: -50, bottom: 50, width: 160, height: 100
+    }],
+    ['fanout-target-middle', {
+        id: 'fanout-target-middle', left: 500, right: 660, top: 100, bottom: 200, width: 160, height: 100
+    }],
+    ['fanout-target-lower', {
+        id: 'fanout-target-lower', left: 500, right: 660, top: 250, bottom: 350, width: 160, height: 100
+    }],
+]);
+vm.runInContext(`
+    getMindMapRelationReservedSides = nodeId => new Set([
+        nodeId === 'fanout-source' ? 'left' : 'right'
+    ]);
+    getMindMapRelationPortContext = nodeId => ({
+        branchSide: nodeId === 'fanout-source' ? 'right' : 'left',
+        hasChildren: false,
+        childSides: []
+    });
+    getMindMapRelationTreeSegments = () => [];
+    getMindMapRelationRoutingKey = () => 'fanout-integration';
+    getMindMapRelationRouteFoldCorridors = () => [];
+    relationRouteCache = { key: '', routes: new Map() };
+`, routingContext);
+const fanoutRoutes = vm.runInContext(`
+    buildMindMapRelationRoutes(fanoutRelations, fanoutCardRects)
+`, routingContext);
+const fanoutRouteList = routingContext.fanoutRelations.map(relation => fanoutRoutes.get(relation.id));
+assert.ok(fanoutRouteList.every(route => route?.sourceSide === 'right'),
+    '同一来源的右侧关系应保持自然路线选出的连接边');
+const fanoutStartYs = fanoutRouteList.map(route => route.points[0].y);
+assert.equal(new Set(fanoutStartYs).size, 3,
+    '批量端口分配后，最终避障路线必须从三个独立端点出线');
+assert.deepEqual(fanoutStartYs, [75, 150, 225],
+    '不考虑圆角限制时，三个连接点应位于卡片完整边长的四等分位置');
+assert.ok(fanoutStartYs[0] < fanoutStartYs[1] && fanoutStartYs[1] < fanoutStartYs[2],
+    '最终连接点顺序应与上、中、下三个对端卡片保持一致');
+
+routingContext.staggeredFanInRelations = [
+    { id: 'fanin-far', sourceId: 'fanin-source-far', targetId: 'fanin-target' },
+    { id: 'fanin-near', sourceId: 'fanin-source-near', targetId: 'fanin-target' },
+];
+routingContext.staggeredFanInCardRects = new Map([
+    ['fanin-source-far', {
+        id: 'fanin-source-far', left: 320, right: 895, top: 105, bottom: 197, width: 575, height: 92
+    }],
+    ['fanin-source-near', {
+        id: 'fanin-source-near', left: 320, right: 1134, top: 222, bottom: 313, width: 814, height: 91
+    }],
+    ['fanin-target', {
+        id: 'fanin-target', left: 25, right: 688, top: 468, bottom: 560, width: 663, height: 92
+    }],
+    ['fanin-blocker-above', {
+        id: 'fanin-blocker-above', left: 320, right: 1500, top: 0, bottom: 80, width: 1180, height: 80
+    }],
+    ['fanin-blocker-middle', {
+        id: 'fanin-blocker-middle', left: 320, right: 1000, top: 340, bottom: 432, width: 680, height: 92
+    }],
+    ['fanin-blocker-below', {
+        id: 'fanin-blocker-below', left: 25, right: 920, top: 586, bottom: 678, width: 895, height: 92
+    }],
+]);
+vm.runInContext(`
+    getMindMapRelationReservedSides = () => new Set(['left']);
+    getMindMapRelationPortContext = () => ({ branchSide: 'right', hasChildren: false });
+    getMindMapRelationTreeSegments = () => [];
+    getMindMapRelationRoutingKey = () => 'staggered-fanin-integration';
+    getMindMapRelationRouteFoldCorridors = () => [];
+    relationRouteCache = { key: '', routes: new Map() };
+`, routingContext);
+const staggeredFanInRoutes = vm.runInContext(`
+    buildMindMapRelationRoutes(staggeredFanInRelations, staggeredFanInCardRects)
+`, routingContext);
+const staggeredFanInRouteList = routingContext.staggeredFanInRelations.map(relation =>
+    staggeredFanInRoutes.get(relation.id)
+);
+assert.ok(staggeredFanInRouteList.every(route => route?.sourceSide === 'right' && route?.targetSide === 'right'),
+    '宽度不同的上方来源卡片应保持从右侧连接目标右侧，不能因另一条关系占道而切换到左侧');
+assert.ok(staggeredFanInRouteList.every(route => route.points.every(point => point.x >= 688)),
+    '同目标的嵌套关系应在卡片右侧完成分流，不能绕过整棵树的左侧');
+assert.ok(staggeredFanInRouteList.every(route =>
+    Math.max(...route.points.map(point => point.x)) <= 1200
+), '右侧嵌套分流应使用来源卡片附近的相邻车道，不能绕到远处空白区域');
+routingContext.staggeredFanInFirstSegments = vm.runInContext(`
+    getMindMapRelationSegments(${JSON.stringify(staggeredFanInRouteList[0].points)})
+`, routingContext);
+routingContext.staggeredFanInSecondRoute = staggeredFanInRouteList[1];
+const staggeredFanInInteractionPenalty = vm.runInContext(`
+    getMindMapRelationSegments(staggeredFanInSecondRoute.points).reduce((sum, segment) =>
+        sum + getMindMapRelationSegmentInteractionPenalty(
+            segment.from,
+            segment.to,
+            staggeredFanInFirstSegments,
+            [staggeredFanInSecondRoute.points[0], staggeredFanInSecondRoute.points.at(-1)]
+        ),
+    0)
+`, routingContext);
+assert.equal(staggeredFanInInteractionPenalty, 0,
+    '右侧嵌套分流后的两条关系线不应产生交叉或重叠');
 
 routingContext.wideSiblingSourceRect = {
     id: 'wide-sibling-source', left: 121, right: 584, top: 217, bottom: 294, width: 463, height: 77
