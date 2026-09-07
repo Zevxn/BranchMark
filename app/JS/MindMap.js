@@ -4378,7 +4378,8 @@ function findMindMapOrthogonalRoute(
     obstacles,
     occupiedSegments = [],
     preferredChannels = [],
-    terminalDirection = 0
+    terminalDirection = 0,
+    bounds = null
 ) {
     const round = value => Math.round(value * 10) / 10;
     const xs = [start.x, end.x];
@@ -4419,8 +4420,17 @@ function findMindMapOrthogonalRoute(
         ys.push(Math.max(...obstacles.map(item => item.bottom)) + MINDMAP_RELATION_LANE_GAP);
     }
 
-    const xValues = Array.from(new Set(xs.map(round))).sort((a, b) => a - b);
-    const yValues = Array.from(new Set(ys.map(round))).sort((a, b) => a - b);
+    if (bounds) {
+        xs.push(bounds.left, bounds.right);
+        ys.push(bounds.top, bounds.bottom);
+    }
+
+    const xValues = Array.from(new Set(xs
+        .filter(value => !bounds || (value >= bounds.left - 0.1 && value <= bounds.right + 0.1))
+        .map(round))).sort((a, b) => a - b);
+    const yValues = Array.from(new Set(ys
+        .filter(value => !bounds || (value >= bounds.top - 0.1 && value <= bounds.bottom + 0.1))
+        .map(round))).sort((a, b) => a - b);
     const startX = xValues.indexOf(round(start.x));
     const startY = yValues.indexOf(round(start.y));
     const endX = xValues.indexOf(round(end.x));
@@ -4667,11 +4677,54 @@ function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegment
         (targetRect.top + targetRect.height / 2) - (sourceRect.top + sourceRect.height / 2)
     );
     const routingMargin = Math.max(120, Math.min(320, centerDistance * 0.2));
-    const routingBounds = {
+    const baseRoutingBounds = {
         left: Math.min(sourceRect.left, targetRect.left) - routingMargin,
         right: Math.max(sourceRect.right, targetRect.right) + routingMargin,
         top: Math.min(sourceRect.top, targetRect.top) - routingMargin,
         bottom: Math.max(sourceRect.bottom, targetRect.bottom) + routingMargin
+    };
+    const getObstacleContentBounds = obstacle => {
+        const padding = String(obstacle.id || '').startsWith('fold-button:')
+            ? MINDMAP_RELATION_FOLD_BUTTON_PADDING
+            : MINDMAP_RELATION_ROUTING_PADDING;
+        return {
+            left: obstacle.left + padding,
+            right: obstacle.right - padding,
+            top: obstacle.top + padding,
+            bottom: obstacle.bottom - padding
+        };
+    };
+    const horizontalBlockers = obstacles.filter(obstacle => {
+        const contentBounds = getObstacleContentBounds(obstacle);
+        return contentBounds.bottom >= Math.min(sourceRect.top, targetRect.top)
+            && contentBounds.top <= Math.max(sourceRect.bottom, targetRect.bottom)
+            && contentBounds.right >= baseRoutingBounds.left
+            && contentBounds.left <= baseRoutingBounds.right;
+    });
+    const verticalBlockers = obstacles.filter(obstacle => {
+        const contentBounds = getObstacleContentBounds(obstacle);
+        return contentBounds.right >= Math.min(sourceRect.left, targetRect.left)
+            && contentBounds.left <= Math.max(sourceRect.right, targetRect.right)
+            && contentBounds.bottom >= baseRoutingBounds.top
+            && contentBounds.top <= baseRoutingBounds.bottom;
+    });
+    const routingBounds = {
+        left: Math.min(
+            baseRoutingBounds.left,
+            ...horizontalBlockers.map(obstacle => obstacle.left - MINDMAP_RELATION_LANE_GAP)
+        ),
+        right: Math.max(
+            baseRoutingBounds.right,
+            ...horizontalBlockers.map(obstacle => obstacle.right + MINDMAP_RELATION_LANE_GAP)
+        ),
+        top: Math.min(
+            baseRoutingBounds.top,
+            ...verticalBlockers.map(obstacle => obstacle.top - MINDMAP_RELATION_LANE_GAP)
+        ),
+        bottom: Math.max(
+            baseRoutingBounds.bottom,
+            ...verticalBlockers.map(obstacle => obstacle.bottom + MINDMAP_RELATION_LANE_GAP)
+        )
     };
     const routingObstacles = obstacles.filter(obstacle =>
         obstacle.right >= routingBounds.left
@@ -4694,58 +4747,63 @@ function routeMindMapRelation(sourceRect, targetRect, obstacles, occupiedSegment
             && bottom >= routingBounds.top
             && top <= routingBounds.bottom;
     });
-    let bestRoute = null;
+    const findBestRoute = searchBounds => {
+        let bestRoute = null;
+        for (const candidate of candidates) {
+            if (bestRoute && (
+                candidate.reservedPortCount > bestRoute.reservedPortCount
+                || (
+                    candidate.reservedPortCount === bestRoute.reservedPortCount
+                    && candidate.occupiedPortCount > bestRoute.occupiedPortCount
+                )
+            )) break;
+            const route = findMindMapOrthogonalRoute(
+                candidate.sourcePort.routePoint,
+                candidate.targetPort.routePoint,
+                routingObstacles,
+                routingOccupiedSegments,
+                routingChannels,
+                candidate.targetSide === 'left' || candidate.targetSide === 'right' ? 1 : 2,
+                searchBounds
+            );
+            if (!route) continue;
+            const points = simplifyMindMapRelationPoints([
+                candidate.sourcePort.port,
+                candidate.sourcePort.routePoint,
+                ...route.points,
+                candidate.targetPort.routePoint,
+                candidate.targetPort.port
+            ]);
+            const terminalTurnPenalty = Math.max(
+                0,
+                getMindMapRelationTurnCount(points) - getMindMapRelationTurnCount(route.points)
+            ) * MINDMAP_RELATION_TURN_PENALTY;
+            const visibleTurnPenalty = getMindMapRelationTurnCount(points)
+                * (MINDMAP_RELATION_VISIBLE_TURN_PENALTY - MINDMAP_RELATION_TURN_PENALTY);
+            const totalCost = route.cost
+                + candidate.alignmentPenalty
+                + candidate.portDeviationPenalty
+                + candidate.estimatedDistance * 0.06
+                + candidate.portReuseCost
+                + terminalTurnPenalty
+                + visibleTurnPenalty;
+            if (bestRoute && bestRoute.cost <= totalCost) continue;
+            bestRoute = {
+                cost: totalCost,
+                points,
+                path: getMindMapRoundedOrthogonalPath(points),
+                sourceSide: candidate.sourceSide,
+                targetSide: candidate.targetSide,
+                reservedPortCount: candidate.reservedPortCount,
+                occupiedPortCount: candidate.occupiedPortCount
+            };
+        }
+        return bestRoute;
+    };
 
-    for (const candidate of candidates) {
-        if (bestRoute && (
-            candidate.reservedPortCount > bestRoute.reservedPortCount
-            || (
-                candidate.reservedPortCount === bestRoute.reservedPortCount
-                && candidate.occupiedPortCount > bestRoute.occupiedPortCount
-            )
-        )) break;
-        const route = findMindMapOrthogonalRoute(
-            candidate.sourcePort.routePoint,
-            candidate.targetPort.routePoint,
-            routingObstacles,
-            routingOccupiedSegments,
-            routingChannels,
-            candidate.targetSide === 'left' || candidate.targetSide === 'right' ? 1 : 2
-        );
-        if (!route) continue;
-        const points = simplifyMindMapRelationPoints([
-            candidate.sourcePort.port,
-            candidate.sourcePort.routePoint,
-            ...route.points,
-            candidate.targetPort.routePoint,
-            candidate.targetPort.port
-        ]);
-        const terminalTurnPenalty = Math.max(
-            0,
-            getMindMapRelationTurnCount(points) - getMindMapRelationTurnCount(route.points)
-        ) * MINDMAP_RELATION_TURN_PENALTY;
-        const visibleTurnPenalty = getMindMapRelationTurnCount(points)
-            * (MINDMAP_RELATION_VISIBLE_TURN_PENALTY - MINDMAP_RELATION_TURN_PENALTY);
-        const totalCost = route.cost
-            + candidate.alignmentPenalty
-            + candidate.portDeviationPenalty
-            + candidate.estimatedDistance * 0.06
-            + candidate.portReuseCost
-            + terminalTurnPenalty
-            + visibleTurnPenalty;
-        if (bestRoute && bestRoute.cost <= totalCost) continue;
-        bestRoute = {
-            cost: totalCost,
-            points,
-            path: getMindMapRoundedOrthogonalPath(points),
-            sourceSide: candidate.sourceSide,
-            targetSide: candidate.targetSide,
-            reservedPortCount: candidate.reservedPortCount,
-            occupiedPortCount: candidate.occupiedPortCount
-        };
-    }
-
-    return bestRoute;
+    // 只按源、目标之间真正挡路的卡片扩展局部窗口：既允许路线绕过中间兄弟，
+    // 又避免位于端点范围之外的超宽兄弟把自己的远端边界变成绕行车道。
+    return findBestRoute(routingBounds) || findBestRoute(null);
 }
 
 function getMindMapRelationFoldCorridors(cardRects) {

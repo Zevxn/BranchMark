@@ -1046,4 +1046,63 @@ assert.equal(vm.runInContext(`
     getMindMapRelationTurnCount(${JSON.stringify(snakeAvoidanceRoute.points)})
 `, routingContext), 3, '应选择三折角开阔路线，避免顶边方案产生额外蛇形折返');
 
+routingContext.wideSiblingSourceRect = {
+    id: 'wide-sibling-source', left: 121, right: 584, top: 217, bottom: 294, width: 463, height: 77
+};
+routingContext.wideSiblingTargetRect = {
+    id: 'wide-sibling-target', left: -100, right: 415, top: 507, bottom: 594, width: 515, height: 87
+};
+routingContext.wideSiblingObstacles = vm.runInContext(`[
+    expandMindMapRelationObstacle(wideSiblingSourceRect),
+    expandMindMapRelationObstacle(wideSiblingTargetRect),
+    expandMindMapRelationObstacle({
+        id: 'unrelated-wide-sibling', left: 121, right: 1098, top: 122, bottom: 205
+    }),
+    expandMindMapRelationObstacle({
+        id: 'middle-sibling', left: 121, right: 775, top: 311, bottom: 389
+    }),
+    expandMindMapRelationObstacle({
+        id: 'lower-sibling', left: 121, right: 647, top: 406, bottom: 485
+    }),
+    expandMindMapRelationObstacle({
+        id: 'lower-target', left: -100, right: 605, top: 603, bottom: 677
+    })
+]`, routingContext);
+routingContext.wideSiblingOccupiedSegments = [
+    { from: { x: 775, y: 350 }, to: { x: 803, y: 350 } },
+    { from: { x: 803, y: 350 }, to: { x: 803, y: 620 } },
+    { from: { x: 803, y: 620 }, to: { x: 463, y: 620 } },
+    { from: { x: 463, y: 620 }, to: { x: 463, y: 550 } },
+    { from: { x: 463, y: 550 }, to: { x: 415, y: 550 } },
+];
+vm.runInContext(`
+    getMindMapRelationReservedSides = nodeId => new Set([
+        nodeId === 'wide-sibling-source' ? 'left' : 'right'
+    ]);
+    getMindMapRelationPortContext = nodeId => ({
+        branchSide: nodeId === 'wide-sibling-source' ? 'right' : 'left',
+        hasChildren: false,
+        childSides: []
+    });
+`, routingContext);
+const wideSiblingRoute = vm.runInContext(`
+    routeMindMapRelation(
+        wideSiblingSourceRect,
+        wideSiblingTargetRect,
+        wideSiblingObstacles,
+        wideSiblingOccupiedSegments
+    )
+`, routingContext);
+assert.ok(wideSiblingRoute, '宽兄弟卡片存在时仍应找到局部关联路线');
+assert.equal(wideSiblingRoute.sourceSide, 'right',
+    '局部窗口应扩展到中间阻挡卡片之外，不得迫使关联线改走父节点一侧');
+const wideSiblingLocalRightLimit = vm.runInContext(`
+    775 + MINDMAP_RELATION_ROUTING_PADDING + MINDMAP_RELATION_LANE_GAP
+`, routingContext);
+assert.ok(
+    Math.max(...wideSiblingRoute.points.map(point => point.x))
+        <= wideSiblingLocalRightLimit,
+    '关联线只应绕过源目标之间的阻挡卡片，不得采用上方超宽兄弟的远端边界',
+);
+
 console.log('卡片关联校验通过：编辑、正交避障、分流防重叠、缓存与 Canvas 导出逻辑完整。');
