@@ -7,11 +7,13 @@ if (typeof marked !== 'undefined') marked.use({ breaks: true, gfm: true });
 const MINDMAP_THEME_STORAGE_KEY = 'mindmap_theme';
 const MINDMAP_CARD_TOOLBAR_HOVER_STORAGE_KEY = 'mindmap_card_toolbar_hover';
 const MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY = 'mindmap_card_content_hover';
+const MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY = 'mindmap_document_outline';
 const MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY = 'mindmap_node_stats_visible';
 const MINDMAP_CARD_MIN_WIDTH = 100;
 const mindMapSettings = {
     cardToolbarHover: true,
     cardContentHover: true,
+    documentOutline: true,
     nodeStatsVisible: true,
 };
 
@@ -50,6 +52,16 @@ function applyMindMapCardContentHover(enabled) {
     if (toggle) toggle.checked = mindMapSettings.cardContentHover;
     const value = $('#settingCardContentHoverValue');
     if (value) value.textContent = mindMapSettings.cardContentHover ? '悬停时预览' : '悬停时隐藏';
+    hideMindMapContentPreview();
+}
+
+function applyMindMapDocumentOutline(enabled) {
+    mindMapSettings.documentOutline = enabled !== false;
+    document.documentElement.dataset.documentOutline = String(mindMapSettings.documentOutline);
+    const toggle = $('#settingDocumentOutlineToggle');
+    if (toggle) toggle.checked = mindMapSettings.documentOutline;
+    const value = $('#settingDocumentOutlineValue');
+    if (value) value.textContent = mindMapSettings.documentOutline ? '达到阈值时显示' : '隐藏长文档目录';
     hideMindMapContentPreview();
 }
 
@@ -98,11 +110,15 @@ async function initializeMindMapTheme() {
     const result = await chrome.storage.local.get({
         [MINDMAP_THEME_STORAGE_KEY]: systemTheme,
         [MINDMAP_CARD_TOOLBAR_HOVER_STORAGE_KEY]: true,
+        [MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY]: true,
+        [MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY]: true,
         [MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY]: true,
     });
     const savedTheme = result && result[MINDMAP_THEME_STORAGE_KEY];
     applyMindMapTheme(savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : systemTheme);
     applyMindMapCardToolbarHover(result?.[MINDMAP_CARD_TOOLBAR_HOVER_STORAGE_KEY] !== false);
+    applyMindMapCardContentHover(result?.[MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY] !== false);
+    applyMindMapDocumentOutline(result?.[MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY] !== false);
     applyMindMapNodeStatsVisibility(result?.[MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY] !== false);
 
     const settingsButton = $('#btn-settings');
@@ -127,6 +143,11 @@ async function initializeMindMapTheme() {
         const enabled = event.currentTarget.checked;
         applyMindMapCardContentHover(enabled);
         await chrome.storage.local.set({ [MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY]: enabled });
+    });
+    $('#settingDocumentOutlineToggle')?.addEventListener('change', async event => {
+        const enabled = event.currentTarget.checked;
+        applyMindMapDocumentOutline(enabled);
+        await chrome.storage.local.set({ [MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY]: enabled });
     });
     $('#settingNodeStatsToggle')?.addEventListener('change', async event => {
         const visible = event.currentTarget.checked;
@@ -405,6 +426,8 @@ const MINDMAP_CONTENT_PREVIEW_ARROW_CORNER_CLEARANCE = 24;
 const MINDMAP_CONTENT_PREVIEW_BOTTOM_COMFORT_HEIGHT = 160;
 const MINDMAP_CONTENT_PREVIEW_MIN_HEIGHT = 200; // 预览最小可读高度
 const MINDMAP_CONTENT_PREVIEW_MIN_WIDTH = 400;  // 预览最小可读宽度
+const MINDMAP_DOCUMENT_OUTLINE_MIN_LENGTH = 1200;
+const MINDMAP_DOCUMENT_OUTLINE_MIN_HEADINGS = 4;
 const mindMapContentPreviewState = {
     card: null,
     el: null,
@@ -1103,7 +1126,7 @@ document.addEventListener('DOMContentLoaded', () => {
  ==============================================================================================*/
     initializeMapClickEvents(); // 初始化点击事件
     initializeMapMouseEvents(); // 初始化鼠标事件
-    initializeMindMapContentPreview(); // 折叠/便利贴卡片的悬停正文预览
+    initializeMindMapContentPreview(); // 折叠/便利贴的全文预览与标准卡片的长文档目录
     initializeMapContextMenu(); // 初始化右键菜单
     initializeNativeDragDrop(); // 初始化原生拖拽
     initializeEditorToolbar();  // 初始化md编辑器
@@ -2650,35 +2673,117 @@ function positionMindMapContentPreview(preview, previewContent, card, resetNatur
     return placement;
 }
 
-function canShowMindMapContentPreview(card) {
-    if (!card?.isConnected) return false;
+function getMindMapDocumentOutline(content, body) {
+    const source = String(content || '').trim();
+    if (source.length < MINDMAP_DOCUMENT_OUTLINE_MIN_LENGTH || !body) return [];
+    // 以最终渲染出的标题为唯一真值，避免数学块、分隔线与 Markdown 预处理导致误判。
+    const headings = Array.from(body.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+        .map(element => ({
+            element,
+            level: Number(element.tagName.slice(1)),
+            text: String(element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim(),
+        }))
+        .filter(heading => heading.text);
+    return headings.length >= MINDMAP_DOCUMENT_OUTLINE_MIN_HEADINGS ? headings : [];
+}
+
+function getMindMapLayoutOffsetTop(element) {
+    let top = 0;
+    let current = element;
+    while (current) {
+        top += Number(current.offsetTop) || 0;
+        current = current.offsetParent;
+    }
+    return top;
+}
+
+function getMindMapHeadingScrollTop(body, target, inset = 8) {
+    if (!body || !target) return 0;
+    // offsetTop 是未经画布 transform 缩放的布局坐标，可直接与 scrollTop 配合。
+    const desiredTop = getMindMapLayoutOffsetTop(target) - getMindMapLayoutOffsetTop(body) - inset;
+    const maxScrollTop = Math.max(0, (Number(body.scrollHeight) || 0) - (Number(body.clientHeight) || 0));
+    return Math.min(maxScrollTop, Math.max(0, desiredTop));
+}
+
+function getMindMapContentPreviewDescriptor(card) {
+    if (!card?.isConnected) return null;
     const node = findNode(state.data, card.dataset.nodeId);
-    return Boolean(String(node?.content || '').trim())
-        && (card.classList.contains('simple') || !card.querySelector('.card-body'));
+    if (!String(node?.content || '').trim()) return null;
+
+    const body = card.querySelector('.card-body');
+    if (card.classList.contains('simple') || !body) {
+        return mindMapSettings.cardContentHover ? { mode: 'content', node, headings: [] } : null;
+    }
+
+    if (!mindMapSettings.documentOutline) return null;
+    const headings = getMindMapDocumentOutline(node.content, body);
+    return headings.length > 0 ? { mode: 'outline', node, headings } : null;
+}
+
+function createMindMapDocumentOutlineHTML(headings) {
+    const baseLevel = Math.min(...headings.map(heading => heading.level));
+    return `<nav class="card-body card-document-outline" aria-label="文档目录">
+        <div class="card-document-outline-header">
+            <span><i class="ri-list-check-2" aria-hidden="true"></i> 文档目录</span>
+            <span>${headings.length} 个标题</span>
+        </div>
+        <ol>${headings.map((heading, index) => `
+            <li style="--outline-depth:${heading.level - baseLevel}">
+                <button type="button" data-heading-index="${index}" title="${escapeHtml(heading.text)}">
+                    <span class="card-document-outline-level">H${heading.level}</span>
+                    <span class="card-document-outline-text">${escapeHtml(heading.text)}</span>
+                </button>
+            </li>`).join('')}
+        </ol>
+    </nav>`;
+}
+
+function canShowMindMapContentPreview(card) {
+    return Boolean(getMindMapContentPreviewDescriptor(card));
 }
 
 function showMindMapContentPreview(card) {
-    if (!mindMapSettings.cardContentHover) return;
     clearMindMapContentPreviewTimer('showTimer');
     clearMindMapContentPreviewTimer('hideTimer');
-    if (!canShowMindMapContentPreview(card)) return;
+    const descriptor = getMindMapContentPreviewDescriptor(card);
+    if (!descriptor) return;
     if (mindMapContentPreviewState.card === card && mindMapContentPreviewState.el) return;
 
     hideMindMapContentPreview();
-    const node = findNode(state.data, card.dataset.nodeId);
+    const { mode, node, headings } = descriptor;
     const preview = document.createElement('div');
-    preview.className = `card-content-preview${card.classList.contains('simple') ? ' simple-preview' : ''}`;
+    preview.className = `card-content-preview${card.classList.contains('simple') ? ' simple-preview' : ''}${mode === 'outline' ? ' outline-preview' : ''}`;
     preview.dataset.placement = 'bottom';
     preview.tabIndex = 0;
-    preview.setAttribute('aria-label', `${node.topic || '卡片'}的内容预览`);
-    // 与普通卡片共用 card-body/md-content 结构和 Markdown 渲染路径，确保样式及富内容一致。
-    preview.innerHTML = createMindMapNodeContentBodyHTML(node.content);
+    preview.setAttribute('aria-label', `${node.topic || '卡片'}的${mode === 'outline' ? '文档目录' : '内容预览'}`);
+    // 全文沿用卡片 Markdown 渲染路径；目录只复用同一气泡外层与定位逻辑。
+    preview.innerHTML = mode === 'outline'
+        ? createMindMapDocumentOutlineHTML(headings)
+        : createMindMapNodeContentBodyHTML(node.content);
     const previewContent = preview.firstElementChild;
     preview.addEventListener('pointerenter', () => clearMindMapContentPreviewTimer('hideTimer'));
     preview.addEventListener('pointerleave', event => {
         if (!card.contains(event.relatedTarget)) scheduleMindMapContentPreviewHide();
     });
     preview.addEventListener('pointerdown', () => preview.focus());
+    if (mode === 'outline') {
+        preview.addEventListener('click', event => {
+            const trigger = event.target.closest('[data-heading-index]');
+            if (!trigger) return;
+            const body = card.querySelector('.card-body');
+            const target = headings[Number(trigger.dataset.headingIndex)]?.element;
+            if (!body || !target || !body.contains(target)) return;
+
+            const targetTop = getMindMapHeadingScrollTop(body, target);
+            body.scrollTo({ top: targetTop, behavior: 'smooth' });
+            target.classList.remove('mindmap-outline-target');
+            void target.offsetWidth;
+            target.classList.add('mindmap-outline-target');
+            setTimeout(() => target.classList.remove('mindmap-outline-target'), 1400);
+            event.preventDefault();
+            event.stopPropagation();
+        });
+    }
     preview.addEventListener('keydown', event => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
             const range = document.createRange();
@@ -2690,7 +2795,7 @@ function showMindMapContentPreview(card) {
         }
     });
     document.body.appendChild(preview);
-    const processRichContentResult = processRichContent(previewContent);
+    const processRichContentResult = mode === 'content' ? processRichContent(previewContent) : null;
     // 长内容绝不能因富内容布局或浏览器恢复行为而从中间开始显示。
     const resetPreviewScrollTop = () => {
         if (preview.isConnected) previewContent.scrollTop = 0;

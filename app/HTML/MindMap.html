@@ -250,6 +250,8 @@
             border-radius: 10px;
             box-shadow: 0 10px 30px var(--shadow-color-hover);
             backdrop-filter: blur(12px);
+            max-height: calc(100vh - 24px);
+            overflow-y: auto;
             opacity: 0;
             visibility: hidden;
             pointer-events: none;
@@ -1435,7 +1437,7 @@
             cursor: auto;       /* 鼠标恢复为文本指针 */
         }
 
-        /* 折叠卡片与便利贴的正文预览：固定在视口中，避免受脑图画布缩放和裁切影响。 */
+        /* 折叠卡片/便利贴的正文预览与长文档目录共用此气泡。 */
         .card-content-preview {
             position: fixed;
             z-index: 880;
@@ -1479,6 +1481,72 @@
         }
         .card-content-preview.simple-preview .card-body {
             max-height: min(var(--simple-card-max-height), calc(100vh - 24px));
+        }
+        .card-content-preview.outline-preview {
+            width: min(420px, calc(100vw - 24px));
+            cursor: default;
+        }
+        .card-document-outline {
+            padding: 8px;
+            overflow-y: auto;
+        }
+        .card-document-outline-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 6px 8px 9px;
+            color: var(--text-color-secondary);
+            font-size: 12px;
+            border-bottom: 1px solid var(--header-border-bottom);
+        }
+        .card-document-outline-header > :first-child {
+            color: var(--text-color);
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .card-document-outline ol {
+            list-style: none;
+            margin: 6px 0 0;
+            padding: 0;
+        }
+        .card-document-outline li { margin: 1px 0; }
+        .card-document-outline button {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            min-width: 0;
+            padding: 7px 8px 7px calc(8px + var(--outline-depth, 0) * 16px);
+            color: var(--text-color);
+            background: transparent;
+            border: 0;
+            border-radius: 6px;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+        .card-document-outline button:hover,
+        .card-document-outline button:focus-visible {
+            color: var(--primary);
+            background: color-mix(in srgb, var(--primary) 10%, transparent);
+            outline: none;
+        }
+        .card-document-outline-level {
+            flex: 0 0 auto;
+            color: var(--text-color-secondary);
+            font-size: 10px;
+            font-variant-numeric: tabular-nums;
+        }
+        .card-document-outline-text {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .card-body .mindmap-outline-target {
+            border-radius: 4px;
+            background: color-mix(in srgb, var(--primary) 10%, transparent);
         }
         .card-content-preview.is-visible {
             opacity: 1;
@@ -2345,6 +2413,17 @@
             </span>
             <span class="mindmap-setting-toggle">
                 <input id="settingCardContentHoverToggle" type="checkbox" checked>
+                <span class="mindmap-setting-switch" aria-hidden="true"></span>
+            </span>
+        </label>
+        <label class="mindmap-setting-row" for="settingDocumentOutlineToggle">
+            <span class="mindmap-setting-icon"><i class="ri-list-check-2" aria-hidden="true"></i></span>
+            <span class="mindmap-setting-copy">
+                <span class="mindmap-setting-name">悬停显示长文档目录</span>
+                <span class="mindmap-setting-value" id="settingDocumentOutlineValue">达到阈值时显示</span>
+            </span>
+            <span class="mindmap-setting-toggle">
+                <input id="settingDocumentOutlineToggle" type="checkbox" checked>
                 <span class="mindmap-setting-switch" aria-hidden="true"></span>
             </span>
         </label>

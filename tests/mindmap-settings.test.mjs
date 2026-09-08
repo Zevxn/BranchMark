@@ -13,6 +13,8 @@ assert.match(html, /id="mindMapSettingsPopover"[^>]*role="dialog"/,
 for (const toggleId of [
     'settingThemeToggle',
     'settingCardToolbarHoverToggle',
+    'settingCardContentHoverToggle',
+    'settingDocumentOutlineToggle',
     'settingNodeStatsToggle',
 ]) {
     assert.match(html, new RegExp(`id="${toggleId}"`), `设置面板应包含 ${toggleId}`);
@@ -22,6 +24,10 @@ assert.match(mindMap, /MINDMAP_THEME_STORAGE_KEY\s*=\s*'mindmap_theme'/,
     '主题设置应继续兼容原持久化键');
 assert.match(mindMap, /MINDMAP_CARD_TOOLBAR_HOVER_STORAGE_KEY\s*=\s*'mindmap_card_toolbar_hover'/,
     '卡片工具栏悬停设置应独立持久化');
+assert.match(mindMap, /MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY\s*=\s*'mindmap_card_content_hover'/,
+    '折叠内容预览设置应独立持久化');
+assert.match(mindMap, /MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY\s*=\s*'mindmap_document_outline'/,
+    '长文档目录设置应独立持久化');
 assert.match(mindMap, /MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY\s*=\s*'mindmap_node_stats_visible'/,
     '左下角统计显示设置应独立持久化');
 assert.match(mindMap, /function applyMindMapNodeStatsVisibility[\s\S]*?nodeStats\.hidden\s*=\s*!mindMapSettings\.nodeStatsVisible/,
@@ -38,7 +44,21 @@ assert.doesNotMatch(html,
 assert.match(mindMap,
     /getMindMapContentPreviewOccupiedRects\(card\),\s*!mindMapSettings\.cardToolbarHover/,
     '只有关闭悬停工具栏时，预览定位才应启用上方候选');
+assert.match(mindMap,
+    /applyMindMapCardContentHover\(result\?\.\[MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY\] !== false\)/,
+    '启动时应恢复折叠内容预览设置');
+assert.match(mindMap,
+    /applyMindMapDocumentOutline\(result\?\.\[MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY\] !== false\)/,
+    '启动时应恢复长文档目录设置');
+assert.match(mindMap,
+    /if \(!mindMapSettings\.documentOutline\) return null;[\s\S]*?getMindMapDocumentOutline\(node\.content, body\)/,
+    '关闭目录设置后，展开的标准卡片不应再生成目录气泡');
+assert.match(mindMap,
+    /return mindMapSettings\.cardContentHover \? \{ mode: 'content', node, headings: \[\] \} : null;/,
+    '折叠内容预览开关应与长文档目录开关保持独立');
+assert.doesNotMatch(mindMap, /function showMindMapContentPreview\(card\)\s*\{\s*if \(!mindMapSettings\.cardContentHover\)/,
+    '目录气泡不应被折叠内容预览开关连带禁用');
 assert.match(mindMap, /e\.target\.closest\('\.mindmap-settings-popover'\)/,
     '操作设置弹出框时不得触发画布平移');
 
-console.log('思维导图设置校验通过：三项设置、持久化与气泡上方候选联动完整。');
+console.log('思维导图设置校验通过：五项设置、独立持久化与气泡联动完整。');
