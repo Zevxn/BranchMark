@@ -227,9 +227,12 @@ function applyImportedMindMap(content) {
             '导入页面',
             { allowEmpty: false }
         );
-        replaceMindMapWorkbook(imported);
-        sessionStorage.removeItem('currentFileID');
-        persistMindMapWorkbookSession();
+        commitCurrentMindMapTabEdits();
+        const importResult = importMindMapWorkbookIntoCurrent(mindMapWorkbook, imported);
+        importResult.resetTabIds.forEach(tabId => mindMapTabRuntime.delete(tabId));
+        loadActiveMindMapTab({ resetHistory: true });
+        persistMindMapWorkbookSession(false);
+        saveStorage();
         showMindMapImportFeedback('✅ 思维导图导入成功');
     } catch (error) {
         console.error('[MindMap] 导入思维导图失败:', error);
@@ -389,6 +392,76 @@ function normalizeMindMapWorkbookSnapshot(snapshot, fallbackName = '页面 1', o
     return { version: MINDMAP_TABS_VERSION, activeTabId: tab.id, tabs: [tab] };
 }
 
+function isMindMapTabRootOnly(tab) {
+    return Boolean(tab?.data
+        && Array.isArray(tab.data.children)
+        && tab.data.children.length === 0);
+}
+
+function getUniqueMindMapTabNameFromNames(baseName, names) {
+    const base = String(baseName || '').trim() || '页面';
+    if (!names.has(base)) return base;
+    let index = 2;
+    while (names.has(`${base} ${index}`)) index++;
+    return `${base} ${index}`;
+}
+
+function cloneImportedMindMapTab(sourceTab, usedNames) {
+    const rootTopic = String(sourceTab?.data?.topic || '').trim();
+    const name = getUniqueMindMapTabNameFromNames(rootTopic || sourceTab?.name, usedNames);
+    const cloned = createMindMapTab(
+        name,
+        cloneMindMapValue({
+            data: sourceTab.data,
+            view: sourceTab.view,
+            scrollMap: sourceTab.scrollMap,
+        }),
+    );
+    usedNames.add(cloned.name);
+    return cloned;
+}
+
+function importMindMapWorkbookIntoCurrent(workbook, importedWorkbook) {
+    const currentTabIndex = workbook.tabs.findIndex(tab => tab.id === workbook.activeTabId);
+    const currentTab = workbook.tabs[currentTabIndex] || workbook.tabs[0];
+    const importedTabs = Array.isArray(importedWorkbook?.tabs) ? importedWorkbook.tabs : [];
+    const importedActiveTab = importedTabs.find(tab => tab.id === importedWorkbook.activeTabId)
+        || importedTabs[0];
+    if (currentTabIndex < 0 || !currentTab || !importedActiveTab) {
+        throw new Error('导入工作簿缺少可用页面');
+    }
+
+    const resetTabIds = [];
+    const usedNames = new Set(workbook.tabs.map(tab => tab.name));
+
+    if (isMindMapTabRootOnly(currentTab)) {
+        usedNames.delete(currentTab.name);
+        const replacement = cloneImportedMindMapTab(importedActiveTab, usedNames);
+        replacement.id = currentTab.id;
+        workbook.tabs[currentTabIndex] = replacement;
+        workbook.activeTabId = replacement.id;
+        resetTabIds.push(replacement.id);
+
+        const extraTabs = importedTabs
+            .filter(tab => tab !== importedActiveTab)
+            .map(tab => cloneImportedMindMapTab(tab, usedNames));
+        workbook.tabs.splice(currentTabIndex + 1, 0, ...extraTabs);
+        return { activeTabId: replacement.id, resetTabIds };
+    }
+
+    const importedTabMap = new Map();
+    const appendedTabs = importedTabs.map(tab => {
+        const cloned = cloneImportedMindMapTab(tab, usedNames);
+        importedTabMap.set(tab, cloned);
+        return cloned;
+    });
+    workbook.tabs.push(...appendedTabs);
+    const activeTab = importedTabMap.get(importedActiveTab) || appendedTabs[0];
+    workbook.activeTabId = activeTab.id;
+    resetTabIds.push(activeTab.id);
+    return { activeTabId: activeTab.id, resetTabIds };
+}
+
 let dockData = JSON.parse(sessionStorage.getItem('DockData'))||[]; // 初始为空数组
 let saveData = JSON.parse(sessionStorage.getItem('MindMapData'))||{};
 let pageTitle = sessionStorage.getItem('pageTitle')||'AI思维导图';
@@ -514,6 +587,13 @@ function getActiveMindMapTab() {
         || null;
 }
 
+function getMindMapSaveName() {
+    const rootTopic = String(state?.data?.topic || '').trim();
+    if (rootTopic) return rootTopic;
+    const tabName = String(getActiveMindMapTab()?.name || '').trim();
+    return tabName || String(pageTitle || '').trim() || '思维导图';
+}
+
 function syncActiveMindMapTab(captureScroll = true) {
     const tab = getActiveMindMapTab();
     if (!tab) return null;
@@ -617,12 +697,13 @@ async function saveMindMapData(isForce=false,notify=true){           // 保存
     if (!bookmarkManager || !isForce) return false;
     const saveData = getMindMapWorkbookSnapshot();
     const currentFileID = sessionStorage.getItem('currentFileID');
-    const isExist = Object.prototype.hasOwnProperty.call(bookmarkManager.data.items, currentFileID);
+    const bookmarkItems = bookmarkManager.data?.items || {};
+    const isExist = Object.prototype.hasOwnProperty.call(bookmarkItems, currentFileID);
     if (!isExist){
         const newId = generateFileId();
         const targetItem = {
             id: newId,
-            name: document.querySelector('#card-root > div.card-header').textContent.trim(),
+            name: getMindMapSaveName(),
             parentId: null,
             data:`MindMapData.__REF__${newId}-extra`
         };
@@ -666,12 +747,8 @@ let mindMapTabDeleteTargetId = null;
 let mindMapTabModalReturnFocus = null;
 
 function getUniqueMindMapTabName(baseName) {
-    const base = String(baseName || '').trim() || '页面';
     const names = new Set(mindMapWorkbook.tabs.map(tab => tab.name));
-    if (!names.has(base)) return base;
-    let index = 2;
-    while (names.has(`${base} ${index}`)) index++;
-    return `${base} ${index}`;
+    return getUniqueMindMapTabNameFromNames(baseName, names);
 }
 
 function getNextMindMapTabName() {
@@ -5579,7 +5656,6 @@ function appendMindMapRelationsToCanvas(canvasNodes, canvasEdges) {
 // SECTION 多卡片总结
 const MINDMAP_SUMMARY_SVG_NS = 'http://www.w3.org/2000/svg';
 const MINDMAP_SUMMARY_MIN_NODES = 2;
-const MINDMAP_SUMMARY_TEXT_LIMIT = 2000;
 const MINDMAP_SUMMARY_BRACE_OFFSET = 18;
 const MINDMAP_SUMMARY_LABEL_GAP = 22;
 const MINDMAP_SUMMARY_COLLISION_GAP = 14;
@@ -5603,12 +5679,12 @@ function ensureMindMapSummaries() {
 
 function getMindMapSummaryContent(summary) {
     const content = typeof summary?.content === 'string' ? summary.content : summary?.text;
-    return String(content || '').slice(0, MINDMAP_SUMMARY_TEXT_LIMIT);
+    return String(content ?? '');
 }
 
 function setMindMapSummaryContent(summary, content) {
     if (!summary) return;
-    summary.content = String(content || '').slice(0, MINDMAP_SUMMARY_TEXT_LIMIT);
+    summary.content = String(content ?? '');
     delete summary.text;
 }
 

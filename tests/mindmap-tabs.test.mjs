@@ -23,8 +23,10 @@ const context = vm.createContext({
     })(),
 });
 vm.runInContext(`${normalizerSource}\n${modelSource}\n`
-    + 'globalThis.normalizeMindMapWorkbookSnapshot = normalizeMindMapWorkbookSnapshot;', context);
+    + 'globalThis.normalizeMindMapWorkbookSnapshot = normalizeMindMapWorkbookSnapshot;'
+    + 'globalThis.importMindMapWorkbookIntoCurrent = importMindMapWorkbookIntoCurrent;', context);
 const normalizeWorkbook = context.normalizeMindMapWorkbookSnapshot;
+const importIntoWorkbook = context.importMindMapWorkbookIntoCurrent;
 
 const legacySnapshot = {
     data: { id: 'root', topic: '旧导图', children: [] },
@@ -77,6 +79,53 @@ assert.throws(
     '导入无效空文件时不应静默创建空页面',
 );
 
+const emptyWorkbook = normalizeWorkbook({
+    data: { id: 'empty-root', topic: '主题', children: [] },
+}, '页面 1');
+const emptyTabId = emptyWorkbook.activeTabId;
+const importedSingle = normalizeWorkbook({
+    data: { id: 'imported-root', topic: '导入导图', children: [{ id: 'imported-child', topic: '子节点', children: [] }] },
+}, '导入页面', { allowEmpty: false });
+const reusedEmptyResult = importIntoWorkbook(emptyWorkbook, importedSingle);
+assert.equal(reusedEmptyResult.activeTabId, emptyTabId, '空页面导入应继续使用当前 Tab');
+assert.equal(emptyWorkbook.tabs.length, 1, '空页面导入不应额外创建 Tab');
+assert.equal(emptyWorkbook.tabs[0].data.topic, '导入导图', '空页面应被导入内容替换');
+assert.equal(emptyWorkbook.tabs[0].data.children.length, 1, '替换后的当前 Tab 应保留导入子节点');
+
+const existingWorkbook = normalizeWorkbook({
+    version: 'tabs-v1',
+    activeTabId: 'existing-tab',
+    tabs: [{
+        id: 'existing-tab',
+        name: '已有页面',
+        data: { id: 'existing-root', topic: '已有导图', children: [{ id: 'existing-child', topic: '已有子节点', children: [] }] },
+    }],
+});
+const appendedResult = importIntoWorkbook(existingWorkbook, importedSingle);
+assert.equal(existingWorkbook.tabs.length, 2, '非空页面导入应追加一个新 Tab');
+assert.notEqual(appendedResult.activeTabId, 'existing-tab', '导入后应激活新建的 Tab');
+assert.equal(existingWorkbook.tabs[0].data.topic, '已有导图', '原有 Tab 内容不得被覆盖');
+assert.equal(existingWorkbook.tabs[1].data.topic, '导入导图', '新 Tab 应载入导入内容');
+assert.equal(existingWorkbook.tabs[1].name, '导入导图', '新 Tab 名称应优先使用根节点 topic');
+assert.notEqual(existingWorkbook.tabs[1].id, importedSingle.tabs[0].id, '新 Tab 不得复用导入文件中的 Tab ID');
+
+const importedMulti = normalizeWorkbook({
+    version: 'tabs-v1',
+    activeTabId: 'source-b',
+    tabs: [
+        { id: 'source-a', name: '来源 A', data: { id: 'source-a-root', topic: '来源 A', children: [] } },
+        { id: 'source-b', name: '来源 B', data: { id: 'source-b-root', topic: '来源 B', children: [] } },
+    ],
+});
+const multiResult = importIntoWorkbook(existingWorkbook, importedMulti);
+assert.equal(existingWorkbook.tabs.length, 4, '导入工作簿时应保留所有来源页面');
+assert.equal(existingWorkbook.tabs.find(tab => tab.id === multiResult.activeTabId).data.topic, '来源 B',
+    '导入工作簿后应激活来源文件的活动页面');
+assert.equal(new Set(existingWorkbook.tabs.map(tab => tab.id)).size, existingWorkbook.tabs.length,
+    '导入后的 Tab ID 必须保持唯一');
+assert.equal(new Set(existingWorkbook.tabs.map(tab => tab.name)).size, existingWorkbook.tabs.length,
+    '导入后的 Tab 名称应保持唯一');
+
 assert.match(html, /id=["']mindMapTabList["'][^>]*role=["']tablist["']/,
     '页面底部应提供可访问的 Tab 列表');
 assert.match(html, /id=["']btn-add-mindmap-tab["']/,
@@ -101,6 +150,20 @@ assert.match(tabDialogSource, /function deleteMindMapTab[\s\S]*?#mindMapTabDelet
     '删除操作应打开 Tab 专用确认框');
 assert.match(mindMap, /function activateMindMapTab\([\s\S]*?commitCurrentMindMapTabEdits\(\)[\s\S]*?loadActiveMindMapTab\(\)/,
     '切页前应提交当前编辑并载入目标页面运行状态');
+assert.match(mindMap, /function applyImportedMindMap\([\s\S]*?importMindMapWorkbookIntoCurrent\(/,
+    '导入应合并到当前工作簿，而不是替换整个工作簿');
+const importSource = mindMap.slice(
+    mindMap.indexOf('function applyImportedMindMap'),
+    mindMap.indexOf('function initializeMindMapImport'),
+);
+assert.doesNotMatch(importSource, /sessionStorage\.removeItem\(['"]currentFileID['"]\)/,
+    '导入到新 Tab 后应继续关联当前文件以支持保存');
+assert.match(mindMap, /function isMindMapTabRootOnly\([\s\S]*?children\.length === 0/,
+    '导入前应识别只有根节点的空页面');
+assert.match(mindMap, /function getMindMapSaveName\([\s\S]*?state\?\.data\?\.topic/,
+    '保存命名应从运行时数据获取根节点名称');
+assert.match(mindMap, /name:\s*getMindMapSaveName\(\)/,
+    '新建保存项应使用安全的脑图名称回退逻辑');
 assert.match(mindMap, /function getMindMapWorkbookSnapshot\([\s\S]*?tabs:\s*mindMapWorkbook\.tabs\.map/,
     '持久化应保存整个工作簿而非仅保存活动页面');
 assert.match(mindMap, /\.\.\.\(Object\.keys\(scrollMap\)\.length > 0 \? \{ scrollMap \} : \{\}\)/,
