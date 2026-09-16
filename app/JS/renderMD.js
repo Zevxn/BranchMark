@@ -421,7 +421,7 @@ imgStyleSheet.textContent = `
 
     /* 4. 鼠标悬停效果 (点击复制提示) */
     .katex-html:hover { 
-        background: var(--bg-secondary); 
+        background: color-mix(in srgb, var(--bg-secondary) 50%, transparent); 
         box-shadow: 0 0 0 1px var(--toolbar-border);
     }
     

@@ -11,6 +11,8 @@ assert.match(html, /id=["']btn-add-summary["'][^>]*disabled/,
     '工具栏应提供默认禁用的多卡片总结按钮');
 assert.match(html, /<svg[^>]*id=["']summary-brace-layer["']/,
     '画布变换层中应包含独立的 SVG 大括号图层');
+assert.match(html, /\.summary-brace\s*\{[\s\S]*?stroke-width:\s*2\.5/,
+    '大括号样式描边宽度应与精细碰撞模型保持一致');
 assert.match(html, /<svg[^>]*id=["']tree-connector-layer["']/,
     '父子连接线应使用独立 SVG 图层并根据最终卡片坐标绘制');
 assert.match(html, /id=["']summary-label-layer["']/,
@@ -164,8 +166,14 @@ assert.doesNotMatch(mindMap, /labelXOffset|getMindMapSummaryHorizontalCollisionS
     '横向总结卡片中心必须始终与大括号中心对齐');
 assert.match(mindMap, /function getMindMapSummaryVerticalBraceCollisionRegions[\s\S]*?appendMindMapSummaryCollisionCurveSegments[\s\S]*?function getMindMapSummaryHorizontalBraceCollisionRegions/,
     '总结大括号应按实际路径分段建立精细避障区域');
-assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, candidate = null\)[\s\S]*?candidate\?\.editorRect[\s\S]*?rect\.top >= candidate\.braceY[\s\S]*?candidate\.collisionRegions \|\|/,
-    '横向总结应按“大括号路径分段 + 总结卡片矩形”查找障碍，避免使用空白包围区域误判');
+assert.match(mindMap, /function getMindMapSummaryVerticalObstacleConstraint[\s\S]*?isAbove[\s\S]*?isBelow[\s\S]*?getMindMapSummarySeparationAnchor[\s\S]*?deficit/,
+    '纵向总结应把可分离的上下兄弟分支转换为纵向位移约束');
+assert.match(mindMap, /region\.kind === 'brace' \? MINDMAP_SUMMARY_BRANCH_CLEARANCE : 0/,
+    '兄弟分支应只在大括号描边区域追加视觉留白，避免重复扩大总结卡片安全区');
+assert.match(mindMap, /if \(evaluation\.orientation === 'vertical'\)[\s\S]*?evaluation\.constraints[\s\S]*?nextConstraint = \{ anchor, direction, deficit \}/,
+    '通用布局迭代器应处理纵向总结生成的分支避障约束');
+assert.match(mindMap, /function getMindMapSummaryLayoutAnchors\(nodeIds, placement, bounds, candidate = null\)[\s\S]*?candidate\?\.editorRect[\s\S]*?rect\.top >= candidate\.braceY[\s\S]*?getMindMapSummaryIntersectingRegions\(rect, candidate\)/,
+    '横向总结应通过共享的精细碰撞区域查找障碍，避免使用空白包围区域误判');
 assert.match(mindMap, /function getMindMapSummaryHorizontalBraceY\(bounds, placement\)[\s\S]*?bounds\.top - MINDMAP_SUMMARY_BRACE_OFFSET[\s\S]*?bounds\.bottom \+ MINDMAP_SUMMARY_BRACE_OFFSET/,
     '横向总结大括号必须贴近成员卡片，不能移到整张导图之外');
 assert.match(mindMap, /function getMindMapSummaryCollisionFreeHorizontalCandidate[\s\S]*?getMindMapSummaryCollisionOffset[\s\S]*?labelOffset \+= collisionOffset[\s\S]*?occupiedSummaryRects/,
@@ -203,6 +211,10 @@ const pathSource = mindMap.slice(
     mindMap.indexOf('function getMindMapSummaryBracePath'),
     mindMap.indexOf('function getMindMapSummaryGeometry'),
 );
+const collisionSource = mindMap.slice(
+    mindMap.indexOf('function getMindMapSummaryExpandedCollisionRegion'),
+    mindMap.indexOf('function getMindMapSummaryBraceCollisionGap'),
+);
 const canvasRectSource = mindMap.slice(
     mindMap.indexOf('function getMindMapCanvasRect'),
     mindMap.indexOf('function expandMindMapRelationObstacle'),
@@ -217,6 +229,7 @@ const cleanupSource = mindMap.slice(
 );
 assert.ok(selectionSource.startsWith('function getMindMapNodeBranchSide'), '应能提取同侧选择校验函数');
 assert.ok(pathSource.startsWith('function getMindMapSummaryBracePath'), '应能提取大括号路径函数');
+assert.ok(collisionSource.startsWith('function getMindMapSummaryExpandedCollisionRegion'), '应能提取总结共享碰撞函数');
 assert.ok(canvasRectSource.startsWith('function getMindMapCanvasRect'), '应能提取画布坐标换算函数');
 assert.ok(layoutAnchorSource.startsWith('function getMindMapSummarySelectedBranchAnchor'), '应能提取总结布局占位锚点函数');
 assert.ok(cleanupSource.startsWith('function removeMindMapSummariesForNodes'), '应能提取总结成员清理函数');
@@ -330,15 +343,25 @@ assert.deepEqual(
 
 const pathContext = vm.createContext({});
 vm.runInContext(`
+    const state = { view: { scale: 1 } };
     const MINDMAP_SUMMARY_BRACE_OFFSET = 18;
     const MINDMAP_SUMMARY_LABEL_GAP = 22;
     const MINDMAP_SUMMARY_COLLISION_GAP = 14;
+    const MINDMAP_SUMMARY_BRANCH_CLEARANCE = 14;
+    const MINDMAP_SUMMARY_BRACE_STROKE_WIDTH = 2.5;
     const MINDMAP_SUMMARY_BRACE_LANE_GAP = 14;
     const MINDMAP_CARD_MIN_WIDTH = 100;
     const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
     const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
     ${pathSource}
+    ${layoutAnchorSource}
 `, pathContext);
+assert.equal(vm.runInContext('getMindMapSummaryBraceCollisionGap()', pathContext), 1.25,
+    '默认缩放下大括号碰撞包络应等于可见描边半宽');
+vm.runInContext('state.view.scale = 2', pathContext);
+assert.equal(vm.runInContext('getMindMapSummaryBraceCollisionGap()', pathContext), 0.625,
+    '大括号碰撞包络应按画布缩放换算为画布坐标');
+vm.runInContext('state.view.scale = 1', pathContext);
 pathContext.bounds = { left: 100, top: 50, right: 300, bottom: 250 };
 const rightPath = vm.runInContext("getMindMapSummaryBracePath(bounds, 'right')", pathContext);
 const leftPath = vm.runInContext("getMindMapSummaryBracePath(bounds, 'left')", pathContext);
@@ -400,8 +423,12 @@ const shiftedVerticalEvaluation = vm.runInContext(
 );
 assert.ok(shiftedVerticalEvaluation.cost > 0,
     '纵向大括号与普通卡片重叠时应计算向外移动距离');
-assert.ok(shiftedVerticalEvaluation.candidate.collisionRect.left >= verticalObstacleCard.rect.right,
-    '移动后的纵向大括号和总结卡片应整体越过障碍卡片');
+assert.ok(shiftedVerticalEvaluation.candidate.collisionRegions.every(region =>
+    verticalObstacleCard.rect.right <= region.left
+    || verticalObstacleCard.rect.left >= region.right
+    || verticalObstacleCard.rect.bottom <= region.top
+    || verticalObstacleCard.rect.top >= region.bottom
+), '移动后的纵向大括号和总结卡片真实碰撞区域应全部避开障碍卡片');
 const blankSpaceObstacleCard = {
     dataset: { nodeId: 'blank-space-obstacle' },
     getClientRects: () => [{}],
@@ -416,6 +443,121 @@ const blankSpaceVerticalEvaluation = vm.runInContext(
 );
 assert.equal(blankSpaceVerticalEvaluation.cost, 0,
     '只进入成员范围空白区域、未接触总结卡片或大括号路径的障碍不得触发纵向总结外移');
+const nearbyCard = {
+    dataset: { nodeId: 'nearby-sibling' },
+    getClientRects: () => [{}],
+    rect: { left: 100, top: 260, right: 450, bottom: 360 },
+};
+vm.runInContext('state.view.scale = 1.5', pathContext);
+pathContext.document = { querySelectorAll: selector => selector === '.node-card' ? [nearbyCard] : [] };
+const nearbyVerticalEvaluation = vm.runInContext(
+    "getMindMapSummaryVerticalEvaluation(bounds, 'right', verticalEditorSize, verticalNodeIds)",
+    pathContext,
+);
+nearbyCard.rect.right = 700;
+const widenedNearbyVerticalEvaluation = vm.runInContext(
+    "getMindMapSummaryVerticalEvaluation(bounds, 'right', verticalEditorSize, verticalNodeIds)",
+    pathContext,
+);
+assert.equal(nearbyVerticalEvaluation.cost, 0,
+    '与大括号可见描边仍有间隙的兄弟节点不应触发避障');
+assert.equal(widenedNearbyVerticalEvaluation.cost, 0,
+    '兄弟节点变宽后仍不应触发避障');
+assert.equal(widenedNearbyVerticalEvaluation.candidate.braceX, nearbyVerticalEvaluation.candidate.braceX,
+    '大括号位置不应受未接触兄弟节点的宽度影响');
+const verticalMembers = [
+    {
+        dataset: { nodeId: 'vertical-member-a' },
+        getClientRects: () => [{}],
+        rect: { left: 100, top: 50, right: 300, bottom: 140 },
+    },
+    {
+        dataset: { nodeId: 'vertical-member-b' },
+        getClientRects: () => [{}],
+        rect: { left: 100, top: 160, right: 300, bottom: 250 },
+    },
+];
+const verticalMemberSet = new Set(verticalMembers);
+const verticalSelectedBranch = { contains: element => verticalMemberSet.has(element) };
+const verticalSiblingUnit = {
+    contains: () => false,
+    parentElement: { closest: selector => selector === '.child-unit' ? verticalSelectedBranch : null },
+};
+const verticalSiblingCard = {
+    dataset: { nodeId: 'vertical-sibling' },
+    getClientRects: () => [{}],
+    closest: selector => selector === '.child-unit' ? verticalSiblingUnit : null,
+    rect: { left: 100, top: 260, right: 700, bottom: 340 },
+};
+pathContext.document = {
+    getElementById(id) {
+        return verticalMembers.find(card => `card-${card.dataset.nodeId}` === id) || null;
+    },
+    querySelectorAll(selector) {
+        return selector === '.node-card' ? [...verticalMembers, verticalSiblingCard] : [];
+    },
+};
+pathContext.verticalMemberIds = verticalMembers.map(card => card.dataset.nodeId);
+pathContext.tallVerticalEditorSize = { width: 140, height: 400 };
+pathContext.verticalSiblingUnit = verticalSiblingUnit;
+const braceClearanceEvaluation = vm.runInContext(
+    "getMindMapSummaryVerticalEvaluation(bounds, 'right', verticalEditorSize, verticalMemberIds)",
+    pathContext,
+);
+assert.equal(braceClearanceEvaluation.cost, 0,
+    '兄弟分支进入大括号视觉留白时不应横向推远总结');
+assert.equal(braceClearanceEvaluation.constraints.length, 1,
+    '靠近大括号端部的兄弟分支应生成纵向留白约束');
+const lowerBraceEdge = Math.max(...braceClearanceEvaluation.candidate.collisionRegions
+    .filter(region => region.kind === 'brace')
+    .map(region => region.bottom));
+const branchClearance = vm.runInContext('MINDMAP_SUMMARY_BRANCH_CLEARANCE', pathContext);
+const braceClearanceShift = Math.ceil(braceClearanceEvaluation.constraints[0].deficit);
+verticalSiblingCard.rect.top += braceClearanceShift;
+verticalSiblingCard.rect.bottom += braceClearanceShift;
+assert.ok(verticalSiblingCard.rect.top - lowerBraceEdge >= branchClearance,
+    '兄弟分支避让后应与大括号可见描边保留统一视觉间距');
+const clearedBraceClearanceEvaluation = vm.runInContext(
+    "getMindMapSummaryVerticalEvaluation(bounds, 'right', verticalEditorSize, verticalMemberIds)",
+    pathContext,
+);
+assert.equal(clearedBraceClearanceEvaluation.constraints.length, 0,
+    '补足大括号视觉间距后布局应立即收敛');
+verticalSiblingCard.rect.top = 260;
+verticalSiblingCard.rect.bottom = 340;
+const tallVerticalEvaluation = vm.runInContext(
+    "getMindMapSummaryVerticalEvaluation(bounds, 'right', tallVerticalEditorSize, verticalMemberIds)",
+    pathContext,
+);
+assert.equal(tallVerticalEvaluation.cost, 0,
+    '纵向总结拉高后应优先保持贴近成员，不能被下方兄弟节点横向推远');
+assert.equal(tallVerticalEvaluation.constraints.length, 1,
+    '纵向总结与下方兄弟节点相交时应生成一个分支位移约束');
+assert.equal(tallVerticalEvaluation.constraints[0].anchor, verticalSiblingUnit,
+    '纵向总结应移动可分离的完整兄弟分支');
+assert.equal(tallVerticalEvaluation.constraints[0].direction, 'before',
+    '下方兄弟分支应整体向下避让纵向总结');
+const siblingVerticalDeficit = tallVerticalEvaluation.constraints[0].deficit;
+verticalSiblingCard.rect.right = 1000;
+const widenedTallVerticalEvaluation = vm.runInContext(
+    "getMindMapSummaryVerticalEvaluation(bounds, 'right', tallVerticalEditorSize, verticalMemberIds)",
+    pathContext,
+);
+assert.equal(widenedTallVerticalEvaluation.cost, 0,
+    '兄弟节点变宽后仍应移动兄弟分支，而不是横向推远总结');
+assert.equal(widenedTallVerticalEvaluation.constraints[0].deficit, siblingVerticalDeficit,
+    '兄弟节点宽度不应改变所需的纵向避让距离');
+const appliedSiblingShift = Math.ceil(siblingVerticalDeficit);
+verticalSiblingCard.rect.top += appliedSiblingShift;
+verticalSiblingCard.rect.bottom += appliedSiblingShift;
+const clearedTallVerticalEvaluation = vm.runInContext(
+    "getMindMapSummaryVerticalEvaluation(bounds, 'right', tallVerticalEditorSize, verticalMemberIds)",
+    pathContext,
+);
+assert.equal(clearedTallVerticalEvaluation.constraints.length, 0,
+    '兄弟分支补足纵向缺口后应收敛，不得继续累积位移');
+assert.equal(clearedTallVerticalEvaluation.candidate.braceX, 318,
+    '兄弟分支避让完成后大括号应保持自然位置');
 pathContext.editorSize = { width: 140, height: 80 };
 const localBottomCandidate = vm.runInContext(
     "getMindMapSummaryHorizontalCandidate(bounds, 'bottom', editorSize)",
@@ -593,7 +735,7 @@ const layoutAnchorContext = vm.createContext({
     },
     getMindMapCanvasRect: element => element.rect,
 });
-vm.runInContext(layoutAnchorSource, layoutAnchorContext);
+vm.runInContext(`${collisionSource}\n${layoutAnchorSource}`, layoutAnchorContext);
 layoutAnchorContext.selectionBounds = { top: 0, bottom: 100 };
 layoutAnchorContext.selectedBranchUnit = selectedBranchUnit;
 layoutAnchorContext.obstacleUnit = obstacleUnit;

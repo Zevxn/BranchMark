@@ -71,14 +71,14 @@ vm.runInContext(`
 `, context);
 
 const singleLineNode = context.createMindMapNodeFromPlainText('这是一段超过二十个字符但不应该再被截断的单行文本');
-assert.equal(singleLineNode.topic, '这是一段超过二十个字符但不应该再被截断的单行文本',
-    '单行文本应完整写入标题');
-assert.equal(singleLineNode.content, '', '单行文本不应重复写入正文');
+assert.equal(singleLineNode.topic, '', '非 Markdown 标题文本不应写入卡片标题');
+assert.equal(singleLineNode.content, '这是一段超过二十个字符但不应该再被截断的单行文本',
+    '非 Markdown 标题文本应完整写入正文');
 
 const multiLineNode = context.createMindMapNodeFromPlainText('第一行标题\r\n第二行正文\r\n第三行正文');
-assert.equal(multiLineNode.topic, '第一行标题', '多行文本第一行应作为标题');
-assert.equal(multiLineNode.content, '第二行正文\n第三行正文',
-    '多行文本剩余内容应作为正文并统一换行符');
+assert.equal(multiLineNode.topic, '', '普通多行文本的首行不应作为卡片标题');
+assert.equal(multiLineNode.content, '第一行标题\n第二行正文\n第三行正文',
+    '普通多行文本应将全文作为正文并统一换行符');
 
 const markdownHeadingNode = context.createMindMapNodeFromPlainText('### **项目计划**\r\n这是正文');
 assert.equal(markdownHeadingNode.topic, '项目计划',
@@ -87,8 +87,10 @@ assert.equal(markdownHeadingNode.content, '这是正文',
     'Markdown 标题后的内容应继续作为正文');
 
 const compactHashNode = context.createMindMapNodeFromPlainText('#不是标准标题\n正文');
-assert.equal(compactHashNode.topic, '#不是标准标题',
+assert.equal(compactHashNode.topic, '',
     '井号后没有空白时不应识别为 Markdown 标题');
+assert.equal(compactHashNode.content, '#不是标准标题\n正文',
+    '非标准 Markdown 标题应将全文作为正文');
 assert.equal(context.createMindMapNodeFromPlainText('   '), null, '纯空白文本不应创建空卡片');
 
 const pureNodes = context.getMindMapClipboardNodes(pureData);
@@ -124,8 +126,9 @@ root.children[0].children = [];
 context.state.selectedIds = new Set(['target']);
 context.navigator.clipboard.readText = async () => '单行粘贴文本';
 await context.pasteNodesToSelection();
-assert.equal(root.children[0].children[0].topic, '单行粘贴文本');
-assert.equal(root.children[0].children[0].content, '',
-    '画布粘贴单行文本创建的卡片不应同时生成重复正文');
+assert.equal(root.children[0].children[0].topic, '',
+    '画布粘贴非 Markdown 标题文本时不应创建卡片标题');
+assert.equal(root.children[0].children[0].content, '单行粘贴文本',
+    '画布粘贴非 Markdown 标题文本时应将全文写入正文');
 
 console.log('mind map JSON paste tests passed');

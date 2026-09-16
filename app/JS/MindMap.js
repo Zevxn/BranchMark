@@ -1,3 +1,5 @@
+// SECTION 基础配置与界面设置
+
 const generateNodeId = () => Math.random().toString(36).substr(2, 9);
 const generateFileId = () => 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 const $ = (sel) => document.querySelector(sel);
@@ -169,6 +171,10 @@ async function initializeMindMapTheme() {
     });
 }
 
+// !SECTION 基础配置与界面设置
+
+// SECTION 数据导入与应用状态
+
 function showMindMapImportFeedback(message) {
     if (typeof showTopToast === 'function') showTopToast(message);
     else window.alert(message);
@@ -293,7 +299,7 @@ function initializeMindMapImport() {
 }
 
 const defaultTreeData = {
-    id: 'root', topic: 'MindMap', content: '## 主题',
+    id: 'root', topic: '主题', content: '',
     widthMode: 'auto', heightMode: 'auto', children: [], relations: [], summaries: [],
     foldedLeft: false, foldedRight: false
 };
@@ -484,8 +490,11 @@ chrome.storage.onChanged.addListener(async(changes, namespace) => {
         await updateState(MindMapData,id,fileName);
     }
 });
+
+// !SECTION 数据导入与应用状态
+
 /*===============================================================================================
-// #region 补丁函数
+// SECTION 数据持久化与多页面管理
  ==============================================================================================*/
 let action=null;
 let saveToCloudTimer = null;
@@ -1081,7 +1090,11 @@ function initializeMindMapTabs() {
         }
     });
 }
-// ===============================================================================================
+
+// !SECTION 数据持久化与多页面管理
+
+// SECTION 应用初始化
+
 document.addEventListener('DOMContentLoaded', () => {
     (async () => {
         const isMapInitialized = sessionStorage.getItem('isMapInitialized');
@@ -1122,7 +1135,7 @@ document.addEventListener('DOMContentLoaded', () => {
     })();
 
 /*===============================================================================================
-// #region 事件绑定
+// SECTION 事件绑定与全局快捷键
  ==============================================================================================*/
     initializeMapClickEvents(); // 初始化点击事件
     initializeMapMouseEvents(); // 初始化鼠标事件
@@ -1189,18 +1202,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const isSimple = card && card.classList.contains('simple');
 
             if (isSimple) {
-                // ==========================================
                 // 情况 A：便利贴模式 (Simple Mode)
-                // ==========================================
                 // 允许默认行为（即允许插入换行符），不要调用 preventDefault()
                 
                 // 关键：必须阻止冒泡！
                 // 否则这个 Enter 会冒泡到 window，触发全局的 "创建兄弟节点" 快捷键
                 e.stopPropagation(); 
             } else {
-                // ==========================================
                 // 情况 B：标准卡片模式 (Standard Mode)
-                // ==========================================
                 // 阻止默认换行，改为“完成编辑”
                 e.preventDefault(); 
                 e.stopPropagation(); 
@@ -1365,10 +1374,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // recordHistory(); renderTree(); renderDock();
+
+    // !SECTION 事件绑定与全局快捷键
+
 });
-// =============================================================================
-// #region 工具栏事件
-// =============================================================================
+
+// !SECTION 应用初始化
+
+// SECTION 节点工具栏与文件操作
 
 function focusMindMapNodeTopic(nodeId) {
     requestAnimationFrame(() => {
@@ -1561,9 +1574,9 @@ function initializeMapToolbar() {
     initializeMindMapTheme();
 }
 
-// =============================================================================
-// #region 右键菜单
-// =============================================================================
+// !SECTION 节点工具栏与文件操作
+
+// SECTION 画布右键菜单
 function getMindMapOverlayViewportBottom(viewportHeight, tabTop, margin = 0) {
     const viewportBottom = Math.max(margin, viewportHeight - margin);
     if (!Number.isFinite(tabTop) || tabTop <= 0 || tabTop >= viewportHeight) return viewportBottom;
@@ -1933,9 +1946,9 @@ function initializeMapContextMenu() {
     });
 }
 
-// =============================================================================
-// #region 编辑器右键菜单
-// =============================================================================
+// !SECTION 画布右键菜单
+
+// SECTION Markdown 编辑器右键菜单
 function initializeEditorContextMenu() {
     const menu = document.getElementById('editorContextMenu');
     const textarea = document.getElementById('editorTextarea');
@@ -2125,9 +2138,10 @@ function initializeEditorContextMenu() {
         }
     });
 }
-// =============================================================================
-// #region 鼠标点击事件
-// =============================================================================
+
+// !SECTION Markdown 编辑器右键菜单
+
+// SECTION 节点选择与键盘导航
 function selectAllMindMapNodes() {
     clearSelectedMindMapRelation();
     clearSelectedMindMapSummary();
@@ -2359,10 +2373,9 @@ function initializeMapClickEvents() {
 
 }
 
+// !SECTION 节点选择与键盘导航
 
-// =============================================================================
-// #region 鼠标事件监听初始化
-// =============================================================================
+// SECTION 内容预览与鼠标交互
 function clampMindMapContentPreview(value, min, max) {
     return Math.min(Math.max(value, min), Math.max(min, max));
 }
@@ -2895,7 +2908,7 @@ function initializeMapMouseEvents() {
         
     }, {passive:false});
 
-    // #region 鼠标按下事件
+    // SECTION 鼠标按下事件
     document.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; 
         // 预览气泡位于画布外；在其中选择、复制文字时不能触发画布平移或卡片操作。
@@ -3020,7 +3033,8 @@ function initializeMapMouseEvents() {
         }
     });
 
-    // #region 鼠标移动事件
+    // !SECTION 鼠标按下事件
+    // SECTION 鼠标移动事件
     document.addEventListener('mousemove', (e) => {
         if(state.mode==='IDLE') return;
         if(e.buttons===0) { onMouseUp(e); return; }
@@ -3072,9 +3086,7 @@ function initializeMapMouseEvents() {
                         applyMindMapEntitySize(targetNode, 'node', newWidth, newHeight, n.isSimple);
                     }
                 });
-                // =========================================================
                 // ▼▼▼ 【核心新增】视图补偿逻辑：让光标像磁铁一样吸住把手 ▼▼▼
-                // =========================================================
                 const handle = state.resize.handleEl;
                 if (handle) {
                     // 1. 获取把手在当前屏幕上的新位置 (此时尺寸已变，Flex布局可能导致它跑偏)
@@ -3096,9 +3108,7 @@ function initializeMapMouseEvents() {
                         updateTransform(); // 立即应用新的画布位置
                     }
                 }
-                // =========================================================
                 // ▲▲▲ 新增结束 ▲▲▲
-                // =========================================================
             }
             // 总结卡片已经直接更新当前 DOM；拖拽期间再次执行布局规划会改写它的
             // transform/位置，让手柄脱离光标。节点缩放仍需实时刷新关联的总结括号。
@@ -3171,12 +3181,15 @@ function initializeMapMouseEvents() {
             }
         }
     });
+
+    // !SECTION 鼠标移动事件
+
     document.addEventListener('mouseup', onMouseUp);
 }
 
-// ==========================================================================
-// #region md编辑器
-// ==========================================================================
+// !SECTION 内容预览与鼠标交互
+
+// SECTION Markdown 编辑器
 function initializeEditorToolbar() {
     $('#editorModal').onmousedown = (e) => { if(e.target===$('#editorModal')) $('#btn-close-modal').click(); };
     $('#editorTextarea').oninput = (e) => { $('#previewContent').innerHTML=renderMarkdown(e.target.value); processRichContent($('#previewContent')); };
@@ -3385,10 +3398,7 @@ function initializeEditorToolbar() {
 
 
 
-// ===================================================================================================================================================
-// #region 全局函数定义
-// ===================================================================================================================================================
-// #region md源码编辑
+// Markdown 源码格式化
 
 function insertTextFormat(prefix, suffix, restoreFocus = true) {
     const textarea = $('#editorTextarea');
@@ -3455,9 +3465,9 @@ function insertTextFormat(prefix, suffix, restoreFocus = true) {
     }, 100);
 };
 
-// =============================================================================
-// #region 卡片关联
-// =============================================================================
+// !SECTION Markdown 编辑器
+
+// SECTION 卡片关联
 const MINDMAP_RELATION_SVG_NS = 'http://www.w3.org/2000/svg';
 const MINDMAP_RELATION_DIRECTIONS = new Set(['none', 'forward', 'reverse']);
 const MINDMAP_RELATION_LINE_STYLES = new Set(['dashed', 'solid']);
@@ -5563,17 +5573,19 @@ function appendMindMapRelationsToCanvas(canvasNodes, canvasEdges) {
         canvasEdges.push(edge);
     });
 }
-// #endregion
 
-// =============================================================================
-// #region 多卡片总结
-// =============================================================================
+// !SECTION 卡片关联
+
+// SECTION 多卡片总结
 const MINDMAP_SUMMARY_SVG_NS = 'http://www.w3.org/2000/svg';
 const MINDMAP_SUMMARY_MIN_NODES = 2;
 const MINDMAP_SUMMARY_TEXT_LIMIT = 2000;
 const MINDMAP_SUMMARY_BRACE_OFFSET = 18;
 const MINDMAP_SUMMARY_LABEL_GAP = 22;
 const MINDMAP_SUMMARY_COLLISION_GAP = 14;
+const MINDMAP_SUMMARY_BRANCH_CLEARANCE = 14;
+// 与 MindMap.html 中 .summary-brace 的 stroke-width 保持一致。
+const MINDMAP_SUMMARY_BRACE_STROKE_WIDTH = 2.5;
 const MINDMAP_SUMMARY_BRACE_LANE_GAP = 14;
 const MINDMAP_SUMMARY_ESTIMATED_WIDTH = 180;
 const MINDMAP_SUMMARY_ESTIMATED_HEIGHT = 120;
@@ -5746,6 +5758,7 @@ function getMindMapSummaryHorizontalBracePath(bounds, placement, braceY = null) 
 
 function getMindMapSummaryExpandedCollisionRegion(rect) {
     return {
+        kind: 'editor',
         left: rect.left - MINDMAP_SUMMARY_COLLISION_GAP,
         right: rect.right + MINDMAP_SUMMARY_COLLISION_GAP,
         top: rect.top - MINDMAP_SUMMARY_COLLISION_GAP,
@@ -5753,7 +5766,30 @@ function getMindMapSummaryExpandedCollisionRegion(rect) {
     };
 }
 
+function getMindMapSummaryCandidateCollisionRegions(candidate) {
+    if (Array.isArray(candidate?.collisionRegions)) return candidate.collisionRegions;
+    if (candidate?.collisionRect) return [candidate.collisionRect];
+    if (candidate?.editorRect) return [getMindMapSummaryExpandedCollisionRegion(candidate.editorRect)];
+    return [];
+}
+
+function getMindMapSummaryIntersectingRegions(rect, candidate) {
+    if (!rect) return [];
+    return getMindMapSummaryCandidateCollisionRegions(candidate).filter(region =>
+        rect.left < region.right
+        && rect.right > region.left
+        && rect.top < region.bottom
+        && rect.bottom > region.top
+    );
+}
+
+function getMindMapSummaryBraceCollisionGap() {
+    const canvasScale = Math.max(0.05, Number(state.view?.scale) || 1);
+    return MINDMAP_SUMMARY_BRACE_STROKE_WIDTH / 2 / canvasScale;
+}
+
 function appendMindMapSummaryCollisionCurveSegments(segments, from, control1, control2, to, steps = 8) {
+    const collisionGap = getMindMapSummaryBraceCollisionGap();
     const pointAt = t => {
         const inverse = 1 - t;
         return {
@@ -5771,21 +5807,24 @@ function appendMindMapSummaryCollisionCurveSegments(segments, from, control1, co
     for (let index = 1; index <= steps; index++) {
         const next = pointAt(index / steps);
         segments.push({
-            left: Math.min(previous.x, next.x) - MINDMAP_SUMMARY_COLLISION_GAP,
-            right: Math.max(previous.x, next.x) + MINDMAP_SUMMARY_COLLISION_GAP,
-            top: Math.min(previous.y, next.y) - MINDMAP_SUMMARY_COLLISION_GAP,
-            bottom: Math.max(previous.y, next.y) + MINDMAP_SUMMARY_COLLISION_GAP
+            kind: 'brace',
+            left: Math.min(previous.x, next.x) - collisionGap,
+            right: Math.max(previous.x, next.x) + collisionGap,
+            top: Math.min(previous.y, next.y) - collisionGap,
+            bottom: Math.max(previous.y, next.y) + collisionGap
         });
         previous = next;
     }
 }
 
 function appendMindMapSummaryCollisionLineSegment(segments, from, to) {
+    const collisionGap = getMindMapSummaryBraceCollisionGap();
     segments.push({
-        left: Math.min(from.x, to.x) - MINDMAP_SUMMARY_COLLISION_GAP,
-        right: Math.max(from.x, to.x) + MINDMAP_SUMMARY_COLLISION_GAP,
-        top: Math.min(from.y, to.y) - MINDMAP_SUMMARY_COLLISION_GAP,
-        bottom: Math.max(from.y, to.y) + MINDMAP_SUMMARY_COLLISION_GAP
+        kind: 'brace',
+        left: Math.min(from.x, to.x) - collisionGap,
+        right: Math.max(from.x, to.x) + collisionGap,
+        top: Math.min(from.y, to.y) - collisionGap,
+        bottom: Math.max(from.y, to.y) + collisionGap
     });
 }
 
@@ -6052,35 +6091,55 @@ function getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffse
     return { braceX, labelX, labelY, editorRect, collisionRect, collisionRegions, braceOffset };
 }
 
-function getMindMapSummaryVisibleObstacleRects(nodeIds) {
+function getMindMapSummaryVisibleObstacles(nodeIds) {
     const selectedIds = new Set(nodeIds || []);
     return Array.from(document.querySelectorAll('.node-card'))
         .filter(card => !selectedIds.has(card.dataset.nodeId) && card.getClientRects().length > 0)
-        .map(card => getMindMapCanvasRect(card));
+        .map(card => ({ card, rect: getMindMapCanvasRect(card) }));
 }
 
 function getMindMapSummaryVerticalEvaluation(bounds, side, editorSize, nodeIds, occupiedRects = []) {
-    const obstacles = [
-        ...getMindMapSummaryVisibleObstacleRects(nodeIds),
-        ...(occupiedRects || [])
-    ];
+    const selectedCards = Array.from(new Set(nodeIds || []))
+        .map(nodeId => document.getElementById(`card-${nodeId}`))
+        .filter(Boolean);
+    const visibleObstacles = getMindMapSummaryVisibleObstacles(nodeIds);
+    const occupiedObstacles = (occupiedRects || []).map(rect => ({ card: null, rect }));
     let braceOffset = 0;
     let candidate = getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffset);
-    for (let index = 0; index <= obstacles.length; index++) {
+    let constraints = [];
+    for (let index = 0; index <= visibleObstacles.length + occupiedObstacles.length; index++) {
         let outwardShift = 0;
-        obstacles.forEach(rect => {
-            (candidate.collisionRegions || [candidate.collisionRect]).forEach(region => {
-                const intersects = rect.left < region.right
-                    && rect.right > region.left
-                    && rect.top < region.bottom
-                    && rect.bottom > region.top;
-                if (!intersects) return;
+        const movableConstraints = [];
+        visibleObstacles.forEach(obstacle => {
+            const constraint = getMindMapSummaryVerticalObstacleConstraint(
+                obstacle,
+                selectedCards,
+                bounds,
+                candidate
+            );
+            if (constraint) {
+                // 可分离的树节点交给外层布局迭代器纵向移动；这里不再把它
+                // 当作横向障碍，否则节点越宽，总结就会被推得越远。
+                movableConstraints.push(constraint);
+                return;
+            }
+            getMindMapSummaryIntersectingRegions(obstacle.rect, candidate).forEach(region => {
                 outwardShift = Math.max(outwardShift, side === 'left'
-                    ? region.right - rect.left
-                    : rect.right - region.left);
+                    ? region.right - obstacle.rect.left
+                    : obstacle.rect.right - region.left);
             });
         });
-        if (outwardShift <= 0) break;
+        occupiedObstacles.forEach(obstacle => {
+            getMindMapSummaryIntersectingRegions(obstacle.rect, candidate).forEach(region => {
+                outwardShift = Math.max(outwardShift, side === 'left'
+                    ? region.right - obstacle.rect.left
+                    : obstacle.rect.right - region.left);
+            });
+        });
+        if (outwardShift <= 0) {
+            constraints = mergeMindMapSummaryVerticalConstraints(movableConstraints);
+            break;
+        }
         braceOffset += outwardShift;
         candidate = getMindMapSummaryVerticalCandidate(bounds, side, editorSize, braceOffset);
     }
@@ -6089,6 +6148,7 @@ function getMindMapSummaryVerticalEvaluation(bounds, side, editorSize, nodeIds, 
         placement: side,
         region: 'side',
         candidate,
+        constraints,
         cost: braceOffset
     };
 }
@@ -6484,6 +6544,59 @@ function getMindMapSummarySeparationAnchor(obstacleCard, selectedCards) {
     return outermostSeparateUnit;
 }
 
+function getMindMapSummaryVerticalObstacleConstraint(obstacle, selectedCards, bounds, candidate) {
+    if (!obstacle?.rect || !obstacle?.card || selectedCards.length === 0) return null;
+
+    // 只移动成员范围之外的完整分支，避免改变夹在总结成员之间的树顺序。
+    // 范围内节点、祖先节点和其他总结卡片继续由横向外移兜底处理。
+    const isAbove = obstacle.rect.bottom <= bounds.top;
+    const isBelow = obstacle.rect.top >= bounds.bottom;
+    if (!isAbove && !isBelow) return null;
+
+    const anchor = getMindMapSummarySeparationAnchor(obstacle.card, selectedCards);
+    if (!anchor) return null;
+    const direction = isBelow ? 'before' : 'after';
+    const nearbyRegions = getMindMapSummaryCandidateCollisionRegions(candidate).filter(region => {
+        const clearance = region.kind === 'brace' ? MINDMAP_SUMMARY_BRANCH_CLEARANCE : 0;
+        const overlapsHorizontally = obstacle.rect.left < region.right
+            && obstacle.rect.right > region.left;
+        if (!overlapsHorizontally) return false;
+        return isBelow
+            ? obstacle.rect.top < region.bottom + clearance && obstacle.rect.bottom > region.top
+            : obstacle.rect.bottom > region.top - clearance && obstacle.rect.top < region.bottom;
+    });
+    if (nearbyRegions.length === 0) return null;
+    const deficit = Math.max(0, ...nearbyRegions.map(region => {
+        const clearance = region.kind === 'brace' ? MINDMAP_SUMMARY_BRANCH_CLEARANCE : 0;
+        return isBelow
+            ? region.bottom + clearance - obstacle.rect.top
+            : obstacle.rect.bottom - region.top + clearance;
+    }));
+    if (deficit <= 0) return null;
+    return {
+        anchor,
+        obstacle: obstacle.card,
+        direction,
+        deficit
+    };
+}
+
+function mergeMindMapSummaryVerticalConstraints(constraints) {
+    const constraintsByAnchor = new Map();
+    (constraints || []).forEach(constraint => {
+        if (!constraint?.anchor || constraint.deficit <= 0) return;
+        const existing = constraintsByAnchor.get(constraint.anchor);
+        if (!existing || constraint.deficit > existing.deficit) {
+            constraintsByAnchor.set(constraint.anchor, constraint);
+        }
+    });
+    const merged = Array.from(constraintsByAnchor.values());
+    return merged.filter(constraint => !merged.some(other =>
+        other !== constraint
+        && other.anchor.contains?.(constraint.anchor)
+    ));
+}
+
 function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = null) {
     const selectedIds = new Set(nodeIds || []);
     const selectedCards = Array.from(selectedIds)
@@ -6497,19 +6610,7 @@ function getMindMapSummaryLayoutAnchors(nodeIds, placement, bounds, candidate = 
         const rect = getMindMapCanvasRect(card);
         if (placement === 'top' && rect.top >= candidate.braceY) return;
         if (placement === 'bottom' && rect.bottom <= candidate.braceY) return;
-        const collisionRegions = candidate.collisionRegions || [candidate.collisionRect || {
-            left: candidate.editorRect.left - MINDMAP_SUMMARY_COLLISION_GAP,
-            right: candidate.editorRect.right + MINDMAP_SUMMARY_COLLISION_GAP,
-            top: candidate.editorRect.top - MINDMAP_SUMMARY_COLLISION_GAP,
-            bottom: candidate.editorRect.bottom + MINDMAP_SUMMARY_COLLISION_GAP
-        }];
-        const intersects = collisionRegions.some(region =>
-            rect.left < region.right
-            && rect.right > region.left
-            && rect.top < region.bottom
-            && rect.bottom > region.top
-        );
-        if (!intersects) return;
+        if (getMindMapSummaryIntersectingRegions(rect, candidate).length === 0) return;
 
         let anchor = getMindMapSummarySeparationAnchor(card, selectedCards);
         let direction = placement === 'top' ? 'after' : 'before';
@@ -6721,7 +6822,15 @@ function prepareMindMapSummaryLayout(summaries) {
         evaluations = evaluateLayouts();
         let nextConstraint = null;
         evaluations.forEach(evaluation => {
-            if (evaluation.orientation !== 'horizontal') return;
+            if (evaluation.orientation === 'vertical') {
+                (evaluation.constraints || []).forEach(({ anchor, direction, deficit }) => {
+                    if (!anchor || deficit <= 0) return;
+                    if (!nextConstraint || deficit > nextConstraint.deficit) {
+                        nextConstraint = { anchor, direction, deficit };
+                    }
+                });
+                return;
+            }
             evaluation.anchors.forEach(({ anchor, direction, distance }) => {
                 if (!anchor) return;
                 const deficit = Math.max(0, evaluation.candidate.requiredSpace - distance);
@@ -6906,11 +7015,10 @@ function initializeMindMapSummaries() {
     window.addEventListener('resize', scheduleRenderMindMapSummaries);
     scheduleRenderMindMapSummaries();
 }
-// #endregion
 
-// =============================================================================
-// #region 搜索定位
-// =============================================================================
+// !SECTION 多卡片总结
+
+// SECTION 搜索定位
 function normalizeMapSearchText(value) {
     const text = String(value ?? '');
     const normalized = typeof text.normalize === 'function' ? text.normalize('NFKC') : text;
@@ -7342,7 +7450,10 @@ function initializeMapSearch() {
     });
     panel.addEventListener('mousedown', event => event.stopPropagation());
 }
-// #endregion
+
+// !SECTION 搜索定位
+
+// SECTION 选择样式与拖拽提交
 
 function applyColorToMindMapSelection(color) {
     let changed = false;
@@ -7560,10 +7671,9 @@ function commitMindMapInlineEditor() {
     }
 }
 
+// !SECTION 选择样式与拖拽提交
 
-// ==========================================
-// #region 存储相关
-// ==========================================
+// SECTION 存储与历史记录
 function saveGlobalScrolls() {
     state.scrollMap = new Map(Object.entries(sanitizeMindMapScrollMap(state.scrollMap, state.data)));
     document.querySelectorAll('.card-body').forEach(el => {
@@ -7652,6 +7762,10 @@ function restoreHistory() {
 };
 function undo() { if(state.historyIndex > 0) { state.historyIndex--; restoreHistory(); } };
 function redo() { if(state.historyIndex < state.history.length - 1) { state.historyIndex++; restoreHistory(); } };
+
+// !SECTION 存储与历史记录
+
+// SECTION 节点渲染与视图更新
 
 
 
@@ -8459,9 +8573,7 @@ function centerTarget(el) {
 }
 
 
-// ==========================================
-// #region 新增：无损样式更新 (防止抖动)
-// ==========================================
+// 无损样式更新（防止抖动）
 function updateTreeStyle(node = state.data, parentIsRoot = true, inheritedColor = null) {
     const isRoot = node.id === state.data.id;
     
@@ -8538,10 +8650,9 @@ function updateTreeStyle(node = state.data, parentIsRoot = true, inheritedColor 
     }
 }
 
+// !SECTION 节点渲染与视图更新
 
-// ==========================================
-// #region 剪贴板功能 (复制/粘贴)
-// ==========================================
+// SECTION 节点剪贴板操作
 const CUSTOM_MIME_TYPE = 'web text/x-mindmap-data';
 const CLIPBOARD_SIGN = "MindMap_Node_Data_v1";
 
@@ -8740,15 +8851,16 @@ function parseMindMapPlainText(value) {
     const firstLine = firstLineBreak < 0 ? text : text.slice(0, firstLineBreak);
     const content = firstLineBreak < 0 ? '' : text.slice(firstLineBreak + 1);
     const headingMatch = firstLine.match(/^#{1,6}[ \t]+(.+)$/);
+    const isMarkdownHeading = Boolean(headingMatch);
 
     return {
         text,
         firstLine,
-        topic: headingMatch
+        topic: isMarkdownHeading
             ? headingMatch[1].replace(/\*\*/g, '').trim()
-            : firstLine.trim(),
-        content,
-        isMarkdownHeading: Boolean(headingMatch)
+            : '',
+        content: isMarkdownHeading ? content : text,
+        isMarkdownHeading
     };
 }
 
@@ -8811,13 +8923,12 @@ async function pasteNodesToSelection() {
     }
 }
 
+// !SECTION 节点剪贴板操作
 
 
 
 
-// ==========================================
-// #region 图片上传功能 (ImgBB)
-// ==========================================
+// SECTION 编辑器图片上传
 
 function initializeImageUpload() {
     const textarea = document.getElementById('editorTextarea');
@@ -8985,13 +9096,12 @@ function replaceTextInEditor(textarea, originalText, newText) {
     }
 }
 
+// !SECTION 编辑器图片上传
 
 
 
 
-// =============================================================================
-// #region 原生文字与 Markdown 文件拖拽支持
-// =============================================================================
+// SECTION Markdown 拖拽导入
 function isMarkdownFile(file) {
     return Boolean(file && typeof file.name === 'string' && /\.md$/i.test(file.name));
 }
@@ -9307,9 +9417,9 @@ function extractMarkdownHeader(text) {
         : ["", parsed.text];
 }
 
-// ==========================================
-// #region Canvas 导出
-// ==========================================
+// !SECTION Markdown 拖拽导入
+
+// SECTION Canvas 导出
     // 辅助：RGB 转 Hex (Obsidian Canvas 需要 Hex 颜色)
 /**
  * @param {string} rgb - RGB 颜色字符串，如 "rgb(255, 0, 0)"
@@ -9373,6 +9483,8 @@ async function writeMindMapCanvasExport(canvasData, fileName) {
     showTopToast(`✅ 已下载文件 (API 不可用或被拒绝)`);
     return false;
 }
+
+// SECTION 横向 Canvas 导出
 
 async function exportToCanvas() {
     const nodes = [];
@@ -9490,10 +9602,9 @@ async function exportToCanvas() {
     await writeMindMapCanvasExport(canvasData, fileName);
 }
 
+// !SECTION 横向 Canvas 导出
 
-// ==========================================
-// #region 竖向 Canvas
-// ==========================================
+// SECTION 竖向 Canvas 导出
 
 
 async function exportToVerticalCanvas() {
@@ -9652,3 +9763,7 @@ async function exportToVerticalCanvas() {
     const fileName=`${getMindMapExportBaseName()}_Vertical.canvas`;
     await writeMindMapCanvasExport(canvasData, fileName);
 }
+
+// !SECTION 竖向 Canvas 导出
+
+// !SECTION Canvas 导出
