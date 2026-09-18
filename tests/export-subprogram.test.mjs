@@ -1,10 +1,11 @@
+import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
 const [helpers, mindMap] = await Promise.all([
     readFile('app/JS/AI-Contents.js', 'utf8'),
-    readFile('app/JS/MindMap.js', 'utf8'),
+    readMindMapSource(),
 ]);
 const storage = new Map();
 const calls = [];

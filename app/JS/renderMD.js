@@ -1,3 +1,4 @@
+// SECTION Markdown 基础配置与样式
 const formulaMap = new Map();
 
 marked.setOptions({
@@ -573,6 +574,9 @@ imgModal.innerHTML = `
         <img src="" alt="Preview" class="image-preview-content" id="imagePreviewTarget">
     </div>
 `;
+// !SECTION Markdown 基础配置与样式
+
+// SECTION 页面初始化与 Markdown 解析
 /* --- 修改 richContent.js 中的 DOMContentLoaded --- */
 document.addEventListener('DOMContentLoaded', () => {
     // 1. 检查页面上是否已经存在模态框
@@ -777,8 +781,10 @@ async function openMarkdownLinkWithQuicker(href) {
     }
 }
 
+// !SECTION 页面初始化与 Markdown 解析
+
 // =============================================================================
-// #region 富文本渲染
+// SECTION 富文本渲染
 // =============================================================================
 async function processRichContent(element) {
     if (!element) return;
@@ -937,8 +943,10 @@ async function processRichContent(element) {
     }
 }
 
+// !SECTION 富文本渲染
+
 // ==========================================
-// #region 图片点击预览功能 (支持缩放+拖拽)
+// SECTION 图片点击预览功能 (支持缩放+拖拽)
 // ==========================================
 function initializeImagePreview() {
     const modal = document.getElementById('imagePreviewModal');
@@ -1087,8 +1095,10 @@ function initializeImagePreview() {
 }
 
 
+// !SECTION 图片点击预览功能 (支持缩放+拖拽)
+
 // ==========================================
-// #region Mermaid 全屏逻辑 (支持拖拽缩放)
+// SECTION Mermaid 全屏逻辑 (支持拖拽缩放)
 // ==========================================
 
 let mermaidState = {
@@ -1290,8 +1300,10 @@ function copyToClipboard(text) {
     }
 }
 
+// !SECTION Mermaid 全屏逻辑 (支持拖拽缩放)
+
 // ==========================================
-// #region 下载 SVG 文件
+// SECTION 下载 SVG 文件
 // ==========================================
 function downloadMermaidSvg() {
     const container = document.getElementById('mermaidModalBody');
@@ -1335,8 +1347,10 @@ function downloadMermaidSvg() {
 
 
 
+// !SECTION 下载 SVG 文件
+
 // ==========================================
-// #region Mermaid SVG 转图片并复制功能
+// SECTION Mermaid SVG 转图片并复制功能
 // ==========================================
 function svgSourceToDataUrl(source) {
     // WebView2 may treat a blob: URL created under a virtual host as a
@@ -1434,8 +1448,10 @@ function copyMermaidAsPng() {
 
 
 
+// !SECTION Mermaid SVG 转图片并复制功能
+
 // ==========================================
-// #region [V5.3 终极修复版] Markdown 拖拽功能 (修复表格富文本 & Ctrl多选)
+// SECTION [V5.3 终极修复版] Markdown 拖拽功能 (修复表格富文本 & Ctrl多选)
 // ==========================================
 let ENABLE_MARKDOWN_DRAG = false; // 设置为 false 可关闭此功能
 // 开关：是否在渲染时注入源码以支持高精度拖拽
@@ -1972,4 +1988,4 @@ class RenderedMarkdownDragger {
 //     }
 // }
 
-
+// !SECTION [V5.3 终极修复版] Markdown 拖拽功能 (修复表格富文本 & Ctrl多选)

@@ -1,3 +1,4 @@
+import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import { access, readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -5,7 +6,7 @@ import vm from 'node:vm';
 const [html, shim, mindMap, bookmarks, helpers, utils, i18n, renderMarkdown, bookmarksCss] = await Promise.all([
     readFile('app/HTML/MindMap.html', 'utf8'),
     readFile('app/JS/standalone-shim.js', 'utf8'),
-    readFile('app/JS/MindMap.js', 'utf8'),
+    readMindMapSource(),
     readFile('app/JS/BookMarks.js', 'utf8'),
     readFile('app/JS/AI-Contents.js', 'utf8'),
     readFile('app/JS/utils.js', 'utf8'),

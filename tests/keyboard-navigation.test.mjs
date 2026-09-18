@@ -1,8 +1,9 @@
+import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
-const mindMap = await readFile('app/JS/MindMap.js', 'utf8');
+const mindMap = await readMindMapSource();
 
 assert.match(mindMap,
     /\['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'\]\.includes\(e\.key\)[\s\S]*?state\.selectedIds\.size === 1[\s\S]*?moveMindMapSelectionByArrow\(e\.key\)/,

@@ -1,3 +1,4 @@
+// SECTION 公共工具与安全策略
 async function chromeGet(key) {
     try {
         const result = await chrome.storage.local.get([key]);       // 读取收藏数据
@@ -62,9 +63,9 @@ function setSafeHTML(element, html) {
         element.innerHTML = html;
     }
 }
-/**********************************************************************************************************
-// #region 创建UI容器
-***********************************************************************************************************/
+// !SECTION 公共工具与安全策略
+
+// SECTION 创建UI容器
 const uiContainer = document.createElement('div');
 uiContainer.className = 'bookmark-manager-container';
 uiContainer.innerHTML = `
@@ -249,9 +250,9 @@ uiContainer.innerHTML = `
     <div class="drag-hint" id="dragHint"></div>
 `;
 
-/**********************************************************************************************************
-// #region 创建主管理类
-***********************************************************************************************************/
+// !SECTION 创建UI容器
+
+// SECTION 创建主管理类
 class myBookmarkManager {
     constructor() {
         this.data = {
@@ -314,9 +315,7 @@ class myBookmarkManager {
             }
         });
     }
-/**********************************************************************************************************
-// #region 读写数据
-***********************************************************************************************************/
+// SECTION 读写数据
     async loadFromStorage() {
         try {
             const savedData=await idbGet('bookmarkData');
@@ -391,9 +390,9 @@ class myBookmarkManager {
         }
     }
 
-/**********************************************************************************************************
-// #region 初始化事件监听器
-***********************************************************************************************************/
+// !SECTION 读写数据
+
+// SECTION 初始化事件监听器
     initializeEventListeners() {
         // 打开面板
         document.addEventListener('keydown', async(e) => {
@@ -506,9 +505,9 @@ class myBookmarkManager {
 
 
 
-/**********************************************************************************************************
-// #region 全局点击事件监听
-***********************************************************************************************************/
+// !SECTION 初始化事件监听器
+
+// SECTION 全局点击事件监听
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.context-menuBM')) this.hideContextMenu();
             const now = Date.now();
@@ -560,9 +559,9 @@ class myBookmarkManager {
         this.initializeSelectionBox(panelContent,treeContainer);
     }
 
-/**********************************************************************************************************
-// #region 模态框事件监听器
-***********************************************************************************************************/
+// !SECTION 全局点击事件监听
+
+// SECTION 模态框事件监听器
     initializeModalListeners() {
         const modals = ['renameModal', 'newFolderModal', 'newItemModal', 'deleteModal'];
         modals.forEach(modalId => {
@@ -617,9 +616,9 @@ class myBookmarkManager {
             });
         });
     }
-/**********************************************************************************************************
-// #region 树状结构事件委托
-***********************************************************************************************************/
+// !SECTION 模态框事件监听器
+
+// SECTION 树状结构事件委托
     initializeTreeEventDelegation() {
         const container = document.getElementById('panelContent');
         
@@ -728,9 +727,7 @@ class myBookmarkManager {
         });
         
 
-        /**********************************************************************************************************
-        // #region 拖拽事件监听
-        ***********************************************************************************************************/
+        // SECTION 拖拽事件监听
         this.containerContext(container);
         this.containerDragstart(container);
         this.containerDragend(container);
@@ -746,6 +743,7 @@ class myBookmarkManager {
         })
         
 
+        // !SECTION 拖拽事件监听
     }
     // --- 新增辅助方法：清除定时器 ---
     _clearAutoExpandTimer() {
@@ -985,9 +983,9 @@ class myBookmarkManager {
         });
     }
 
-/**********************************************************************************************************
-// #region 搜索功能
-***********************************************************************************************************/
+// !SECTION 树状结构事件委托
+
+// SECTION 搜索功能
     initializeSearch(){
         const searchBtn = document.getElementById('searchBtn');
         const searchBarRow = document.getElementById('searchBarRow');
@@ -1096,9 +1094,9 @@ class myBookmarkManager {
 
 
 
-/**********************************************************************************************************
-// #region 右键菜单
-***********************************************************************************************************/
+// !SECTION 搜索功能
+
+// SECTION 右键菜单
     initializeContextMenu() {
         const menu = document.getElementById('contextMenuBM');
 
@@ -1252,9 +1250,9 @@ class myBookmarkManager {
     hideContextMenu() {
         document.getElementById('contextMenuBM').style.display = 'none';
     }
-/**********************************************************************************************************
-// #region 下拉菜单
-***********************************************************************************************************/
+// !SECTION 右键菜单
+
+// SECTION 下拉菜单
     initializeCustomDropdown(dropdownId, modalId) {
         const dropdown = document.getElementById(dropdownId);
         const display = dropdown.querySelector('.dropdown-display');
@@ -1308,9 +1306,9 @@ class myBookmarkManager {
         this.clearSelection();
         this.currentFolderId = folderId;
     }
-/**********************************************************************************************************
-// #region 渲染面包屑导航和收藏夹树
-***********************************************************************************************************/
+// !SECTION 下拉菜单
+
+// SECTION 渲染面包屑导航和收藏夹树
     render() {
         this.renderBreadcrumb();
         this.renderTree();
@@ -1460,9 +1458,9 @@ class myBookmarkManager {
         this.applyFilter();
     }
 
-/**********************************************************************************************************
-// #region 新增内容渲染
-***********************************************************************************************************/
+// !SECTION 渲染面包屑导航和收藏夹树
+
+// SECTION 新增内容渲染
     renderFolderContent(folderId) {
         const children = this.getChildren(folderId);
         if (children.length === 0) return '';
@@ -1761,9 +1759,9 @@ class myBookmarkManager {
             </div>
         `;
     }
-/**********************************************************************************************************
-// #region 渲染移动菜单
-***********************************************************************************************************/
+// !SECTION 新增内容渲染
+
+// SECTION 渲染移动菜单
     renderMoveToMenu(sourceId, container) {
         const sourceItem = this.data.folders[sourceId] || this.data.items[sourceId];
         if (!sourceItem) return;
@@ -1808,9 +1806,9 @@ class myBookmarkManager {
         this.renderTreeToContainer(container, filterFn, handleClick, rootName, sourceId);
     }
 
-/**********************************************************************************************************
-// #region 通用树形菜单渲染
-***********************************************************************************************************/
+// !SECTION 渲染移动菜单
+
+// SECTION 通用树形菜单渲染
     /**
      * @param {HTMLElement} container - 容器元素
      * @param {Function} filterFn - 过滤函数 (folder) => boolean
@@ -1899,9 +1897,9 @@ class myBookmarkManager {
             container.innerHTML = '<div style="padding:12px;color:#94a3b8;font-size:12px;text-align:center;">无文件夹</div>';
         }
     }
-/**********************************************************************************************************
-// #region 数据打开逻辑
-***********************************************************************************************************/
+// !SECTION 通用树形菜单渲染
+
+// SECTION 数据打开逻辑
     async open_MultipleQA(selectedIds,action,sidebar=false) {
         try {
             const selectedItems = selectedIds
@@ -1976,9 +1974,9 @@ class myBookmarkManager {
             }
         }
     }
-/**********************************************************************************************************
-// #region 重命名
-***********************************************************************************************************/
+// !SECTION 数据打开逻辑
+
+// SECTION 重命名
     showRenameModal(id) {
         const item = this.data.folders[id] || this.data.items[id];
         document.getElementById('renameInput').value = item.name;
@@ -2007,9 +2005,9 @@ class myBookmarkManager {
     }
 
 
-/**********************************************************************************************************
-// #region 新建文件夹
-***********************************************************************************************************/
+// !SECTION 重命名
+
+// SECTION 新建文件夹
     showNewFolderModal(parentId = 'root') {
         // console.log(this.data.folders[parentId]);
         document.getElementById('newFolderNameInput').value = '';
@@ -2061,9 +2059,9 @@ class myBookmarkManager {
         this.hideModal('newFolderModal');
 
     }
-/**********************************************************************************************************
-// #region 新建收藏
-***********************************************************************************************************/
+// !SECTION 新建文件夹
+
+// SECTION 新建收藏
     showNewItemModal(indexdata,reply,action='',parentId = 'root') {
         this.indexData=indexdata;   // 实例内部调用都是空值
         this.replyData=reply;       // 实例内部调用都是空值
@@ -2206,9 +2204,9 @@ class myBookmarkManager {
         return currentParent;
     }
 
-/**********************************************************************************************************
-// #region 删除
-***********************************************************************************************************/
+// !SECTION 新建收藏
+
+// SECTION 删除
     showDeleteModal(ids) {
         const isMultiple = Array.isArray(ids) && ids.length > 1;
         const itemName = isMultiple ?
@@ -2301,9 +2299,9 @@ class myBookmarkManager {
         this.renderDeleteNode(id);
     }
 
-/**********************************************************************************************************
-// #region 多选拖拽
-***********************************************************************************************************/
+// !SECTION 删除
+
+// SECTION 多选拖拽
     async moveMultipleItems(itemIds, targetId, position) {
         // 按当前显示顺序排序，确保移动后顺序正确
         const container = document.getElementById('treeContainer');
@@ -2506,9 +2504,9 @@ class myBookmarkManager {
     generateId() {
         return 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
-/**********************************************************************************************************
-// #region 框选功能
-***********************************************************************************************************/
+// !SECTION 多选拖拽
+
+// SECTION 框选功能
     initializeSelectionBox(panelContent,treeContainer) {
         
         let mouseDownOnPanel = false;
@@ -2794,8 +2792,10 @@ class myBookmarkManager {
         });
     }
 }
+// !SECTION 框选功能
+// !SECTION 创建主管理类
 
-
+// SECTION 书签管理器初始化
 let bookmarkManager = null;
 
 async function initializeBookmarkManager() {
@@ -2816,3 +2816,4 @@ if (document.readyState === 'loading') {
         console.error('[Bookmarks] 初始化失败:', error);
     });
 }
+// !SECTION 书签管理器初始化

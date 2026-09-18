@@ -1,14 +1,15 @@
+import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const source = await readFile('app/JS/MindMap.js', 'utf8');
+const source = await readMindMapSource();
 const plainTextParserStart = source.indexOf('function parseMindMapPlainText');
 const plainTextParserEnd = source.indexOf('function createMindMapNodeFromPlainText', plainTextParserStart);
 const helperStart = source.indexOf('function isMarkdownFile');
 const helperEnd = source.indexOf('function initializeNativeDragDrop', helperStart);
 const markdownHeaderStart = source.indexOf('function extractMarkdownHeader');
-const markdownHeaderEnd = source.indexOf('// ==========================================', markdownHeaderStart);
+const markdownHeaderEnd = source.indexOf('// !SECTION Markdown 拖拽导入', markdownHeaderStart);
 
 assert.ok(plainTextParserStart >= 0 && plainTextParserEnd > plainTextParserStart,
     '应能定位粘贴与拖放共用的文本解析函数');

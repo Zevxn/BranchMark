@@ -1,8 +1,9 @@
+import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
-const mindMapSource = await readFile('app/JS/MindMap.js', 'utf8');
+const mindMapSource = await readMindMapSource();
 const helperStart = mindMapSource.indexOf('function isTemporarilyCollapsed');
 const helperEnd = mindMapSource.indexOf('function createNodeHTML', helperStart);
 assert.ok(helperStart >= 0 && helperEnd > helperStart,

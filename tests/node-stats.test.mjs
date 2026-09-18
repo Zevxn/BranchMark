@@ -1,10 +1,11 @@
+import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
 const [html, mindMap] = await Promise.all([
     readFile('app/HTML/MindMap.html', 'utf8'),
-    readFile('app/JS/MindMap.js', 'utf8'),
+    readMindMapSource(),
 ]);
 
 assert.match(html, /\.node-stats\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?left:\s*14px;[\s\S]*?bottom:\s*14px;/,

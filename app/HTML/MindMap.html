@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+<!-- SECTION 思维导图页面 -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -18,15 +19,24 @@
     <script src="../libs/auto-render.min.js"></script>
     <script src="../libs/highlight.min.js"></script>
 
+    <!-- SECTION 运行时依赖与脚本加载 -->
     <script src="../JS/static/i18n.js"></script>
     <script src="../JS/utils.js" defer></script>
     <script src="../JS/AI-Contents.js" defer></script>
     <script src="../JS/renderMD.js" defer></script>
     <script src="../JS/MindMap.js" defer></script>
+    <script src="../JS/MindMap-UI.js" defer></script>
+    <script src="../JS/MindMap-Relations.js" defer></script>
+    <script src="../JS/MindMap-SummariesSearch.js" defer></script>
+    <script src="../JS/MindMap-Render.js" defer></script>
+    <script src="../JS/MindMap-IO.js" defer></script>
     <script src="../JS/BookMarks.js" defer></script>
+    <!-- !SECTION 运行时依赖与脚本加载 -->
     <link rel="stylesheet" href="../CSS/BookMarks.css">
 
+    <!-- SECTION 页面样式与布局 -->
 <style>
+        /* SECTION 基础变量与主题 */
         /* --- 1. 基础变量定义 --- */
         :root { 
             color-scheme: light; 
@@ -184,6 +194,8 @@
             .color-swatch { border-color: #555 !important; }
         }
 
+        /* !SECTION 基础变量与主题 */
+        /* SECTION 全局滚动条 */
         /* --- 3. 全局滚动条样式 (所有元素通用) --- */
         *::-webkit-scrollbar {
             width: var(--scroll-size);
@@ -206,6 +218,8 @@
             background: transparent;
         }
 
+        /* !SECTION 全局滚动条 */
+        /* SECTION 基础样式 */
         /* --- 4. 基础样式 --- */
         *, *::before, *::after { box-sizing: border-box; }
         body { 
@@ -219,6 +233,8 @@
             transition: background-color 0.3s, color 0.3s;
         } 
 
+        /* !SECTION 基础样式 */
+        /* SECTION 工具栏 */
         /* ====== 工具栏 ========================================================================== */
         .toolbar { 
             position: fixed; top: 15px; left: 50%; 
@@ -722,6 +738,8 @@
         }
         
 
+        /* !SECTION 工具栏 */
+        /* SECTION 画布 */
         /* ====== 画布 ========================================================================== */
         #app { width: 100%; height: 100%; position: relative; z-index: 0; }
         .canvas-layer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; transform-origin: 0 0; }
@@ -1166,6 +1184,8 @@
             z-index: 2;
         }
 
+        /* !SECTION 画布 */
+        /* SECTION 框选拖拽 */
         /* ====== 框选拖拽 ========================================================================== */
         .selection-rect { position: fixed; border: 1px solid var(--primary); background: rgba(0,123,255,0.1); z-index: 800; pointer-events: none; display: none; }
         .insert-line { position: fixed; height: 4px; background: var(--primary); border-radius: 2px; z-index: 900; pointer-events: none; display: none; box-shadow: 0 0 6px rgba(0,123,255,0.5); }
@@ -1211,6 +1231,8 @@
             color: inherit;
         }
 
+        /* !SECTION 框选拖拽 */
+        /* SECTION 卡片坞 */
         /* === Dock-卡片坞 ============================================================================== */
         .card-dock-container { position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%); z-index: 600; display: none; flex-direction: column; align-items: center; width: fit-content; max-width: 80%; transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); }
         .card-dock-container.collapsed { transform: translate(-50%, 100%); }
@@ -1263,6 +1285,8 @@
         .dock-desc .md-content h1, .dock-desc .md-content h2 { font-size: 13px; margin: 4px 0; }
         .dock-desc .md-content p { margin: 2px 0; }
 
+        /* !SECTION 卡片坞 */
+        /* SECTION 节点结构 */
         /* ====== 节点结构 ========================================================================== */
         .root-wrapper { display: flex; align-items: center; height: fit-content; }
         .node-wrapper { display: flex; align-items: center; }
@@ -1320,6 +1344,8 @@
         .child-unit.left-side:only-child::before { left: auto; right: -30px; }
         
 
+        /* !SECTION 节点结构 */
+        /* SECTION 卡片样式 */
         /* ====== 卡片样式 ========================================================================== */
         .node-card {
             --node-card-radius: 8px;
@@ -1701,6 +1727,8 @@
         .node-card.left-side .resize-bl { display: block; }
         .resize-b { bottom:-5px; left:0; right:0; height:10px; cursor:row-resize; }
 
+        /* !SECTION 卡片样式 */
+        /* SECTION 卡片折叠按钮 */
         /* ====== 卡片折叠按钮 ========================================================================== */
         .fold-btn {
             position: absolute; 
@@ -1777,6 +1805,8 @@
         }
 
 
+        /* !SECTION 卡片折叠按钮 */
+        /* SECTION 模态框 */
         /* ====== 模态框 ========================================================================== */
         .modal-mask { position: fixed; inset: 0; background: var(--modal-mask); z-index: 2000; display: none; justify-content: center; align-items: center; backdrop-filter: blur(3px); }
         .modal-mask.active { display: flex; }
@@ -1901,6 +1931,8 @@
         }
         .node-card.simple .tool-icon{padding: 0px;}
 
+        /* !SECTION 模态框 */
+        /* SECTION 卡片工具栏 */
         /* ====== 卡片工具栏 ========================================================================== */
         .header-tools { gap: 6px; }
         .tool-icon { font-size:16px; color:#888; cursor:pointer; padding:4px; border-radius:4px; transition:0.2s; mix-blend-mode: multiply; }
@@ -1988,6 +2020,8 @@
                 border-color: var(--line-color) !important;
             }
         }
+        /* !SECTION 卡片工具栏 */
+        /* SECTION 右键菜单 */
         /* ============================== 右键菜单 =============================== 右键菜单 == */
         .context-menu {
             position: fixed;
@@ -2089,6 +2123,8 @@
             }
         }
 
+        /* !SECTION 右键菜单 */
+        /* SECTION Markdown 编辑器工具栏 */
         /* ====================== markdown编辑器工具栏 =================================== markdown编辑器工具栏 == */
         .editor-toolbar {
             display: flex;
@@ -2244,6 +2280,8 @@
             box-shadow: 0 4px 12px var(--shadow-color);
         }
 
+        /* !SECTION Markdown 编辑器工具栏 */
+        /* SECTION 无标题卡片手柄 */
         /* =========================================================
         卡片没有标题时的隐形手柄模式 (Ghost Handle)
         ========================================================= */
@@ -2333,9 +2371,12 @@
             pointer-events: none;
         }
 
+        /* !SECTION 无标题卡片手柄 */
     </style>
+    <!-- !SECTION 页面样式与布局 -->
 </head>
 <body class="mindmap">
+    <!-- SECTION 文件输入与工具栏 -->
     <input type="file" id="fileInput" class="mindmap-file-input" accept=".json,application/json" tabindex="-1" aria-hidden="true">
     <div class="toolbar">
         <button class="btn" id="btn-undo" title="Ctrl+Z" disabled><i class="ri-arrow-go-back-line"></i></button>
@@ -2380,7 +2421,9 @@
             <i class="ri-settings-3-line"></i>
         </button>
     </div>
+    <!-- !SECTION 文件输入与工具栏 -->
 
+    <!-- SECTION 设置、搜索与关联面板 -->
     <section class="mindmap-settings-popover" id="mindMapSettingsPopover" role="dialog" aria-label="思维导图设置" aria-hidden="true">
         <div class="mindmap-settings-title">设置</div>
         <label class="mindmap-setting-row" for="settingThemeToggle">
@@ -2504,7 +2547,9 @@
         </div>
         <div class="relation-navigation-list" id="relationNavigationList" role="menu" aria-label="可跳转的关联卡片"></div>
     </section>
+    <!-- !SECTION 设置、搜索与关联面板 -->
 
+    <!-- SECTION 颜色选择器与卡片坞 -->
     <div class="color-popup" id="colorPopup">
         <div class="color-swatch" style="background:#ffffff" data-color=""></div>
         <div class="color-swatch" style="background:#ffecb3" data-color="#ffecb3"></div>
@@ -2528,7 +2573,9 @@
         <div class="card-dock-body" id="dock-body"></div>
     </div>
 
+    <!-- !SECTION 颜色选择器与卡片坞 -->
 
+    <!-- SECTION 画布与页面标签 -->
     <div id="app">
         <div class="canvas-layer" id="canvas-layer">
             <svg class="tree-connector-layer" id="tree-connector-layer" aria-label="脑图父子连接线"></svg>
@@ -2549,14 +2596,15 @@
             <span id="ghostCount" class="ghost-count" style="display:none;"></span>
         </div>
     </div>
-
     <nav class="mindmap-tabs" id="mindMapTabs" aria-label="导图页面">
         <div class="mindmap-tab-list" id="mindMapTabList" role="tablist"></div>
         <button class="mindmap-tab-add" id="btn-add-mindmap-tab" type="button" title="新建页面" aria-label="新建页面">
             <i class="ri-add-line" aria-hidden="true"></i>
         </button>
     </nav>
+    <!-- !SECTION 画布与页面标签 -->
 
+    <!-- SECTION 页面标签菜单与状态 -->
     <div class="context-menu mindmap-tab-menu" id="mindMapTabMenu">
         <div class="menu-item" data-tab-action="rename"><i class="ri-edit-line"></i> 重命名页面</div>
         <div class="menu-item" data-tab-action="duplicate"><i class="ri-file-copy-line"></i> 复制页面</div>
@@ -2606,7 +2654,9 @@
         <span>兄弟 <span class="node-stats-value" id="nodeStatsSiblings">—</span></span>
     </div>
 
+    <!-- !SECTION 页面标签菜单与状态 -->
 
+    <!-- SECTION 上下文菜单与 Markdown 编辑器 -->
     <!-- 右键菜单 -->
     <div id="contextMenu" class="context-menu">
         <div class="menu-item" data-action="copy-md">
@@ -2788,5 +2838,7 @@
             </div>
         </div>
     </div>
+    <!-- !SECTION 上下文菜单与 Markdown 编辑器 -->
 </body>
+<!-- !SECTION 思维导图页面 -->
 </html>

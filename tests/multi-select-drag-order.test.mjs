@@ -1,8 +1,9 @@
+import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
-const mindMap = await readFile('app/JS/MindMap.js', 'utf8');
+const mindMap = await readMindMapSource();
 
 assert.match(mindMap, /getMindMapDragProcessingOrder\(selectedNodes, state\.drag\.dropType\)/,
     '多选拖动应统一通过稳定的节点顺序函数处理');

@@ -1,8 +1,9 @@
+import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const mindMap = await readFile('app/JS/MindMap.js', 'utf8');
+const mindMap = await readMindMapSource();
 const normalizerStart = mindMap.indexOf('function isMindMapNodeData(');
 const normalizerEnd = mindMap.indexOf('function applyImportedMindMap(', normalizerStart);
 const normalizerSource = mindMap.slice(normalizerStart, normalizerEnd).trim();

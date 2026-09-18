@@ -1,9 +1,10 @@
+import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const [html, mindMap] = await Promise.all([
     readFile('app/HTML/MindMap.html', 'utf8'),
-    readFile('app/JS/MindMap.js', 'utf8'),
+    readMindMapSource(),
 ]);
 const fadeStart = html.indexOf('@keyframes fadeIn');
 const fadeEnd = html.indexOf('.menu-item {', fadeStart);
