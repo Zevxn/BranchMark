@@ -307,6 +307,171 @@ const defaultTreeData = {
     foldedLeft: false, foldedRight: false
 };
 const MINDMAP_TABS_VERSION = 'tabs-v1';
+const MINDMAP_INTERNAL_LINK_PROTOCOL = 'mindmap:';
+const MINDMAP_INTERNAL_LINK_VERSION = '1';
+
+// SECTION 导图内链接数据
+
+function getMindMapWorkbookDocumentId(snapshot = null, options = {}) {
+    const candidates = [
+        snapshot?.documentId,
+        options.documentId,
+        typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('currentFileID') : '',
+    ];
+    const existingId = candidates
+        .map(value => String(value || '').trim())
+        .find(Boolean);
+    if (existingId) return existingId;
+    if (typeof generateFileId === 'function') return generateFileId();
+    return `doc_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function parseMindMapInternalLink(href) {
+    const rawHref = String(href || '').trim();
+    if (!rawHref) return null;
+
+    let parsed;
+    try {
+        parsed = href instanceof URL ? href : new URL(rawHref);
+    } catch {
+        return null;
+    }
+
+    if (parsed.protocol !== MINDMAP_INTERNAL_LINK_PROTOCOL || parsed.hostname !== 'card') {
+        return null;
+    }
+
+    const version = parsed.searchParams.get('v') || MINDMAP_INTERNAL_LINK_VERSION;
+    const documentId = parsed.searchParams.get('doc') || '';
+    const tabId = parsed.searchParams.get('tab') || '';
+    const nodeId = parsed.searchParams.get('node') || '';
+    if (version !== MINDMAP_INTERNAL_LINK_VERSION || !documentId || !tabId || !nodeId) {
+        return null;
+    }
+
+    return {
+        kind: 'mindmap-card',
+        version,
+        documentId,
+        tabId,
+        nodeId,
+        href: parsed.href,
+    };
+}
+
+function createMindMapInternalLinkHref(nodeId, tabId = null, documentId = null) {
+    const normalizedNodeId = String(nodeId || '').trim();
+    const normalizedTabId = String(tabId || mindMapWorkbook?.activeTabId || '').trim();
+    const normalizedDocumentId = String(
+        documentId || mindMapWorkbook?.documentId || '',
+    ).trim();
+    if (!normalizedNodeId || !normalizedTabId || !normalizedDocumentId) return '';
+
+    const params = new URLSearchParams({
+        v: MINDMAP_INTERNAL_LINK_VERSION,
+        doc: normalizedDocumentId,
+        tab: normalizedTabId,
+        node: normalizedNodeId,
+    });
+    return `${MINDMAP_INTERNAL_LINK_PROTOCOL}//card?${params.toString()}`;
+}
+
+function findMindMapNodeInTree(root, nodeId) {
+    if (!root || nodeId === undefined || nodeId === null) return null;
+    if (String(root.id) === String(nodeId)) return root;
+    for (const child of Array.isArray(root.children) ? root.children : []) {
+        const found = findMindMapNodeInTree(child, nodeId);
+        if (found) return found;
+    }
+    return null;
+}
+
+function resolveMindMapInternalLink(targetOrHref) {
+    const target = typeof targetOrHref === 'string'
+        ? parseMindMapInternalLink(targetOrHref)
+        : targetOrHref;
+    if (!target?.documentId || !target.tabId || !target.nodeId) {
+        return { target: null, tab: null, node: null, reason: 'invalid' };
+    }
+
+    if (target.documentId !== mindMapWorkbook?.documentId) {
+        return { target, tab: null, node: null, reason: 'document' };
+    }
+
+    const tab = mindMapWorkbook.tabs.find(item => item.id === target.tabId) || null;
+    if (!tab) return { target, tab: null, node: null, reason: 'tab' };
+    const node = findMindMapNodeInTree(tab.data, target.nodeId);
+    if (!node) return { target, tab, node: null, reason: 'node' };
+    return { target, tab, node, reason: null };
+}
+
+function rewriteMindMapInternalLinksInText(text, options = {}) {
+    const sourceDocumentId = String(options.sourceDocumentId || '').trim();
+    const destinationDocumentId = String(
+        options.destinationDocumentId || sourceDocumentId,
+    ).trim();
+    if (!sourceDocumentId || !destinationDocumentId) return String(text || '');
+
+    const sourceTabId = options.sourceTabId ? String(options.sourceTabId) : null;
+    const tabIdMap = options.tabIdMap instanceof Map ? options.tabIdMap : new Map();
+    const nodeIdMap = options.nodeIdMap instanceof Map ? options.nodeIdMap : new Map();
+
+    return String(text || '').replace(/mindmap:\/\/card\?[^\s)]+/g, href => {
+        const target = parseMindMapInternalLink(href);
+        if (!target || target.documentId !== sourceDocumentId) return href;
+        if (sourceTabId && target.tabId !== sourceTabId) return href;
+
+        const nextTabId = tabIdMap.get(target.tabId) || target.tabId;
+        const nextNodeId = nodeIdMap.get(target.nodeId) || target.nodeId;
+        if (
+            nextTabId === target.tabId
+            && nextNodeId === target.nodeId
+            && destinationDocumentId === target.documentId
+        ) {
+            return href;
+        }
+        return createMindMapInternalLinkHref(nextNodeId, nextTabId, destinationDocumentId);
+    });
+}
+
+function rewriteMindMapInternalLinksInTree(root, options = {}) {
+    if (!root || typeof root !== 'object') return root;
+    if (typeof root.content === 'string') {
+        root.content = rewriteMindMapInternalLinksInText(root.content, options);
+    }
+    (Array.isArray(root.children) ? root.children : []).forEach(child => {
+        rewriteMindMapInternalLinksInTree(child, options);
+    });
+    return root;
+}
+
+function getMindMapInternalLinkForNode(nodeId, tabId = null) {
+    const normalizedTabId = String(tabId || mindMapWorkbook?.activeTabId || '').trim();
+    const tab = mindMapWorkbook?.tabs?.find(item => item.id === normalizedTabId);
+    if (!tab || !findMindMapNodeInTree(tab.data, nodeId)) return '';
+    return createMindMapInternalLinkHref(nodeId, normalizedTabId, mindMapWorkbook.documentId);
+}
+
+async function copyMindMapInternalLink(nodeId, showToast = true) {
+    if (typeof syncActiveMindMapTab === 'function') syncActiveMindMapTab(false);
+    const href = getMindMapInternalLinkForNode(nodeId);
+    if (!href) {
+        if (showToast) showTopToast('❌ 无法生成导图内链接');
+        return false;
+    }
+
+    try {
+        await navigator.clipboard.writeText(href);
+        if (showToast) showTopToast('🔗 导图内链接已复制');
+        return true;
+    } catch (error) {
+        console.warn('[MindMap] 复制导图内链接失败:', error);
+        if (showToast) showTopToast('❌ 复制失败，请检查剪贴板权限');
+        return false;
+    }
+}
+
+// !SECTION 导图内链接数据
 
 function cloneMindMapValue(value) {
     return JSON.parse(JSON.stringify(value));
@@ -361,6 +526,7 @@ function getLegacyMindMapTabName(snapshot, fallbackName = '') {
 
 function normalizeMindMapWorkbookSnapshot(snapshot, fallbackName = '页面 1', options = {}) {
     const allowEmpty = options.allowEmpty !== false;
+    const documentId = getMindMapWorkbookDocumentId(snapshot, options);
     const isWorkbook = snapshot
         && typeof snapshot === 'object'
         && !Array.isArray(snapshot)
@@ -377,19 +543,29 @@ function normalizeMindMapWorkbookSnapshot(snapshot, fallbackName = '页面 1', o
         const activeTabId = tabs.some(tab => tab.id === snapshot.activeTabId)
             ? snapshot.activeTabId
             : tabs[0].id;
-        return { version: MINDMAP_TABS_VERSION, activeTabId, tabs };
+        return { version: MINDMAP_TABS_VERSION, documentId, activeTabId, tabs };
     }
 
     const hasLegacyData = isMindMapNodeData(snapshot?.data) || isMindMapNodeData(snapshot);
     if (!hasLegacyData) {
         if (!allowEmpty) throw new Error('思维导图节点格式不正确');
         const tab = createMindMapTab('页面 1');
-        return { version: MINDMAP_TABS_VERSION, activeTabId: tab.id, tabs: [tab] };
+        return {
+            version: MINDMAP_TABS_VERSION,
+            documentId,
+            activeTabId: tab.id,
+            tabs: [tab]
+        };
     }
 
     const normalized = normalizeImportedMindMap(snapshot);
     const tab = createMindMapTab(getLegacyMindMapTabName(snapshot, fallbackName), normalized);
-    return { version: MINDMAP_TABS_VERSION, activeTabId: tab.id, tabs: [tab] };
+    return {
+        version: MINDMAP_TABS_VERSION,
+        documentId,
+        activeTabId: tab.id,
+        tabs: [tab]
+    };
 }
 
 function isMindMapTabRootOnly(tab) {
@@ -421,6 +597,15 @@ function cloneImportedMindMapTab(sourceTab, usedNames) {
     return cloned;
 }
 
+function rewriteImportedMindMapTabLinks(clonedTab, sourceDocumentId, destinationDocumentId, tabIdMap) {
+    if (!clonedTab?.data) return;
+    rewriteMindMapInternalLinksInTree(clonedTab.data, {
+        sourceDocumentId,
+        destinationDocumentId,
+        tabIdMap,
+    });
+}
+
 function importMindMapWorkbookIntoCurrent(workbook, importedWorkbook) {
     const currentTabIndex = workbook.tabs.findIndex(tab => tab.id === workbook.activeTabId);
     const currentTab = workbook.tabs[currentTabIndex] || workbook.tabs[0];
@@ -433,6 +618,8 @@ function importMindMapWorkbookIntoCurrent(workbook, importedWorkbook) {
 
     const resetTabIds = [];
     const usedNames = new Set(workbook.tabs.map(tab => tab.name));
+    const sourceDocumentId = String(importedWorkbook.documentId || '').trim();
+    const destinationDocumentId = String(workbook.documentId || '').trim();
 
     if (isMindMapTabRootOnly(currentTab)) {
         usedNames.delete(currentTab.name);
@@ -442,10 +629,26 @@ function importMindMapWorkbookIntoCurrent(workbook, importedWorkbook) {
         workbook.activeTabId = replacement.id;
         resetTabIds.push(replacement.id);
 
+        const importedTabMap = new Map([[importedActiveTab.id, replacement]]);
         const extraTabs = importedTabs
             .filter(tab => tab !== importedActiveTab)
-            .map(tab => cloneImportedMindMapTab(tab, usedNames));
+            .map(tab => {
+                const cloned = cloneImportedMindMapTab(tab, usedNames);
+                importedTabMap.set(tab.id, cloned);
+                return cloned;
+            });
         workbook.tabs.splice(currentTabIndex + 1, 0, ...extraTabs);
+        const tabIdMap = new Map(
+            Array.from(importedTabMap.entries(), ([sourceTabId, clonedTab]) => [sourceTabId, clonedTab.id]),
+        );
+        importedTabMap.forEach((clonedTab, sourceTabId) => {
+            rewriteImportedMindMapTabLinks(
+                clonedTab,
+                sourceDocumentId,
+                destinationDocumentId,
+                tabIdMap,
+            );
+        });
         return { activeTabId: replacement.id, resetTabIds };
     }
 
@@ -456,6 +659,17 @@ function importMindMapWorkbookIntoCurrent(workbook, importedWorkbook) {
         return cloned;
     });
     workbook.tabs.push(...appendedTabs);
+    const tabIdMap = new Map(
+        Array.from(importedTabMap.entries(), ([sourceTab, clonedTab]) => [sourceTab.id, clonedTab.id]),
+    );
+    importedTabMap.forEach((clonedTab, sourceTab) => {
+        rewriteImportedMindMapTabLinks(
+            clonedTab,
+            sourceDocumentId,
+            destinationDocumentId,
+            tabIdMap,
+        );
+    });
     const activeTab = importedTabMap.get(importedActiveTab) || appendedTabs[0];
     workbook.activeTabId = activeTab.id;
     resetTabIds.push(activeTab.id);
@@ -613,6 +827,7 @@ function getMindMapWorkbookSnapshot(captureScroll = true) {
     syncActiveMindMapTab(captureScroll);
     return {
         version: MINDMAP_TABS_VERSION,
+        documentId: mindMapWorkbook.documentId,
         activeTabId: mindMapWorkbook.activeTabId,
         tabs: mindMapWorkbook.tabs.map(tab => {
             const scrollMap = sanitizeMindMapScrollMap(tab.scrollMap, tab.data);
@@ -673,6 +888,7 @@ function loadActiveMindMapTab(options = {}) {
 }
 
 function replaceMindMapWorkbook(workbook) {
+    if (!workbook.documentId) workbook.documentId = getMindMapWorkbookDocumentId(workbook);
     mindMapWorkbook = workbook;
     mindMapTabRuntime.clear();
     loadActiveMindMapTab({ resetHistory: true });
@@ -681,7 +897,9 @@ function replaceMindMapWorkbook(workbook) {
 async function updateState(MindMapData,newCurrentFileID,pageTitle,otherPageOpen=false){       // 思维导图页面加载思维导图文件
     if (!otherPageOpen) await saveMindMapData(true,false);  // 询问保存当前文件
     document.title = pageTitle;
-    replaceMindMapWorkbook(normalizeMindMapWorkbookSnapshot(MindMapData, pageTitle));
+    replaceMindMapWorkbook(normalizeMindMapWorkbookSnapshot(MindMapData, pageTitle, {
+        documentId: newCurrentFileID,
+    }));
     sessionStorage.setItem('currentFileID', newCurrentFileID);
     persistMindMapWorkbookSession(false);
     sessionStorage.setItem('pageTitle', pageTitle);
@@ -733,6 +951,7 @@ function new_MindMap(){
     const tab = createMindMapTab('页面 1');
     replaceMindMapWorkbook({
         version: MINDMAP_TABS_VERSION,
+        documentId: generateFileId(),
         activeTabId: tab.id,
         tabs: [tab]
     });
@@ -1217,6 +1436,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeMapClickEvents(); // 初始化点击事件
     initializeMapMouseEvents(); // 初始化鼠标事件
     initializeMindMapContentPreview(); // 折叠/便利贴的全文预览与标准卡片的长文档目录
+    initializeMindMapInternalLinkPreview(); // 导图内链接点击后的固定预览
     initializeMapContextMenu(); // 初始化右键菜单
     initializeNativeDragDrop(); // 初始化原生拖拽
     initializeEditorToolbar();  // 初始化md编辑器
@@ -1315,7 +1535,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasSelection = window.getSelection() && window.getSelection().toString().length > 0;
 
         // 预览气泡内的文字应完整保留浏览器原生快捷键（尤其是复制与全选）。
-        if (activeEl?.closest?.('.card-content-preview')) return;
+        if (activeEl?.closest?.('.card-content-preview, .mindmap-link-preview')) return;
 
         // 搜索定位优先于浏览器页面查找，但编辑器打开时仍保留编辑器自身行为。
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !isModalActive) {

@@ -1003,8 +1003,31 @@ function isDescendant(r,nid,tid) {
 };
 function deepCopyNode(node) {
     const newNode = JSON.parse(JSON.stringify(node));
-    const map = (n) => { n.id = generateNodeId(); if(n.children) n.children.forEach(map); };
-    map(newNode); return newNode;
+    const nodeIdMap = new Map();
+    const map = (n) => {
+        const previousId = n.id;
+        n.id = generateNodeId();
+        if (previousId !== undefined && previousId !== null) {
+            nodeIdMap.set(String(previousId), String(n.id));
+        }
+        if (n.children) n.children.forEach(map);
+    };
+    map(newNode);
+
+    const workbook = typeof mindMapWorkbook !== 'undefined' ? mindMapWorkbook : null;
+    if (
+        workbook?.documentId
+        && workbook.activeTabId
+        && typeof rewriteMindMapInternalLinksInTree === 'function'
+    ) {
+        rewriteMindMapInternalLinksInTree(newNode, {
+            sourceDocumentId: workbook.documentId,
+            destinationDocumentId: workbook.documentId,
+            sourceTabId: workbook.activeTabId,
+            nodeIdMap,
+        });
+    }
+    return newNode;
 };
 
 // ---防止 XSS 和 HTML 渲染的转义函数---

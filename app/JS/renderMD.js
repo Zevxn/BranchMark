@@ -339,6 +339,18 @@ imgStyleSheet.textContent = `
         border-radius: 3px;
     }
 
+    /* 导图内链接不打开新页面，使用虚线下划线和小箭头提示其预览行为。 */
+    .md-content a.md-internal-link {
+        text-decoration-style: dashed;
+    }
+    .md-content a.md-internal-link::after {
+        content: ' ↗';
+        display: inline-block;
+        font-size: 0.82em;
+        text-decoration: none;
+        opacity: 0.72;
+    }
+
     /* 本地文件使用附件式入口，限制继承字号，长文件名也能自然换行 */
     .md-content a.md-file-link {
         display: inline-flex;
@@ -349,7 +361,7 @@ imgStyleSheet.textContent = `
         padding: 6px 9px;
         border: 1px solid var(--toolbar-border);
         border-radius: 6px;
-        background-color: var(--bg-secondary);
+        background-color: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
         color: var(--text-color);
         font-size: clamp(13px, 0.92em, 15px);
         font-weight: 500;
@@ -729,6 +741,11 @@ function normalizeMarkdownLinkTarget(href) {
     if (!rawHref) return null;
     if (rawHref.startsWith('#')) return { kind: 'internal', target: rawHref };
 
+    const mindMapTarget = typeof parseMindMapInternalLink === 'function'
+        ? parseMindMapInternalLink(rawHref)
+        : null;
+    if (mindMapTarget) return mindMapTarget;
+
     let parsed;
     try {
         parsed = new URL(rawHref, document.baseURI || location.href);
@@ -793,7 +810,9 @@ async function processRichContent(element) {
     );
     element.querySelectorAll('a[href]').forEach(link => {
         const normalizedTarget = normalizeMarkdownLinkTarget(link.getAttribute('href'));
+        const isMindMapInternalLink = normalizedTarget?.kind === 'mindmap-card';
         const isLocalFile = normalizedTarget?.kind === 'file';
+        link.classList.toggle('md-internal-link', isMindMapInternalLink);
         link.classList.toggle('md-file-link', isLocalFile);
 
         if (isLocalFile && !link.dataset.fileLinkDecorated) {
@@ -809,7 +828,7 @@ async function processRichContent(element) {
             link.dataset.fileLinkDecorated = 'true';
         }
 
-        if (useQuickerSubprogram) {
+        if (isMindMapInternalLink || useQuickerSubprogram) {
             link.removeAttribute('target');
             link.removeAttribute('rel');
         } else {
@@ -821,6 +840,13 @@ async function processRichContent(element) {
         if (!link.dataset.linkClickBound) {
             link.addEventListener('click', async event => {
                 event.stopPropagation();
+                if (isMindMapInternalLink) {
+                    event.preventDefault();
+                    if (typeof openMindMapInternalLinkPreview === 'function') {
+                        openMindMapInternalLinkPreview(normalizedTarget);
+                    }
+                    return;
+                }
                 if (!useQuickerSubprogram) return;
                 event.preventDefault();
                 await openMarkdownLinkWithQuicker(link.getAttribute('href'));

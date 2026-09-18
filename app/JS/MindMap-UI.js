@@ -330,7 +330,7 @@ function initializeMapContextMenu() {
             contextTargetId = summary.id;
             selectMindMapSummary(summary.id);
             setDeleteLabel('删除总结');
-            ['cut', 'copy', 'paste', 'add-relation', 'create-tab-from-node', 'expand', 'collapse']
+            ['cut', 'copy', 'paste', 'copy-mindmap-link', 'add-relation', 'create-tab-from-node', 'expand', 'collapse']
                 .forEach(action => setActionVisibility(action, false));
             toStandardItem.style.display = summary.isSimple ? '' : 'none';
             toSimpleItem.style.display = summary.isSimple ? 'none' : '';
@@ -394,6 +394,7 @@ function initializeMapContextMenu() {
         const canAddRelation = state.selectedIds.size === 2;
         addRelationItem.style.display = canAddRelation ? '' : 'none';
         createTabItem.style.display = state.selectedIds.size === 1 ? '' : 'none';
+        setActionVisibility('copy-mindmap-link', true);
         positionMindMapContextMenu(contextMenu, e.clientX, e.clientY);
     });
 
@@ -454,6 +455,11 @@ function initializeMapContextMenu() {
         }
         if (action === 'paste') {
             pasteNodesToSelection();
+            contextMenu.classList.remove('active');
+            return;
+        }
+        if (action === 'copy-mindmap-link') {
+            void copyMindMapInternalLink(contextTargetId);
             contextMenu.classList.remove('active');
             return;
         }
@@ -718,6 +724,8 @@ function initializeEditorContextMenu() {
             const cmd = item.dataset.cmd;
             if (['cut', 'copy', 'paste'].includes(cmd)) {
                 handleClipboard(cmd);
+            } else if (cmd === 'insert-mindmap-link') {
+                executeAction(() => { void insertMindMapLinkFromClipboard(); });
             } else {
                 executeAction(() => {
                     if (cmd === 'bold') insertTextFormat('**', '**');
@@ -952,6 +960,11 @@ function initializeMapClickEvents() {
     });
     document.addEventListener('dblclick', (e) => {
         const t = e.target;
+        if (t.closest('.md-content a')) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         
         // --- 修复：支持 Dock 卡片双击 ---
         const dockCard = t.closest('.dock-card');
@@ -1530,7 +1543,7 @@ function initializeMapMouseEvents() {
     document.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; 
         // 预览气泡位于画布外；在其中选择、复制文字时不能触发画布平移或卡片操作。
-        if (e.target.closest('.card-content-preview')) return;
+        if (e.target.closest('.card-content-preview, .mindmap-link-preview, .md-content a')) return;
          // ▼▼▼ [新增功能] 空格键按下时，强制进入平移模式 (优先级最高) ▼▼▼
         if (isSpacePressed) {
             state.mode = 'PANNING';
@@ -1807,12 +1820,200 @@ function initializeMapMouseEvents() {
 
 // !SECTION 内容预览与鼠标交互
 
+// SECTION 导图内链接预览
+const mindMapInternalLinkPreviewState = {
+    target: null,
+    resolution: null,
+};
+
+function closeMindMapInternalLinkPreview() {
+    const panel = $('#mindMapLinkPreview');
+    if (!panel) return;
+    panel.classList.remove('is-open');
+    panel.setAttribute('aria-hidden', 'true');
+    mindMapInternalLinkPreviewState.target = null;
+    mindMapInternalLinkPreviewState.resolution = null;
+}
+
+function getMindMapInternalLinkPreviewError(resolution) {
+    if (resolution?.reason === 'document') return '该链接属于其他导图，当前页面无法预览。';
+    if (resolution?.reason === 'tab') return '链接指向的页面已不存在。';
+    if (resolution?.reason === 'node') return '链接指向的卡片已不存在。';
+    return '链接格式无效，无法预览。';
+}
+
+function isSameMindMapInternalLinkTarget(left, right) {
+    if (!left || !right) return false;
+    return left.documentId === right.documentId
+        && left.tabId === right.tabId
+        && left.nodeId === right.nodeId;
+}
+
+function openMindMapInternalLinkPreview(targetOrHref) {
+    const panel = $('#mindMapLinkPreview');
+    if (!panel) return false;
+
+    const target = typeof targetOrHref === 'string'
+        ? parseMindMapInternalLink(targetOrHref)
+        : targetOrHref;
+    if (panel.classList.contains('is-open')
+        && isSameMindMapInternalLinkTarget(mindMapInternalLinkPreviewState.target, target)) {
+        closeMindMapInternalLinkPreview();
+        return true;
+    }
+    const resolution = resolveMindMapInternalLink(target);
+    const title = $('#mindMapLinkPreviewTitle');
+    const body = $('#mindMapLinkPreviewBody');
+    const jumpButton = $('#btn-mindmap-link-jump');
+    if (!title || !body || !jumpButton) return false;
+
+    hideMindMapContentPreview();
+    mindMapInternalLinkPreviewState.target = resolution.target;
+    mindMapInternalLinkPreviewState.resolution = resolution;
+    body.replaceChildren();
+
+    if (resolution.node && resolution.tab) {
+        title.textContent = String(resolution.node.topic || '').trim() || '未命名卡片';
+        jumpButton.disabled = false;
+
+        const content = String(resolution.node.content || '').trim();
+        if (content) {
+            const contentBody = document.createElement('div');
+            contentBody.className = 'mindmap-link-preview-markdown md-content';
+            contentBody.innerHTML = renderMarkdown(content);
+            body.appendChild(contentBody);
+            void processRichContent(contentBody);
+        } else {
+            const empty = document.createElement('div');
+            empty.className = 'mindmap-link-preview-empty';
+            empty.textContent = '这张卡片暂无正文内容。';
+            body.appendChild(empty);
+        }
+    } else {
+        title.textContent = '无法预览链接';
+        jumpButton.disabled = true;
+        const error = document.createElement('div');
+        error.className = 'mindmap-link-preview-error';
+        error.textContent = getMindMapInternalLinkPreviewError(resolution);
+        body.appendChild(error);
+    }
+
+    panel.classList.add('is-open');
+    panel.setAttribute('aria-hidden', 'false');
+    return true;
+}
+
+function jumpToMindMapInternalLinkTarget() {
+    const { target, resolution } = mindMapInternalLinkPreviewState;
+    if (!target || !resolution?.node || !resolution.tab) {
+        showTopToast('❌ 链接目标不可用');
+        return false;
+    }
+
+    const shouldSwitchTab = mindMapWorkbook.activeTabId !== target.tabId;
+    closeMindMapInternalLinkPreview();
+    if (shouldSwitchTab && !activateMindMapTab(target.tabId)) {
+        showTopToast('❌ 无法打开链接所在页面');
+        return false;
+    }
+
+    const locate = () => {
+        if (typeof jumpToMindMapRelatedCard === 'function') {
+            jumpToMindMapRelatedCard(target.nodeId);
+        }
+    };
+    if (shouldSwitchTab) requestAnimationFrame(() => requestAnimationFrame(locate));
+    else locate();
+    return true;
+}
+
+function initializeMindMapInternalLinkPreview() {
+    $('#btn-mindmap-link-close')?.addEventListener('click', closeMindMapInternalLinkPreview);
+    $('#btn-mindmap-link-jump')?.addEventListener('click', jumpToMindMapInternalLinkTarget);
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && $('#mindMapLinkPreview')?.classList.contains('is-open')) {
+            event.preventDefault();
+            closeMindMapInternalLinkPreview();
+        }
+    });
+}
+
+// !SECTION 导图内链接预览
+
 // SECTION Markdown 编辑器
+function insertMindMapLinkIntoEditor(href) {
+    const editor = $('#editorTextarea');
+    const target = parseMindMapInternalLink(href);
+    if (!editor || !target) {
+        showTopToast('⚠️ 剪贴板中没有有效的导图内链接');
+        return false;
+    }
+
+    const targetResolution = resolveMindMapInternalLink(target);
+    if (!targetResolution.node) {
+        showTopToast('⚠️ 该链接不属于当前导图，或目标卡片已删除');
+        return false;
+    }
+
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const selectedText = editor.value.slice(start, end).replace(/\r?\n/g, ' ').trim();
+    if (!selectedText) {
+        showTopToast('⚠️ 请先选中要添加链接的文字');
+        return false;
+    }
+
+    const replacement = `[${selectedText.replace(/\]/g, '\\\]')}](${target.href || href})`;
+    const oldScrollTop = editor.scrollTop;
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(start, end);
+    if (typeof document.execCommand === 'function') {
+        document.execCommand('insertText', false, replacement);
+    } else {
+        editor.value = editor.value.slice(0, start) + replacement + editor.value.slice(end);
+    }
+    editor.setSelectionRange(start, start + replacement.length);
+    editor.scrollTop = oldScrollTop;
+    editor.dispatchEvent(new Event('input'));
+    showTopToast(`🔗 已为“${selectedText}”添加导图内链接`);
+    return true;
+}
+
+async function insertMindMapLinkFromClipboard() {
+    try {
+        const href = await navigator.clipboard.readText();
+        return insertMindMapLinkIntoEditor(href);
+    } catch (error) {
+        console.warn('[MindMap] 读取导图内链接失败:', error);
+        showTopToast('❌ 无法读取剪贴板中的导图内链接');
+        return false;
+    }
+}
+
 function initializeEditorToolbar() {
     $('#editorModal').onmousedown = (e) => { if(e.target===$('#editorModal')) $('#btn-close-modal').click(); };
     $('#editorTextarea').oninput = (e) => { $('#previewContent').innerHTML=renderMarkdown(e.target.value); processRichContent($('#previewContent')); };
     $('#btn-fullscreen').onclick = () => $('#modalWin').classList.toggle('fullscreen');
     const editor = $('#editorTextarea'), preview = $('#previewContent');
+
+    editor.addEventListener('paste', event => {
+        const pastedText = event.clipboardData?.getData('text/plain') || '';
+        if (!parseMindMapInternalLink(pastedText)) return;
+        if (editor.selectionStart === editor.selectionEnd) return;
+        event.preventDefault();
+        insertMindMapLinkIntoEditor(pastedText);
+    });
+    editor.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+            event.preventDefault();
+            void insertMindMapLinkFromClipboard();
+        }
+    });
+    $('#btn-insert-mindmap-link')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        void insertMindMapLinkFromClipboard();
+    });
 
     editor.addEventListener('scroll', () => { if(!isSyncingEditor) { isSyncingPreview=true; const p=editor.scrollTop/(editor.scrollHeight-editor.clientHeight); preview.scrollTop=p*(preview.scrollHeight-preview.clientHeight); setTimeout(()=>isSyncingPreview=false,10); } });
     preview.addEventListener('scroll', () => { if(!isSyncingPreview) { isSyncingEditor=true; const p=preview.scrollTop/(preview.scrollHeight-preview.clientHeight); editor.scrollTop=p*(editor.scrollHeight-editor.clientHeight); setTimeout(()=>isSyncingEditor=false,10); } });

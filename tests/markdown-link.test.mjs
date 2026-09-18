@@ -9,6 +9,8 @@ const helperEnd = renderMarkdown.indexOf('// ===================================
 assert.ok(helperStart >= 0 && helperEnd > helperStart, '应能定位 Markdown 链接打开适配代码');
 assert.match(renderMarkdown, /\.md-content a\.md-file-link\s*\{/,
     '本地文件链接应使用独立的附件式样式');
+assert.match(renderMarkdown, /\.md-content a\.md-file-link\s*\{[\s\S]*?background-color:\s*color-mix\(in srgb, var\(--bg-secondary\) 55%, transparent\);/,
+    '本地文件链接默认应使用半透明背景');
 assert.match(renderMarkdown, /font-size:\s*clamp\(13px, 0\.92em, 15px\)/,
     '本地文件链接字号不应随大字号容器无限放大');
 assert.match(renderMarkdown, /ri-file-paper-2-line md-file-link-icon/,

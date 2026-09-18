@@ -63,7 +63,7 @@
             --shadow-color-hover: rgba(0, 0, 0, 0.219);
             --shadow-color-active: rgba(24,144,255,0.15);
             --node-default-color: rgba(0,0,0,0.15);
-            --node-card-min-width: 80px;
+            --node-card-min-width: 100px;
             --node-card-max-width: 600px;
             --node-card-max-body-height: 600px;
             --node-card-topic-only-min-height: 43px;
@@ -1612,6 +1612,134 @@
             left: calc(var(--preview-arrow-offset) - 6px);
         }
 
+        /* SECTION 导图内链接预览 */
+        .mindmap-link-preview {
+            position: fixed;
+            z-index: 1200;
+            top: 74px;
+            left: 12px;
+            bottom: 56px;
+            width: min(420px, calc(100vw - 24px));
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            color: var(--text-color);
+            background: color-mix(in srgb, var(--card-bg) 96%, transparent);
+            border: 1px solid var(--toolbar-border);
+            border-radius: 12px;
+            box-shadow: 0 12px 32px var(--shadow-color-hover);
+            backdrop-filter: blur(12px);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transform: translateX(-14px);
+            transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
+        }
+        .mindmap-link-preview.is-open {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+            transform: translateX(0);
+        }
+        .mindmap-link-preview-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 12px 13px 16px;
+            border-bottom: 1px solid var(--header-border-bottom);
+            flex: 0 0 auto;
+        }
+        .mindmap-link-preview-heading {
+            min-width: 0;
+        }
+        .mindmap-link-preview-title {
+            display: block;
+            overflow: hidden;
+            color: var(--text-color);
+            font-size: 15px;
+            font-weight: 650;
+            line-height: 1.35;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .mindmap-link-preview-actions {
+            display: flex;
+            flex: 0 0 auto;
+            align-items: center;
+            gap: 10px;
+        }
+        .mindmap-link-preview-action {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            color: var(--text-color-secondary);
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            font: inherit;
+            font-size: 16px;
+            line-height: 1;
+            transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+        }
+        .mindmap-link-preview-action:active:not(:disabled) {
+            transform: scale(0.95);
+        }
+        .mindmap-link-preview-action:not(.danger):hover:not(:disabled) {
+            background: var(--btn-hover);
+            color: var(--primary);
+        }
+        .mindmap-link-preview-action:focus-visible {
+            outline: 2px solid color-mix(in srgb, var(--primary) 58%, transparent);
+            outline-offset: 2px;
+        }
+        .mindmap-link-preview-action.primary {
+            color: var(--text-color-secondary);
+        }
+        .mindmap-link-preview-action.danger {
+            color: #ff4d4f;
+            border-radius: 50%;
+            font-size: 18px;
+            transition: background-color 0.2s ease, color 0.2s ease, transform 0.3s ease;
+        }
+        .mindmap-link-preview-action.danger:hover:not(:disabled) {
+            color: white;
+            background: #ff4d4f;
+            transform: rotate(90deg);
+        }
+        .mindmap-link-preview-action:disabled {
+            cursor: not-allowed;
+            opacity: 0.45;
+        }
+        .mindmap-link-preview-body {
+            min-height: 0;
+            padding: 10px 12px 14px;
+            overflow-y: auto;
+            user-select: text;
+        }
+        .mindmap-link-preview-markdown {
+            min-height: 40px;
+            color: var(--text-color);
+        }
+        .mindmap-link-preview-markdown > :first-child { margin-top: 0; }
+        .mindmap-link-preview-markdown > :last-child { margin-bottom: 0; }
+        .mindmap-link-preview-empty,
+        .mindmap-link-preview-error {
+            padding: 20px 8px;
+            color: var(--text-color-secondary);
+            font-size: 13px;
+            line-height: 1.6;
+            text-align: center;
+        }
+        .mindmap-link-preview-error {
+            color: color-mix(in srgb, #d9363e 78%, var(--text-color));
+        }
+        /* !SECTION 导图内链接预览 */
+
         /* Resize Handles */
         .resize-handle { position: absolute; opacity: 0; z-index: 50; transition: 0.1s; }
         .node-card:hover .resize-handle { opacity: 1; }
@@ -2547,6 +2675,22 @@
         </div>
         <div class="relation-navigation-list" id="relationNavigationList" role="menu" aria-label="可跳转的关联卡片"></div>
     </section>
+    <aside class="mindmap-link-preview" id="mindMapLinkPreview" aria-label="导图内链接预览" aria-hidden="true">
+        <div class="mindmap-link-preview-head">
+            <div class="mindmap-link-preview-heading">
+                <strong class="mindmap-link-preview-title" id="mindMapLinkPreviewTitle">未命名卡片</strong>
+            </div>
+            <div class="mindmap-link-preview-actions">
+                <button class="mindmap-link-preview-action primary" id="btn-mindmap-link-jump" type="button" title="跳转到卡片" aria-label="跳转到卡片">
+                    <i class="ri-arrow-right-up-line" aria-hidden="true"></i>
+                </button>
+                <button class="mindmap-link-preview-action danger" id="btn-mindmap-link-close" type="button" title="关闭预览" aria-label="关闭预览">
+                    <i class="ri-close-line" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+        <div class="mindmap-link-preview-body" id="mindMapLinkPreviewBody"></div>
+    </aside>
     <!-- !SECTION 设置、搜索与关联面板 -->
 
     <!-- SECTION 颜色选择器与卡片坞 -->
@@ -2662,6 +2806,9 @@
         <div class="menu-item" data-action="copy-md">
             <i class="ri-markdown-fill"></i> 复制md
         </div>
+        <div class="menu-item" data-action="copy-mindmap-link">
+            <i class="ri-link-m"></i> 复制链接
+        </div>
         <div class="menu-item" data-action="cut">
             <i class="ri-scissors-cut-line"></i> 剪切节点
         </div>
@@ -2734,6 +2881,7 @@
         <div class="menu-item" data-cmd="cut"><i class="ri-scissors-cut-line"></i> 剪切</div>
         <div class="menu-item" data-cmd="copy"><i class="ri-file-copy-line"></i> 复制</div>
         <div class="menu-item" data-cmd="paste"><i class="ri-clipboard-line"></i> 粘贴</div>
+        <div class="menu-item" data-cmd="insert-mindmap-link"><i class="ri-link-m"></i> 插入导图内链接</div>
         <div class="menu-divider"></div>
 
         <!-- 格式化 -->
@@ -2786,6 +2934,9 @@
                     <div class="editor-toolbar">
                         <button class="icon-btn edit-btn" id="btn-copy-md" title="复制 Markdown 源码">
                             <i class="ri-file-copy-2-line"></i>
+                        </button>
+                        <button class="icon-btn edit-btn" id="btn-insert-mindmap-link" title="插入导图内链接 (Ctrl+K)">
+                            <i class="ri-link-m"></i>
                         </button>
                         <button class="edit-btn" data-cmd="bold" title="加粗 (Ctrl+B)"><i class="ri-bold"></i></button>
                         <button class="edit-btn" data-cmd="italic" title="斜体 (Ctrl+I)"><i class="ri-italic"></i></button>

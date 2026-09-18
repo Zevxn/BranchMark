@@ -5,8 +5,12 @@ const CLIPBOARD_SIGN = "MindMap_Node_Data_v1";
 /**
  * 递归重生成节点 ID (用于粘贴时防止 ID 冲突)
  */
-function renewNodeIds(node) {
+function renewNodeIds(node, idMap = new Map()) {
+    const previousId = node.id;
     node.id = generateNodeId();
+    if (previousId !== undefined && previousId !== null) {
+        idMap.set(String(previousId), String(node.id));
+    }
     // 重置一些状态
     node.folded = false; // 粘贴进来的节点默认展开
     // 确保样式模式兼容
@@ -14,7 +18,7 @@ function renewNodeIds(node) {
     if (!node.heightMode) node.heightMode = 'auto';
     
     if (node.children && node.children.length > 0) {
-        node.children.forEach(child => renewNodeIds(child));
+        node.children.forEach(child => renewNodeIds(child, idMap));
     }
     return node;
 }
@@ -169,8 +173,18 @@ function pasteMindMapNodesToSelection(nodesToPaste) {
     };
     countNodes(nodesToPaste);
 
+    const workbook = typeof mindMapWorkbook !== 'undefined' ? mindMapWorkbook : null;
     nodesToPaste.forEach(node => {
-        const newNode = renewNodeIds(node); // 重生成 ID
+        const nodeIdMap = new Map();
+        const newNode = renewNodeIds(node, nodeIdMap); // 重生成 ID
+        if (workbook?.documentId && workbook.activeTabId) {
+            rewriteMindMapInternalLinksInTree(newNode, {
+                sourceDocumentId: workbook.documentId,
+                destinationDocumentId: workbook.documentId,
+                sourceTabId: workbook.activeTabId,
+                nodeIdMap,
+            });
+        }
         if (isRoot) newNode.dir = 'right';
         else delete newNode.dir;
         targetNode.children.push(newNode);
