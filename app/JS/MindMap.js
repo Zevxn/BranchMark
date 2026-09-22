@@ -11,12 +11,14 @@ const MINDMAP_CARD_TOOLBAR_HOVER_STORAGE_KEY = 'mindmap_card_toolbar_hover';
 const MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY = 'mindmap_card_content_hover';
 const MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY = 'mindmap_document_outline';
 const MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY = 'mindmap_node_stats_visible';
+const MINDMAP_MATH_CLICK_COPY_STORAGE_KEY = 'mindmap_math_click_copy';
 const MINDMAP_CARD_MIN_WIDTH = 100;
 const mindMapSettings = {
     cardToolbarHover: true,
     cardContentHover: true,
     documentOutline: true,
     nodeStatsVisible: true,
+    mathClickCopy: true,
 };
 
 function getMindMapExportBaseName() {
@@ -67,6 +69,16 @@ function applyMindMapDocumentOutline(enabled) {
     hideMindMapContentPreview();
 }
 
+function applyMindMapMathClickCopy(enabled) {
+    mindMapSettings.mathClickCopy = enabled !== false;
+    document.documentElement.dataset.mathClickCopy = String(mindMapSettings.mathClickCopy);
+    const toggle = $('#settingMathClickCopyToggle');
+    if (toggle) toggle.checked = mindMapSettings.mathClickCopy;
+    const value = $('#settingMathClickCopyValue');
+    if (value) value.textContent = mindMapSettings.mathClickCopy ? '点击公式复制 LaTeX' : '点击公式不复制';
+    if (typeof updateRenderedMathClickCopyState === 'function') updateRenderedMathClickCopyState();
+}
+
 function applyMindMapNodeStatsVisibility(visible) {
     mindMapSettings.nodeStatsVisible = visible !== false;
     const nodeStats = $('#nodeStats');
@@ -115,6 +127,7 @@ async function initializeMindMapTheme() {
         [MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY]: true,
         [MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY]: true,
         [MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY]: true,
+        [MINDMAP_MATH_CLICK_COPY_STORAGE_KEY]: true,
     });
     const savedTheme = result && result[MINDMAP_THEME_STORAGE_KEY];
     applyMindMapTheme(savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : systemTheme);
@@ -122,6 +135,7 @@ async function initializeMindMapTheme() {
     applyMindMapCardContentHover(result?.[MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY] !== false);
     applyMindMapDocumentOutline(result?.[MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY] !== false);
     applyMindMapNodeStatsVisibility(result?.[MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY] !== false);
+    applyMindMapMathClickCopy(result?.[MINDMAP_MATH_CLICK_COPY_STORAGE_KEY] !== false);
 
     const settingsButton = $('#btn-settings');
     const settingsPopover = $('#mindMapSettingsPopover');
@@ -150,6 +164,11 @@ async function initializeMindMapTheme() {
         const enabled = event.currentTarget.checked;
         applyMindMapDocumentOutline(enabled);
         await chrome.storage.local.set({ [MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY]: enabled });
+    });
+    $('#settingMathClickCopyToggle')?.addEventListener('change', async event => {
+        const enabled = event.currentTarget.checked;
+        applyMindMapMathClickCopy(enabled);
+        await chrome.storage.local.set({ [MINDMAP_MATH_CLICK_COPY_STORAGE_KEY]: enabled });
     });
     $('#settingNodeStatsToggle')?.addEventListener('change', async event => {
         const visible = event.currentTarget.checked;

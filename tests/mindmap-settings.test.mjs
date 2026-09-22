@@ -2,9 +2,10 @@ import { readMindMapSource } from './helpers/mindmap-source.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [html, mindMap] = await Promise.all([
+const [html, mindMap, renderMD] = await Promise.all([
     readFile('app/HTML/MindMap.html', 'utf8'),
     readMindMapSource(),
+    readFile('app/JS/renderMD.js', 'utf8'),
 ]);
 
 assert.match(html, /id="btn-settings"[^>]*aria-controls="mindMapSettingsPopover"/,
@@ -16,6 +17,7 @@ for (const toggleId of [
     'settingCardToolbarHoverToggle',
     'settingCardContentHoverToggle',
     'settingDocumentOutlineToggle',
+    'settingMathClickCopyToggle',
     'settingNodeStatsToggle',
 ]) {
     assert.match(html, new RegExp(`id="${toggleId}"`), `设置面板应包含 ${toggleId}`);
@@ -31,6 +33,8 @@ assert.match(mindMap, /MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY\s*=\s*'mindmap_docum
     '长文档目录设置应独立持久化');
 assert.match(mindMap, /MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY\s*=\s*'mindmap_node_stats_visible'/,
     '左下角统计显示设置应独立持久化');
+assert.match(mindMap, /MINDMAP_MATH_CLICK_COPY_STORAGE_KEY\s*=\s*'mindmap_math_click_copy'/,
+    '公式点击复制设置应独立持久化');
 assert.match(mindMap, /function applyMindMapNodeStatsVisibility[\s\S]*?nodeStats\.hidden\s*=\s*!mindMapSettings\.nodeStatsVisible/,
     '统计显示开关应直接控制左下角统计元素');
 assert.match(html,
@@ -52,6 +56,21 @@ assert.match(mindMap,
     /applyMindMapDocumentOutline\(result\?\.\[MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY\] !== false\)/,
     '启动时应恢复长文档目录设置');
 assert.match(mindMap,
+    /applyMindMapMathClickCopy\(result\?\.\[MINDMAP_MATH_CLICK_COPY_STORAGE_KEY\] !== false\)/,
+    '启动时应恢复公式点击复制设置');
+assert.match(mindMap,
+    /function applyMindMapMathClickCopy[\s\S]*?mindMapSettings\.mathClickCopy = enabled !== false[\s\S]*?updateRenderedMathClickCopyState\(\)/,
+    '公式点击复制开关应同步更新渲染状态');
+assert.match(renderMD,
+    /function isMindMapMathClickCopyEnabled[\s\S]*?mindMapSettings\.mathClickCopy !== false/,
+    '公式点击复制应读取设置状态');
+assert.match(renderMD,
+    /if \(!isMindMapMathClickCopyEnabled\(\)\) return;[\s\S]*?copyToClipboard\(latexSource\)/,
+    '关闭公式点击复制后不得执行复制');
+assert.match(renderMD,
+    /:root\[data-math-click-copy="false"\] \.md-content \.katex-html[\s\S]*?cursor: text/,
+    '关闭公式点击复制后应取消公式点击提示样式');
+assert.match(mindMap,
     /if \(!mindMapSettings\.documentOutline\) return null;[\s\S]*?getMindMapDocumentOutline\(node\.content, body\)/,
     '关闭目录设置后，展开的标准卡片不应再生成目录气泡');
 assert.match(mindMap,
@@ -62,4 +81,4 @@ assert.doesNotMatch(mindMap, /function showMindMapContentPreview\(card\)\s*\{\s*
 assert.match(mindMap, /e\.target\.closest\('\.mindmap-settings-popover'\)/,
     '操作设置弹出框时不得触发画布平移');
 
-console.log('思维导图设置校验通过：五项设置、独立持久化与气泡联动完整。');
+console.log('思维导图设置校验通过：六项设置、独立持久化与气泡联动完整。');

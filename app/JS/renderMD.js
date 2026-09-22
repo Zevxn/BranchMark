@@ -437,6 +437,16 @@ imgStyleSheet.textContent = `
         background: color-mix(in srgb, var(--bg-secondary) 50%, transparent); 
         box-shadow: 0 0 0 1px var(--toolbar-border);
     }
+
+    :root[data-math-click-copy="false"] .md-content .katex-html {
+        cursor: text;
+        user-select: text;
+    }
+
+    :root[data-math-click-copy="false"] .md-content .katex-html:hover {
+        background: transparent;
+        box-shadow: none;
+    }
     
     .katex {font-size: 1.1em !important;}
 
@@ -719,6 +729,21 @@ function renderMarkdown(c) {
     return html;
 }
 
+function isMindMapMathClickCopyEnabled() {
+    return typeof mindMapSettings === 'undefined' || mindMapSettings.mathClickCopy !== false;
+}
+
+function updateRenderedMathClickCopyState() {
+    const enabled = isMindMapMathClickCopyEnabled();
+    document.querySelectorAll('.katex').forEach(katexNode => {
+        if (!katexNode.querySelector('annotation[encoding="application/x-tex"]')) return;
+        katexNode.style.cursor = enabled ? 'pointer' : '';
+        katexNode.classList.toggle('clickable-math', enabled);
+        if (enabled) katexNode.title = '点击复制 LaTeX 公式';
+        else katexNode.removeAttribute('title');
+    });
+}
+
 const QUICKER_OPEN_PATH_OR_URL_SP = 'DeepConvoOpenPathOrUrl';
 const QUICKER_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'file:', 'zotero:', 'obsidian:']);
 
@@ -926,7 +951,7 @@ async function processRichContent(element) {
                 throwOnError: false
             });
 
-            // --- 新增：为公式添加点击复制功能 ---
+            // --- 为公式添加点击复制功能 ---
             element.querySelectorAll('.katex').forEach(katexNode => {
                 if (katexNode.dataset.clickBound) return;
                 
@@ -934,11 +959,14 @@ async function processRichContent(element) {
                 if (annotation) {
                     const latexSource = annotation.textContent;
                     
-                    katexNode.style.cursor = 'pointer';
-                    katexNode.title = '点击复制 LaTeX 公式';
-                    katexNode.classList.add('clickable-math'); 
+                    const enabled = isMindMapMathClickCopyEnabled();
+                    katexNode.style.cursor = enabled ? 'pointer' : '';
+                    katexNode.classList.toggle('clickable-math', enabled);
+                    if (enabled) katexNode.title = '点击复制 LaTeX 公式';
+                    else katexNode.removeAttribute('title');
                     
                     katexNode.addEventListener('click', (e) => {
+                        if (!isMindMapMathClickCopyEnabled()) return;
                         e.stopPropagation(); 
                         e.preventDefault();
                         
