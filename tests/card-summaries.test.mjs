@@ -153,7 +153,7 @@ assert.match(mindMap, /function initializeMapContextMenu\(\)[\s\S]*?const summar
     '右击总结卡片时应复用脑图右键菜单并选中对应总结');
 assert.match(mindMap, /contextTargetKind = 'node'[\s\S]*?clearSelectedMindMapRelation\(\);[\s\S]*?clearSelectedMindMapSummary\(\);/,
     '从总结切换到普通卡片右键菜单时应清理旧的独立对象选中态');
-assert.match(mindMap, /\['cut', 'copy', 'paste', 'add-relation', 'create-tab-from-node', 'expand', 'collapse'\][\s\S]*?setActionVisibility\(action, false\)/,
+assert.match(mindMap, /\['cut', 'copy', 'paste',[^\]]*'add-relation', 'create-tab-from-node', 'expand', 'collapse'\][\s\S]*?setActionVisibility\(action, false\)/,
     '总结右键菜单应隐藏依赖树节点结构的不适用功能');
 assert.match(mindMap, /contextTargetKind === 'summary'[\s\S]*?action === 'copy-md'[\s\S]*?action === 'delete'[\s\S]*?action === 'auto-fit'[\s\S]*?action === 'to-simple'[\s\S]*?action === 'set-color'/,
     '总结右键菜单应复用复制、删除、自适应、模式切换和颜色动作');

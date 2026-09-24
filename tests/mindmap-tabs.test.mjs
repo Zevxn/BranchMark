@@ -86,7 +86,7 @@ const emptyWorkbook = normalizeWorkbook({
 const emptyTabId = emptyWorkbook.activeTabId;
 const importedSingle = normalizeWorkbook({
     data: { id: 'imported-root', topic: '导入导图', children: [{ id: 'imported-child', topic: '子节点', children: [] }] },
-}, '导入页面', { allowEmpty: false });
+}, '', { allowEmpty: false });
 const reusedEmptyResult = importIntoWorkbook(emptyWorkbook, importedSingle);
 assert.equal(reusedEmptyResult.activeTabId, emptyTabId, '空页面导入应继续使用当前 Tab');
 assert.equal(emptyWorkbook.tabs.length, 1, '空页面导入不应额外创建 Tab');
@@ -114,14 +114,30 @@ const importedMulti = normalizeWorkbook({
     version: 'tabs-v1',
     activeTabId: 'source-b',
     tabs: [
-        { id: 'source-a', name: '来源 A', data: { id: 'source-a-root', topic: '来源 A', children: [] } },
-        { id: 'source-b', name: '来源 B', data: { id: 'source-b-root', topic: '来源 B', children: [] } },
+        { id: 'source-a', name: '自定义页面 A', data: { id: 'source-a-root', topic: '来源根节点 A', children: [] } },
+        { id: 'source-b', name: '自定义页面 B', data: { id: 'source-b-root', topic: '来源根节点 B', children: [] } },
+        { id: 'source-c', data: { id: 'source-c-root', topic: '来源根节点 C', children: [] } },
     ],
 });
+
+const freshWorkbook = normalizeWorkbook({
+    data: { id: 'fresh-root', topic: '新建导图', children: [] },
+}, '新建导图');
+const freshImportResult = importIntoWorkbook(freshWorkbook, importedMulti);
+assert.equal(freshWorkbook.tabs.length, 3, '新建空导图导入工作簿应保留所有来源页面');
+assert.equal(freshWorkbook.tabs.find(tab => tab.id === freshImportResult.activeTabId).name, '自定义页面 B',
+    '新建空导图导入后应保留活动 Tab 的原名称');
+assert.equal(freshWorkbook.tabs.find(tab => tab.data.topic === '来源根节点 A').name, '自定义页面 A',
+    '导入应保留与根节点标题不同的自定义 Tab 名');
+assert.equal(freshWorkbook.tabs.find(tab => tab.data.topic === '来源根节点 C').name, '来源根节点 C',
+    '来源 Tab 没有名称时应回退使用根节点标题');
+
 const multiResult = importIntoWorkbook(existingWorkbook, importedMulti);
-assert.equal(existingWorkbook.tabs.length, 4, '导入工作簿时应保留所有来源页面');
-assert.equal(existingWorkbook.tabs.find(tab => tab.id === multiResult.activeTabId).data.topic, '来源 B',
+assert.equal(existingWorkbook.tabs.length, 5, '导入工作簿时应保留所有来源页面');
+assert.equal(existingWorkbook.tabs.find(tab => tab.id === multiResult.activeTabId).data.topic, '来源根节点 B',
     '导入工作簿后应激活来源文件的活动页面');
+assert.equal(existingWorkbook.tabs.find(tab => tab.data.topic === '来源根节点 A').name, '自定义页面 A',
+    '追加导入时也应保留来源 Tab 的原名称');
 assert.equal(new Set(existingWorkbook.tabs.map(tab => tab.id)).size, existingWorkbook.tabs.length,
     '导入后的 Tab ID 必须保持唯一');
 assert.equal(new Set(existingWorkbook.tabs.map(tab => tab.name)).size, existingWorkbook.tabs.length,
@@ -157,6 +173,8 @@ const importSource = mindMap.slice(
     mindMap.indexOf('function applyImportedMindMap'),
     mindMap.indexOf('function initializeMindMapImport'),
 );
+assert.match(importSource, /normalizeMindMapWorkbookSnapshot\(\s*JSON\.parse\(content\),\s*''/,
+    '旧格式导入时不应使用通用占位名覆盖根节点标题');
 assert.doesNotMatch(importSource, /sessionStorage\.removeItem\(['"]currentFileID['"]\)/,
     '导入到新 Tab 后应继续关联当前文件以支持保存');
 assert.match(mindMap, /function isMindMapTabRootOnly\([\s\S]*?children\.length === 0/,

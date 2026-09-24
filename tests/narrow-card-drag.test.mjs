@@ -49,7 +49,7 @@ assert.match(mindMap, /if\(e\.target\.closest\('\.card-header'\)\)\s*\{\s*state\
     '标题栏未被工具图标命中时应能启动卡片预拖动');
 const canvasPointerDownSource = mindMap.slice(
     mindMap.indexOf("if(!e.target.closest('.card-dock-container'))"),
-    mindMap.indexOf('// #region 鼠标移动事件'),
+    mindMap.indexOf('// SECTION 鼠标移动事件'),
 );
 assert.doesNotMatch(canvasPointerDownSource, /state\.selectedIds\.clear\(\)/,
     '画布按下并进入平移候选时不应立即清除卡片选中');

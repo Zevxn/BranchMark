@@ -243,7 +243,7 @@ function applyImportedMindMap(content) {
     try {
         const imported = normalizeMindMapWorkbookSnapshot(
             JSON.parse(content),
-            '导入页面',
+            '',
             { allowEmpty: false }
         );
         commitCurrentMindMapTabEdits();
@@ -554,7 +554,12 @@ function normalizeMindMapWorkbookSnapshot(snapshot, fallbackName = '页面 1', o
     if (isWorkbook) {
         const tabs = snapshot.tabs.map((tab, index) => {
             const normalized = normalizeImportedMindMap(tab);
-            const normalizedTab = createMindMapTab(tab.name || `页面 ${index + 1}`, normalized);
+            const importedName = typeof tab?.name === 'string' ? tab.name.trim() : '';
+            const rootTopic = String(normalized.data?.topic || '').trim();
+            const normalizedTab = createMindMapTab(
+                importedName || rootTopic || `页面 ${index + 1}`,
+                normalized,
+            );
             if (typeof tab.id === 'string' && tab.id.trim()) normalizedTab.id = tab.id;
             return normalizedTab;
         });
@@ -602,8 +607,9 @@ function getUniqueMindMapTabNameFromNames(baseName, names) {
 }
 
 function cloneImportedMindMapTab(sourceTab, usedNames) {
+    const importedName = String(sourceTab?.name || '').trim();
     const rootTopic = String(sourceTab?.data?.topic || '').trim();
-    const name = getUniqueMindMapTabNameFromNames(rootTopic || sourceTab?.name, usedNames);
+    const name = getUniqueMindMapTabNameFromNames(importedName || rootTopic, usedNames);
     const cloned = createMindMapTab(
         name,
         cloneMindMapValue({

@@ -540,6 +540,10 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
         : '';
     const toggleIcon = isSimple ? 'ri-layout-top-2-line' : 'ri-sticky-note-line';
     const toggleTitle = isSimple ? '切换回标准卡片' : '切换为便利贴模式';
+    const hasFloatingTools = relationCount > 0
+        || !isRoot
+        || (hasContent && !isContentCollapsed && !isSimple)
+        || (hasContent && !isSimple && !isCompactCollapsed);
 
     let childrenHTML = '';
     if(hasChildren && areChildrenVisible) {
@@ -578,12 +582,12 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
                     <span class="node-topic" contenteditable="true">${escapeHtml(node.topic)}</span>
                 </div>
             </div>
-            <div class="header-tools card-floating-tools">
+            ${hasFloatingTools ? `<div class="header-tools card-floating-tools">
                 <button class="tool-icon relation-navigation-trigger" type="button" data-action="navigate-relation" title="查看关联卡片（${relationCount}）" aria-label="查看关联卡片" ${relationCount > 0 ? '' : 'hidden'}><i class="ri-links-line" aria-hidden="true"></i></button>
                 ${!isRoot ? `<i class="tool-icon ${toggleIcon}" data-action="toggle-simple" title="${toggleTitle}"></i>` : ''}
                 ${hasContent && !isContentCollapsed && !isSimple ? `<i class="ri-aspect-ratio-line tool-icon" data-action="auto-height" title="自适应尺寸"></i>` : ''}
                 ${hasContent && !isSimple && !isCompactCollapsed ? `<i class="tool-icon ${node.contentCollapsed?'ri-arrow-down-s-line':'ri-arrow-up-s-line'}" data-action="toggle-content"></i>` : ''}
-            </div>
+            </div>` : ''}
             ${bodyContent}
             ${resizeHandles}
             ${foldBtn}

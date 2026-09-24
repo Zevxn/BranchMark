@@ -7,7 +7,7 @@ const mindMap = await readMindMapSource();
 const normalizerStart = mindMap.indexOf('function isMindMapNodeData(');
 const normalizerEnd = mindMap.indexOf('function applyImportedMindMap(', normalizerStart);
 const clipboardStart = mindMap.indexOf("const CUSTOM_MIME_TYPE = 'web text/x-mindmap-data';");
-const clipboardEnd = mindMap.indexOf('// ==========================================\n// #region 图片上传功能', clipboardStart);
+const clipboardEnd = mindMap.indexOf('// SECTION 编辑器图片上传', clipboardStart);
 
 const normalizerSource = mindMap.slice(normalizerStart, normalizerEnd).trim();
 const clipboardSource = mindMap.slice(clipboardStart, clipboardEnd).trim();
