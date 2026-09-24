@@ -1849,6 +1849,112 @@ function isSameMindMapInternalLinkTarget(left, right) {
         && left.nodeId === right.nodeId;
 }
 
+// SECTION 导图内链接预览宽度调整
+function initializeMindMapInternalLinkPreviewResizer() {
+    const panel = $('#mindMapLinkPreview');
+    const resizer = $('#mindMapLinkPreviewResizer');
+    if (!panel || !resizer) return;
+
+    let preferredWidth = null;
+    let hasUserAdjustedWidth = false;
+    let activePointerId = null;
+    let dragStartX = 0;
+    let dragStartWidth = 0;
+
+    function getMaxWidth() {
+        return Math.max(0, window.innerWidth - 24);
+    }
+
+    function getWidthLimits() {
+        const max = getMaxWidth();
+        return { min: Math.min(280, max), max };
+    }
+
+    function clampWidth(width) {
+        const limits = getWidthLimits();
+        return Math.min(limits.max, Math.max(limits.min, width));
+    }
+
+    function updateResizerValue(width) {
+        const limits = getWidthLimits();
+        resizer.setAttribute('aria-valuenow', String(Math.round(width)));
+        resizer.setAttribute('aria-valuemin', String(Math.round(limits.min)));
+        resizer.setAttribute('aria-valuemax', String(Math.round(limits.max)));
+        resizer.setAttribute('aria-valuetext', `预览区宽度 ${Math.round(width)} 像素`);
+    }
+
+    function applyPreferredWidth() {
+        if (preferredWidth !== null) panel.style.width = `${clampWidth(preferredWidth)}px`;
+        updateResizerValue(panel.getBoundingClientRect().width);
+    }
+
+    function setPreferredWidth(width) {
+        hasUserAdjustedWidth = true;
+        preferredWidth = clampWidth(width);
+        panel.style.width = `${preferredWidth}px`;
+        updateResizerValue(preferredWidth);
+    }
+
+    function savePreferredWidth() {
+        void chrome.storage.local.set({ [MINDMAP_INTERNAL_LINK_PREVIEW_WIDTH_STORAGE_KEY]: preferredWidth })
+            .catch(error => console.warn('[MindMap] 保存导图内链接预览宽度失败:', error));
+    }
+
+    function finishResize(event) {
+        if (activePointerId === null || (event && event.pointerId !== activePointerId)) return;
+        activePointerId = null;
+        panel.classList.remove('is-resizing');
+        if (resizer.hasPointerCapture(event.pointerId)) resizer.releasePointerCapture(event.pointerId);
+        if (preferredWidth !== null) savePreferredWidth();
+    }
+
+    resizer.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        activePointerId = event.pointerId;
+        dragStartX = event.clientX;
+        dragStartWidth = panel.getBoundingClientRect().width;
+        panel.classList.add('is-resizing');
+        resizer.setPointerCapture(event.pointerId);
+    });
+    resizer.addEventListener('pointermove', event => {
+        if (event.pointerId !== activePointerId) return;
+        setPreferredWidth(dragStartWidth + event.clientX - dragStartX);
+    });
+    resizer.addEventListener('pointerup', finishResize);
+    resizer.addEventListener('pointercancel', finishResize);
+    resizer.addEventListener('lostpointercapture', finishResize);
+    resizer.addEventListener('keydown', event => {
+        const step = event.shiftKey ? 40 : 16;
+        const currentWidth = panel.getBoundingClientRect().width;
+        let nextWidth;
+        if (event.key === 'ArrowRight') nextWidth = currentWidth + step;
+        else if (event.key === 'ArrowLeft') nextWidth = currentWidth - step;
+        else if (event.key === 'Home') nextWidth = getWidthLimits().min;
+        else if (event.key === 'End') nextWidth = getWidthLimits().max;
+        else return;
+
+        event.preventDefault();
+        hasUserAdjustedWidth = true;
+        setPreferredWidth(nextWidth);
+        savePreferredWidth();
+    });
+
+    window.addEventListener('resize', applyPreferredWidth);
+    chrome.storage.local.get({ [MINDMAP_INTERNAL_LINK_PREVIEW_WIDTH_STORAGE_KEY]: null })
+        .then(result => {
+            const savedWidth = Number(result?.[MINDMAP_INTERNAL_LINK_PREVIEW_WIDTH_STORAGE_KEY]);
+            if (!hasUserAdjustedWidth && Number.isFinite(savedWidth) && savedWidth > 0) {
+                preferredWidth = savedWidth;
+                applyPreferredWidth();
+            } else {
+                updateResizerValue(panel.getBoundingClientRect().width);
+            }
+        })
+        .catch(error => console.warn('[MindMap] 读取导图内链接预览宽度失败:', error));
+}
+// !SECTION 导图内链接预览宽度调整
+
 function openMindMapInternalLinkPreview(targetOrHref) {
     const panel = $('#mindMapLinkPreview');
     if (!panel) return false;
@@ -1928,6 +2034,7 @@ function jumpToMindMapInternalLinkTarget() {
 }
 
 function initializeMindMapInternalLinkPreview() {
+    initializeMindMapInternalLinkPreviewResizer();
     $('#btn-mindmap-link-close')?.addEventListener('click', closeMindMapInternalLinkPreview);
     $('#btn-mindmap-link-jump')?.addEventListener('click', jumpToMindMapInternalLinkTarget);
     document.addEventListener('keydown', event => {
@@ -1990,7 +2097,128 @@ async function insertMindMapLinkFromClipboard() {
     }
 }
 
+// SECTION Markdown 编辑器预览区宽度调整
+function initializeEditorPreviewResizer() {
+    const modalBody = $('#editorModal .modal-body');
+    const previewPane = $('#editorModal .preview-pane');
+    const resizer = $('#editorPreviewResizer');
+    if (!modalBody || !previewPane || !resizer) return;
+
+    let preferredWidth = null;
+    let activePointerId = null;
+    let dragStartX = 0;
+    let dragStartWidth = 0;
+
+    function getAvailableWidth() {
+        return Math.max(0, modalBody.clientWidth);
+    }
+
+    function getWidthLimits() {
+        const availableWidth = getAvailableWidth();
+        const minEditorWidth = Math.min(280, availableWidth * 0.35);
+        const minPreviewWidth = Math.min(240, availableWidth * 0.3);
+        return {
+            min: minPreviewWidth,
+            max: Math.max(minPreviewWidth, availableWidth - minEditorWidth),
+        };
+    }
+
+    function clampWidth(width) {
+        const limits = getWidthLimits();
+        return Math.min(limits.max, Math.max(limits.min, width));
+    }
+
+    function updateResizerValue(width) {
+        const availableWidth = getAvailableWidth();
+        const limits = getWidthLimits();
+        const percentage = availableWidth > 0 ? Math.round((width / availableWidth) * 100) : 50;
+        resizer.setAttribute('aria-valuenow', String(percentage));
+        resizer.setAttribute('aria-valuemin', String(Math.round((limits.min / Math.max(availableWidth, 1)) * 100)));
+        resizer.setAttribute('aria-valuemax', String(Math.round((limits.max / Math.max(availableWidth, 1)) * 100)));
+        resizer.setAttribute('aria-valuetext', `预览区宽度 ${Math.round(width)} 像素`);
+    }
+
+    function applyPreferredWidth() {
+        if (modalBody.clientWidth <= 0) return;
+        if (preferredWidth === null) {
+            previewPane.style.removeProperty('flex-basis');
+            updateResizerValue(previewPane.getBoundingClientRect().width);
+            return;
+        }
+
+        const width = clampWidth(preferredWidth);
+        previewPane.style.flexBasis = `${width}px`;
+        updateResizerValue(width);
+    }
+
+    function setPreviewWidth(width) {
+        if (modalBody.clientWidth <= 0) return;
+        preferredWidth = clampWidth(width);
+        previewPane.style.flexBasis = `${preferredWidth}px`;
+        updateResizerValue(preferredWidth);
+    }
+
+    function savePreferredWidth() {
+        void chrome.storage.local.set({ [MINDMAP_EDITOR_PREVIEW_WIDTH_STORAGE_KEY]: preferredWidth })
+            .catch(error => console.warn('[MindMap] 保存预览区宽度失败:', error));
+    }
+
+    function finishResize(event) {
+        if (activePointerId === null || (event && event.pointerId !== activePointerId)) return;
+        activePointerId = null;
+        modalBody.classList.remove('is-resizing-preview');
+        if (resizer.hasPointerCapture(event.pointerId)) resizer.releasePointerCapture(event.pointerId);
+        if (preferredWidth !== null) savePreferredWidth();
+    }
+
+    resizer.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        activePointerId = event.pointerId;
+        dragStartX = event.clientX;
+        dragStartWidth = previewPane.getBoundingClientRect().width;
+        modalBody.classList.add('is-resizing-preview');
+        resizer.setPointerCapture(event.pointerId);
+    });
+    resizer.addEventListener('pointermove', event => {
+        if (event.pointerId !== activePointerId) return;
+        setPreviewWidth(dragStartWidth - (event.clientX - dragStartX));
+    });
+    resizer.addEventListener('pointerup', finishResize);
+    resizer.addEventListener('pointercancel', finishResize);
+    resizer.addEventListener('lostpointercapture', finishResize);
+    resizer.addEventListener('keydown', event => {
+        const step = event.shiftKey ? 40 : 16;
+        const currentWidth = previewPane.getBoundingClientRect().width;
+        let nextWidth;
+        if (event.key === 'ArrowLeft') nextWidth = currentWidth + step;
+        else if (event.key === 'ArrowRight') nextWidth = currentWidth - step;
+        else if (event.key === 'Home') nextWidth = getWidthLimits().min;
+        else if (event.key === 'End') nextWidth = getWidthLimits().max;
+        else return;
+
+        event.preventDefault();
+        setPreviewWidth(nextWidth);
+        preferredWidth = clampWidth(nextWidth);
+        savePreferredWidth();
+    });
+
+    const resizeObserver = new ResizeObserver(applyPreferredWidth);
+    resizeObserver.observe(modalBody);
+    window.addEventListener('resize', applyPreferredWidth);
+
+    chrome.storage.local.get({ [MINDMAP_EDITOR_PREVIEW_WIDTH_STORAGE_KEY]: null })
+        .then(result => {
+            const savedWidth = Number(result?.[MINDMAP_EDITOR_PREVIEW_WIDTH_STORAGE_KEY]);
+            if (Number.isFinite(savedWidth) && savedWidth > 0) preferredWidth = savedWidth;
+            applyPreferredWidth();
+        })
+        .catch(error => console.warn('[MindMap] 读取预览区宽度设置失败:', error));
+}
+// !SECTION Markdown 编辑器预览区宽度调整
+
 function initializeEditorToolbar() {
+    initializeEditorPreviewResizer();
     $('#editorModal').onmousedown = (e) => { if(e.target===$('#editorModal')) $('#btn-close-modal').click(); };
     $('#editorTextarea').oninput = (e) => { $('#previewContent').innerHTML=renderMarkdown(e.target.value); processRichContent($('#previewContent')); };
     $('#btn-fullscreen').onclick = () => $('#modalWin').classList.toggle('fullscreen');

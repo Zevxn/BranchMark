@@ -358,7 +358,7 @@ imgStyleSheet.textContent = `
         gap: 7px;
         max-width: 100%;
         box-sizing: border-box;
-        padding: 6px 9px;
+        padding: 4px 9px;
         border: 1px solid var(--toolbar-border);
         border-radius: 6px;
         background-color: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
@@ -372,7 +372,7 @@ imgStyleSheet.textContent = `
 
     .md-content a.md-file-link:hover {
         border-color: var(--primary);
-        background-color: var(--btn-hover);
+        background-color: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
         text-decoration: none;
     }
 
@@ -872,9 +872,31 @@ async function processRichContent(element) {
                     }
                     return;
                 }
+                if (isLocalFile) {
+                    event.preventDefault();
+                    if (event.detail === 0) {
+                        if (useQuickerSubprogram) {
+                            await openMarkdownLinkWithQuicker(link.getAttribute('href'));
+                        } else {
+                            window.open(link.href, '_blank', 'noopener,noreferrer');
+                        }
+                    }
+                    return;
+                }
                 if (!useQuickerSubprogram) return;
                 event.preventDefault();
                 await openMarkdownLinkWithQuicker(link.getAttribute('href'));
+            });
+
+            link.addEventListener('dblclick', async event => {
+                if (!isLocalFile) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (useQuickerSubprogram) {
+                    await openMarkdownLinkWithQuicker(link.getAttribute('href'));
+                    return;
+                }
+                window.open(link.href, '_blank', 'noopener,noreferrer');
             });
 
             link.dataset.linkClickBound = 'true';

@@ -12,6 +12,8 @@ const MINDMAP_CARD_CONTENT_HOVER_STORAGE_KEY = 'mindmap_card_content_hover';
 const MINDMAP_DOCUMENT_OUTLINE_STORAGE_KEY = 'mindmap_document_outline';
 const MINDMAP_NODE_STATS_VISIBLE_STORAGE_KEY = 'mindmap_node_stats_visible';
 const MINDMAP_MATH_CLICK_COPY_STORAGE_KEY = 'mindmap_math_click_copy';
+const MINDMAP_EDITOR_PREVIEW_WIDTH_STORAGE_KEY = 'mindmap_editor_preview_width';
+const MINDMAP_INTERNAL_LINK_PREVIEW_WIDTH_STORAGE_KEY = 'mindmap_internal_link_preview_width';
 const MINDMAP_CARD_MIN_WIDTH = 100;
 const mindMapSettings = {
     cardToolbarHover: true,

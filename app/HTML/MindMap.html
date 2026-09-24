@@ -1620,6 +1620,8 @@
             left: 12px;
             bottom: 56px;
             width: min(420px, calc(100vw - 24px));
+            min-width: min(280px, calc(100vw - 24px));
+            max-width: calc(100vw - 24px);
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
@@ -1641,12 +1643,71 @@
             pointer-events: auto;
             transform: translateX(0);
         }
+        .mindmap-link-preview-resizer {
+            position: absolute;
+            z-index: 2;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            width: 16px;
+            align-items: center;
+            justify-content: flex-end;
+            cursor: col-resize;
+            touch-action: none;
+            outline: none;
+            opacity: 0.58;
+            transition: opacity 0.15s ease;
+        }
+        .mindmap-link-preview-resizer::before {
+            position: absolute;
+            right: -1px;
+            width: 9px;
+            height: 44px;
+            border: 1px solid var(--toolbar-border);
+            border-right: 0;
+            border-radius: 6px 0 0 6px;
+            background: color-mix(in srgb, var(--card-bg) 92%, var(--toolbar-border));
+            content: '';
+            transition: background-color 0.15s ease, border-color 0.15s ease;
+        }
+        .mindmap-link-preview-resizer::after {
+            position: absolute;
+            right: 3px;
+            width: 2px;
+            height: 14px;
+            border-radius: 2px;
+            background: repeating-linear-gradient(to bottom, var(--text-color-secondary) 0 1px, transparent 1px 4px);
+            content: '';
+            transition: background-color 0.15s ease;
+        }
+        .mindmap-link-preview-resizer:hover,
+        .mindmap-link-preview-resizer:focus-visible,
+        .mindmap-link-preview.is-resizing .mindmap-link-preview-resizer {
+            opacity: 1;
+        }
+        .mindmap-link-preview-resizer:hover::after,
+        .mindmap-link-preview-resizer:focus-visible::after,
+        .mindmap-link-preview.is-resizing .mindmap-link-preview-resizer::after {
+            background: repeating-linear-gradient(to bottom, var(--primary) 0 1px, transparent 1px 4px);
+        }
+        .mindmap-link-preview-resizer:hover::before,
+        .mindmap-link-preview-resizer:focus-visible::before,
+        .mindmap-link-preview.is-resizing .mindmap-link-preview-resizer::before {
+            border-color: color-mix(in srgb, var(--primary) 55%, var(--toolbar-border));
+            background: color-mix(in srgb, var(--card-bg) 82%, var(--primary));
+        }
+        .mindmap-link-preview.is-resizing,
+        .mindmap-link-preview.is-resizing * {
+            cursor: col-resize !important;
+            user-select: none !important;
+        }
         .mindmap-link-preview-head {
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            padding: 14px 12px 13px 16px;
+            padding: 14px 20px 13px 16px;
             border-bottom: 1px solid var(--header-border-bottom);
             flex: 0 0 auto;
         }
@@ -1717,7 +1778,7 @@
         }
         .mindmap-link-preview-body {
             min-height: 0;
-            padding: 10px 12px 14px;
+            padding: 10px 20px 14px 12px;
             overflow-y: auto;
             user-select: text;
         }
@@ -1946,9 +2007,53 @@
         .modal-body { flex: 1; display: flex; overflow: hidden; min-height: 0; }
         .editor-pane { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--toolbar-border); min-width: 0; position: relative}
         .editor { flex: 1; padding: 20px; border: none; outline: none; resize: none; background: var(--modal-bg); font-family: monospace; font-size: 15px; line-height:1.6; box-sizing: border-box; color: var(--text-color); }
-        .preview-pane { flex: 1; display: flex; flex-direction: column; background: var(--card-bg); min-width: 0; overflow: hidden; 
+        .preview-pane { flex: 0 0 50%; display: flex; flex-direction: column; background: var(--card-bg); min-width: 0; overflow: hidden;
             user-select: text;  /* 允许文字被选中 */
             cursor: auto;       /* 鼠标恢复为文本指针 */}
+        .editor-preview-resizer {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex: 0 0 12px;
+            align-items: center;
+            justify-content: center;
+            margin: 0 -6px;
+            cursor: col-resize;
+            touch-action: none;
+            outline: none;
+        }
+        .editor-preview-resizer::before {
+            width: 2px;
+            height: 100%;
+            background: var(--toolbar-border);
+            content: '';
+            transition: background-color 0.15s ease, width 0.15s ease;
+        }
+        .editor-preview-resizer::after {
+            position: absolute;
+            width: 5px;
+            height: 32px;
+            border-radius: 4px;
+            background: var(--toolbar-border);
+            content: '';
+            transition: background-color 0.15s ease;
+        }
+        .editor-preview-resizer:hover::before,
+        .editor-preview-resizer:focus-visible::before,
+        .modal-body.is-resizing-preview .editor-preview-resizer::before {
+            width: 3px;
+            background: var(--primary);
+        }
+        .editor-preview-resizer:hover::after,
+        .editor-preview-resizer:focus-visible::after,
+        .modal-body.is-resizing-preview .editor-preview-resizer::after {
+            background: var(--primary);
+        }
+        .modal-body.is-resizing-preview,
+        .modal-body.is-resizing-preview * {
+            cursor: col-resize !important;
+            user-select: none !important;
+        }
         .preview-content { flex: 1; padding: 30px; overflow-y: auto; color: var(--text-color); }
 
         /* 卡片与总结共用：按钮悬浮在卡片正上方，悬停或键盘聚焦时显示。 */
@@ -2701,6 +2806,7 @@
             </div>
         </div>
         <div class="mindmap-link-preview-body" id="mindMapLinkPreviewBody"></div>
+        <div class="mindmap-link-preview-resizer" id="mindMapLinkPreviewResizer" role="separator" tabindex="0" aria-label="调整导图内链接预览宽度" aria-orientation="vertical" aria-controls="mindMapLinkPreview" aria-valuenow="420" aria-valuemin="280" aria-valuemax="1200"></div>
     </aside>
     <!-- !SECTION 设置、搜索与关联面板 -->
 
@@ -2994,6 +3100,7 @@
                     </div>
                     <textarea class="editor" id="editorTextarea" placeholder="在此输入 Markdown..."></textarea>
                 </div>
+                <div class="editor-preview-resizer" id="editorPreviewResizer" role="separator" tabindex="0" aria-label="调整 Markdown 预览区宽度" aria-orientation="vertical" aria-controls="editorTextarea previewContent" aria-valuenow="50" aria-valuemin="25" aria-valuemax="75"></div>
                 <div class="preview-pane">
                     <div class="preview-content md-content" id="previewContent" style="font-size: 16px; line-height: 1.6;"></div>
                 </div>
