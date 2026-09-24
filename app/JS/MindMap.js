@@ -540,7 +540,7 @@ function createMindMapTab(name = '页面 1', snapshot = null) {
 
 function getLegacyMindMapTabName(snapshot, fallbackName = '') {
     const fileName = String(fallbackName || '').trim();
-    if (fileName && fileName !== 'AI思维导图' && fileName !== '新建思维导图') return fileName;
+    if (fileName && fileName !== 'BranchMark' && fileName !== '新建思维导图') return fileName;
     const rootName = String(snapshot?.data?.topic || snapshot?.topic || '').trim();
     return rootName || '页面 1';
 }
@@ -705,7 +705,8 @@ function importMindMapWorkbookIntoCurrent(workbook, importedWorkbook) {
 
 let dockData = JSON.parse(sessionStorage.getItem('DockData'))||[]; // 初始为空数组
 let saveData = JSON.parse(sessionStorage.getItem('MindMapData'))||{};
-let pageTitle = sessionStorage.getItem('pageTitle')||'AI思维导图';
+let pageTitle = sessionStorage.getItem('pageTitle')||'BranchMark';
+if (pageTitle === 'AI思维导图') pageTitle = 'BranchMark';
 document.title = pageTitle;
 let mindMapWorkbook = normalizeMindMapWorkbookSnapshot(saveData, pageTitle);
 let initialMindMapTab = mindMapWorkbook.tabs.find(tab => tab.id === mindMapWorkbook.activeTabId)

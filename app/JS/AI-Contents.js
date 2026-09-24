@@ -6,8 +6,8 @@
  */
 
 function cleanPageName(pageName = null) {
-    const value = pageName || document.title || 'AI思维导图';
-    return String(value).trim() || 'AI思维导图';
+    const value = pageName || document.title || 'BranchMark';
+    return String(value).trim() || 'BranchMark';
 }
 
 async function buildQAList(targetItem) {
