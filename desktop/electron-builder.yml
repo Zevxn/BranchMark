@@ -1,0 +1,47 @@
+appId: com.deepconvo.mindmap
+productName: BranchMark
+copyright: DeepConvo
+
+directories:
+  output: release
+  buildResources: build
+
+# 使用项目已安装的 Electron 运行时，避免打包时重复下载 Electron 压缩包。
+electronDist: node_modules/electron/dist
+
+# 只把外壳代码打进 asar；网页资源通过 extraResources 原样放到 resources/app，
+# 便于排查问题，也避免 asar 读取大体积静态资源的额外开销。
+files:
+  - main.js
+  - lib/**/*
+  - package.json
+
+extraResources:
+  - from: ../dist
+    to: app
+
+asar: true
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: BranchMark
+  artifactName: BranchMark-Setup-${version}.${ext}
+  uninstallDisplayName: BranchMark
+
+portable:
+  artifactName: BranchMark-Portable-${version}.${ext}

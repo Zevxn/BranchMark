@@ -7,6 +7,9 @@ node_modules/
 /dist/
 /quicker/DeepConvoMindMap/DeepConvoMindMap.cs
 /quicker/DeepConvoMindMap/releases/
+/desktop/release*/
+/desktop/.tmp/
+/desktop/build/
 
 # Test and coverage output
 /coverage/
@@ -34,3 +37,4 @@ desktop.ini
 ref/index.html
 *min.js
 *_min_v1.html
+.workbuddy/

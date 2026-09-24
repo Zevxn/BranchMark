@@ -1,0 +1,25 @@
+{
+  "name": "deepconvo-mindmap-desktop",
+  "productName": "BranchMark",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BranchMark 桌面版：Electron 外壳加载 app/ 的构建产物 dist/，不修改任何业务代码",
+  "main": "main.js",
+  "author": "DeepConvo",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dist": "cd .. && node scripts/build.mjs",
+    "start": "npm run dist && node tools/launch.cjs .",
+    "dev": "node tools/launch.cjs .",
+    "smoke": "npm run dist && node tools/launch.cjs tools/smoke.cjs",
+    "verify": "node tools/verify-packaged.cjs",
+    "pack": "npm run dist && electron-builder --dir",
+    "build:win": "npm run dist && electron-builder --win --x64",
+    "build:portable": "npm run dist && electron-builder --win portable --x64",
+    "icon": "node tools/make-icon.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.4.4",
+    "electron-builder": "^26.15.3"
+  }
+}
