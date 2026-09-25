@@ -178,7 +178,7 @@ imgStyleSheet.textContent = `
         max-height: none !important;
         min-width: auto !important;
         pointer-events: auto; 
-        user-select: text; 
+        user-select: none;
     }
 
     /* 7. 弹窗按钮 */
