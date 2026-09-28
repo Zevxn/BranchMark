@@ -283,6 +283,16 @@
             pointer-events: auto;
             transform: translateY(0);
         }
+        .mindmap-obsidian-menu { width: max-content; max-width: calc(100vw - 24px); transition: none; }
+        .mindmap-obsidian-menu .menu-item {
+            width: 100%;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            text-align: left;
+            font-family: inherit;
+        }
+        .mindmap-obsidian-menu .menu-item:hover { background: var(--btn-hover); }
         .mindmap-settings-title {
             padding: 6px 8px 8px;
             color: var(--text-color);
@@ -2657,14 +2667,8 @@
         <button class="btn" id="btn-open"><i class="ri-download-2-fill" title="导入脑图"></i></button>
         <button class="btn" id="btn-export"><i class="ri-upload-2-fill" title="导出脑图"></i></button>
         <div class="divider"></div>
-        <button class="btn" id="btn-export-canvas" title="导出为 Obsidian Canvas">
-            <i class="ri-artboard-line"></i>
-        </button>
-        <button class="btn" id="btn-export-vertical" title="导出为 竖向 Canvas">
-            <i class="ri-node-tree" style="transform: rotate(90deg);"></i>
-        </button>
-        <button class="btn" id="btn-change-folder" title="切换保存目录">
-            <i class="ri-folder-settings-line"></i>
+        <button class="btn" id="btn-obsidian" type="button" title="Obsidian 导出与保存目录" aria-label="Obsidian 操作" aria-haspopup="dialog" aria-controls="obsidianMenu" aria-expanded="false">
+            <i class="ri-artboard-line" aria-hidden="true"></i>
         </button>
         <div class="divider"></div>
         <button class="btn" id="btn-storage-location" type="button" title="设置桌面版数据存储位置" aria-label="设置桌面版数据存储位置" hidden>
@@ -2677,6 +2681,17 @@
     <!-- !SECTION 文件输入与工具栏 -->
 
     <!-- SECTION 设置、搜索与关联面板 -->
+    <section class="mindmap-settings-popover mindmap-obsidian-menu" id="obsidianMenu" role="dialog" aria-label="Obsidian 操作" aria-hidden="true">
+        <button class="menu-item" id="btn-export-canvas" type="button" title="导出为 Obsidian Canvas">
+            <i class="ri-artboard-line" aria-hidden="true"></i> 导出横向 Canvas
+        </button>
+        <button class="menu-item" id="btn-export-vertical" type="button" title="导出为 竖向 Canvas">
+            <i class="ri-node-tree" style="transform: rotate(90deg);" aria-hidden="true"></i> 导出竖向 Canvas
+        </button>
+        <button class="menu-item" id="btn-change-folder" type="button" title="切换保存目录">
+            <i class="ri-folder-settings-line" aria-hidden="true"></i> 切换保存目录
+        </button>
+    </section>
     <section class="mindmap-settings-popover" id="mindMapSettingsPopover" role="dialog" aria-label="思维导图设置" aria-hidden="true">
         <div class="mindmap-settings-title">设置</div>
         <div class="mindmap-setting-row mindmap-tauri-storage" id="tauriStorageSetting" hidden>

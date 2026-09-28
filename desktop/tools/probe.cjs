@@ -61,6 +61,29 @@ const PROBE = `(async () => {
 
     await wait(300);
 
+    // SECTION Obsidian 菜单验证
+    const obsidianButton = document.getElementById('btn-obsidian');
+    const obsidianMenu = document.getElementById('obsidianMenu');
+    let obsidianMenuWorks = false;
+    if (obsidianButton && obsidianMenu) {
+        const isOpen = () => getComputedStyle(obsidianMenu).visibility === 'visible';
+        obsidianButton.click();
+        const opened = isOpen() && obsidianButton.getAttribute('aria-expanded') === 'true'
+            && document.activeElement.id === 'btn-export-canvas'
+            && ['btn-export-canvas', 'btn-export-vertical', 'btn-change-folder'].every(id =>
+                obsidianMenu.contains(document.getElementById(id)) && typeof document.getElementById(id).onclick === 'function');
+        obsidianButton.click();
+        const toggledClosed = !isOpen();
+        obsidianButton.click();
+        document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        const outsideClosed = !isOpen();
+        obsidianButton.click();
+        obsidianMenu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        obsidianMenuWorks = opened && toggledClosed && outsideClosed && !isOpen()
+            && obsidianButton.getAttribute('aria-expanded') === 'false';
+    }
+    // !SECTION Obsidian 菜单验证
+
     const styles = Array.from(document.styleSheets).map(sheet => sheet.href || 'inline');
     const externalStyles = styles.filter(href => href && /^https?:/i.test(href));
     const scriptSources = Array.from(document.querySelectorAll('script[src]')).map(s => s.getAttribute('src'));
@@ -74,6 +97,7 @@ const PROBE = `(async () => {
         isSecureContext: window.isSecureContext,
         appRootElement: Boolean(document.getElementById('app')),
         toolbarElement: Boolean(document.querySelector('.toolbar')),
+        obsidianMenuWorks,
         cardCount: document.querySelectorAll('.node-card').length,
 
         standaloneShim: window.__DEEP_CONVO_STANDALONE__ === true,
@@ -115,6 +139,7 @@ function buildAssertions(probe) {
         check('处于安全上下文', probe.isSecureContext === true, probe.isSecureContext),
         check('主画布容器存在', probe.appRootElement, probe.appRootElement),
         check('工具栏渲染完成', probe.toolbarElement, probe.toolbarElement),
+        check('Obsidian 菜单保留三个操作并支持开关、外部点击和 Esc 收起', probe.obsidianMenuWorks, probe.obsidianMenuWorks),
         check('渲染出节点卡片', probe.cardCount > 0, `${probe.cardCount} 张`),
         check('standalone-shim 已生效', probe.standaloneShim, probe.standaloneShim),
         check('chrome.* 兼容层已安装', probe.chromeCompatLayer, probe.chromeCompatLayer),

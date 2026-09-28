@@ -177,6 +177,50 @@ function initializeMapToolbar() {
         r.readAsText(f);
     };
     initializeMindMapImport();
+
+    const obsidianButton = $('#btn-obsidian');
+    const obsidianMenu = $('#obsidianMenu');
+    const setObsidianMenuOpen = open => {
+        obsidianMenu.classList.toggle('is-open', open);
+        obsidianMenu.setAttribute('aria-hidden', String(!open));
+        obsidianButton.setAttribute('aria-expanded', String(open));
+        if (!open) return;
+        const rect = obsidianButton.getBoundingClientRect();
+        obsidianMenu.style.left = Math.min(
+            Math.max(12, rect.left + (rect.width - obsidianMenu.offsetWidth) / 2),
+            Math.max(12, window.innerWidth - obsidianMenu.offsetWidth - 12),
+        ) + 'px';
+        obsidianMenu.style.top = Math.max(12, Math.min(
+            rect.bottom + 14, window.innerHeight - obsidianMenu.offsetHeight - 12,
+        )) + 'px';
+        obsidianMenu.querySelector('button').focus();
+    };
+    obsidianButton.onclick = () => setObsidianMenuOpen(!obsidianMenu.classList.contains('is-open'));
+    obsidianMenu.addEventListener('click', event => {
+        if (!event.target.closest('button')) return;
+        setObsidianMenuOpen(false);
+        obsidianButton.focus();
+    }, true);
+    document.addEventListener('pointerdown', event => {
+        if (!event.target.closest('#btn-obsidian, #obsidianMenu')) setObsidianMenuOpen(false);
+    });
+    [obsidianButton, obsidianMenu].forEach(element => element.addEventListener('keydown', event => {
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        // 保留按钮的键盘操作，避免 Enter、Tab、空格触发画布快捷键。
+        event.stopPropagation();
+        if (event.key === 'Escape') {
+            setObsidianMenuOpen(false);
+            obsidianButton.focus();
+        }
+    }));
+    obsidianMenu.addEventListener('focusout', event => {
+        if (!obsidianMenu.contains(event.relatedTarget) && event.relatedTarget !== obsidianButton) {
+            setObsidianMenuOpen(false);
+        }
+    });
+    window.addEventListener('resize', () => setObsidianMenuOpen(false));
+    $('.toolbar').addEventListener('scroll', () => setObsidianMenuOpen(false));
+
     $('#btn-export-canvas').onclick = () => {
         exportToCanvas();
     };

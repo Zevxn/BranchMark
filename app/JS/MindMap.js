@@ -96,11 +96,11 @@ function positionMindMapSettingsPopover() {
     const popover = $('#mindMapSettingsPopover');
     if (!button || !popover?.classList.contains('is-open')) return;
     const margin = 12;
-    const gap = 8;
+    const gap = 14;
     const buttonRect = button.getBoundingClientRect();
     const popoverRect = popover.getBoundingClientRect();
     const left = Math.min(
-        Math.max(buttonRect.right - popoverRect.width, margin),
+        Math.max(buttonRect.left + (buttonRect.width - popoverRect.width) / 2, margin),
         Math.max(margin, window.innerWidth - popoverRect.width - margin),
     );
     const preferredTop = buttonRect.bottom + gap;
@@ -130,6 +130,9 @@ async function initializeTauriStorageLocation() {
     if (!tauriCore || typeof tauriCore.invoke !== 'function' || !storageButton || !storagePath || !storageSetting) return;
 
     const invoke = (command, args) => tauriCore.invoke(command, args);
+    const formatStoragePath = directory => String(directory || '')
+        .replace(/^\\\\\?\\UNC\\/i, '\\\\')
+        .replace(/^\\\\\?\\(?=[a-z]:\\)/i, '');
     storageButton.hidden = false;
     storageSetting.hidden = false;
 
@@ -138,10 +141,10 @@ async function initializeTauriStorageLocation() {
         const displayPath = status.pending_default
             ? '重启后恢复默认位置'
             : status.pending_directory
-                ? `重启后切换至：${status.pending_directory}`
+                ? `重启后切换至：${formatStoragePath(status.pending_directory)}`
                 : status.is_default
-                    ? `默认位置：${status.current_directory}`
-                    : status.current_directory;
+                    ? `默认位置：${formatStoragePath(status.current_directory)}`
+                    : formatStoragePath(status.current_directory);
         storagePath.textContent = displayPath;
         storagePath.title = displayPath;
         storageButton.title = `设置桌面版数据存储位置\n${displayPath}`;
@@ -171,7 +174,7 @@ async function initializeTauriStorageLocation() {
 
             const currentDirectory = status.pending_directory || status.current_directory;
             const confirmed = window.confirm(
-                `当前数据位置：\n${currentDirectory}\n\n新位置：\n${selectedDirectory}\n\n` +
+                `当前数据位置：\n${formatStoragePath(currentDirectory)}\n\n新位置：\n${formatStoragePath(selectedDirectory)}\n\n` +
                 '若新位置已有本软件的数据，将使用已有数据并保留原数据文件；否则会迁移当前数据，成功后删除原数据文件。设置在完全退出并重新打开软件后生效。继续吗？'
             );
             if (!confirmed) return;
