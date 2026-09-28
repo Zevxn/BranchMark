@@ -14,7 +14,14 @@ function createLocalStorage(values = new Map()) {
     };
 }
 
-function startRuntime({ bridge = null, webview = null, storageValues = new Map(), host = 'mindmap.test' } = {}) {
+function startRuntime({
+    bridge = null,
+    webview = null,
+    tauri = null,
+    indexedDB = null,
+    storageValues = new Map(),
+    host = 'mindmap.test',
+} = {}) {
     const location = { href: `https://${host}/HTML/MindMap.html` };
     const document = {
         currentScript: { src: `https://${host}/JS/standalone-shim.js` },
@@ -23,8 +30,10 @@ function startRuntime({ bridge = null, webview = null, storageValues = new Map()
     const window = { location, document, open() {} };
     if (webview) window.chrome = { webview };
     if (bridge) window.$quickerSync = bridge;
+    if (tauri) window.__TAURI__ = { core: { invoke: tauri } };
+    if (indexedDB) window.indexedDB = indexedDB;
     const localStorage = createLocalStorage(storageValues);
-    const context = vm.createContext({
+    const contextValues = {
         URL,
         clearTimeout,
         console,
@@ -35,7 +44,9 @@ function startRuntime({ bridge = null, webview = null, storageValues = new Map()
         setTimeout,
         structuredClone,
         window,
-    });
+    };
+    if (indexedDB) contextValues.indexedDB = indexedDB;
+    const context = vm.createContext(contextValues);
     vm.runInContext(shim, context, { filename: 'standalone-shim.js' });
     return { window, storageValues };
 }
@@ -185,4 +196,144 @@ assert.equal(reopenedSettings.mindmap_card_toolbar_hover, false);
 assert.equal(reopenedSettings.mindmap_node_stats_visible, false);
 assert.equal(JSON.stringify(reopenedBookmarks.data.bookmarkData), JSON.stringify(bookmarkData));
 
-console.log('存储同步校验通过：Quicker 原生变量与普通浏览器本地存储均可读写并恢复数据。');
+function createIndexedDb(values) {
+    const databaseValues = new Map(Object.entries(values));
+    const database = {
+        objectStoreNames: { contains: () => true },
+        transaction() {
+            const transaction = { error: null };
+            const store = {
+                getAllKeys() {
+                    const request = {};
+                    queueMicrotask(() => {
+                        request.result = [...databaseValues.keys()];
+                        request.onsuccess?.();
+                    });
+                    return request;
+                },
+                getAll() {
+                    const request = {};
+                    queueMicrotask(() => {
+                        request.result = [...databaseValues.values()];
+                        request.onsuccess?.();
+                    });
+                    return request;
+                },
+                get(key) {
+                    const request = {};
+                    queueMicrotask(() => {
+                        request.result = databaseValues.get(key);
+                        request.onsuccess?.();
+                    });
+                    return request;
+                },
+                put(value, key) { databaseValues.set(key, value); },
+                delete(key) { databaseValues.delete(key); },
+            };
+            transaction.objectStore = () => store;
+            setTimeout(() => transaction.oncomplete?.(), 0);
+            return transaction;
+        },
+    };
+    return {
+        open() {
+            const request = { result: database };
+            queueMicrotask(() => request.onsuccess?.());
+            return request;
+        },
+    };
+}
+
+let tauriStoredDocument = null;
+const tauriCommands = [];
+const tauriInvoke = async (command, args = {}) => {
+    tauriCommands.push(command);
+    if (command === 'read_storage_data') {
+        return tauriStoredDocument ? structuredClone(tauriStoredDocument) : null;
+    }
+    if (command === 'write_storage_data') {
+        if (args.ifMissing && tauriStoredDocument) return structuredClone(tauriStoredDocument);
+        tauriStoredDocument = structuredClone(args.data);
+        return structuredClone(tauriStoredDocument);
+    }
+    throw new Error('Unexpected Tauri command: ' + command);
+};
+const tauriLegacySnapshot = {
+    data: { id: 'tauri-root', topic: 'Tauri 旧数据' },
+    view: { tx: 25, ty: 45, scale: 1.1 },
+    scrollMap: { 'tauri-root': 12 },
+};
+const tauriLegacyLocalStorage = new Map([
+    ['deepconvo-standalone:chrome:currentFileID', JSON.stringify('tauri_file')],
+    ['deepconvo-standalone:chrome:MindMapData', JSON.stringify(tauriLegacySnapshot)],
+    ['deepconvo-standalone:chrome:mindmap_theme', JSON.stringify('dark')],
+    ['deepconvo-standalone:idb:legacyFallback', JSON.stringify({ retained: true })],
+]);
+const tauriRuntime = startRuntime({
+    tauri: tauriInvoke,
+    indexedDB: createIndexedDb({
+        bookmarkData,
+        'MindMapData.__REF__tauri_file-extra': tauriLegacySnapshot,
+        'largeContents.__REF__tauri_file-extra': ['旧 Markdown 内容'],
+        legacyFallback: { preferred: 'IndexedDB' },
+    }),
+    storageValues: tauriLegacyLocalStorage,
+    host: 'tauri-mindmap.test',
+});
+const migratedTauriTheme = await tauriRuntime.window.chrome.storage.local.get('mindmap_theme');
+const migratedTauriBookmarks = await tauriRuntime.window.chrome.runtime.sendMessage({
+    action: 'IDB_GET',
+    keys: null,
+});
+assert.equal(migratedTauriTheme.mindmap_theme, 'dark');
+assert.deepEqual(migratedTauriBookmarks.data.bookmarkData, bookmarkData,
+    'Tauri 首次启动应迁移 IndexedDB 中的书签索引');
+assert.deepEqual(migratedTauriBookmarks.data.legacyFallback, { preferred: 'IndexedDB' },
+    '同键冲突时应保留 IndexedDB 数据');
+assert.deepEqual(migratedTauriBookmarks.data['MindMapData.__REF__tauri_file-extra'], tauriLegacySnapshot,
+    'Tauri 首次启动应迁移导图快照引用');
+assert.deepEqual(migratedTauriBookmarks.data['largeContents.__REF__tauri_file-extra'], ['旧 Markdown 内容'],
+    'Tauri 首次启动应迁移大型 Markdown 引用内容');
+assert.equal(tauriStoredDocument.version, 1);
+assert.equal(tauriStoredDocument.chrome.currentFileID, 'tauri_file');
+assert.ok(tauriCommands.includes('read_storage_data'));
+assert.ok(tauriCommands.includes('write_storage_data'));
+assert.equal(tauriLegacyLocalStorage.get('deepconvo-standalone:chrome:mindmap_theme'), JSON.stringify('dark'),
+    '迁移不得删除旧 WebView localStorage 数据');
+
+const tauriEditedSnapshot = {
+    data: { id: 'tauri-root', topic: '文件桥接保存后的脑图' },
+    view: { tx: 55, ty: 65, scale: 1.25 },
+    scrollMap: {},
+};
+await tauriRuntime.window.chrome.storage.local.set({ mindmap_node_stats_visible: false });
+await tauriRuntime.window.chrome.runtime.sendMessage({
+    action: 'IDB_SET',
+    data: { 'MindMapData.__REF__tauri_file-extra': tauriEditedSnapshot },
+});
+assert.deepEqual(tauriStoredDocument.idb['MindMapData.__REF__tauri_file-extra'], tauriEditedSnapshot);
+assert.deepEqual(tauriStoredDocument.chrome.MindMapData, tauriEditedSnapshot,
+    'Tauri 文件存储必须同步活动导图启动快照');
+assert.equal(tauriStoredDocument.chrome.mindmap_node_stats_visible, false);
+assert.equal(tauriLegacyLocalStorage.size, 4,
+    'Tauri 新写入不得继续落入 WebView localStorage');
+
+const tauriReloaded = startRuntime({
+    tauri: tauriInvoke,
+    storageValues: new Map(),
+    host: 'tauri-mindmap.test',
+});
+const reloadedTauriSettings = await tauriReloaded.window.chrome.storage.local.get([
+    'currentFileID',
+    'mindmap_node_stats_visible',
+]);
+const reloadedTauriSnapshot = await tauriReloaded.window.chrome.runtime.sendMessage({
+    action: 'IDB_GET',
+    keys: 'MindMapData.__REF__tauri_file-extra',
+});
+assert.equal(reloadedTauriSettings.currentFileID, 'tauri_file');
+assert.equal(reloadedTauriSettings.mindmap_node_stats_visible, false);
+assert.deepEqual(reloadedTauriSnapshot.data['MindMapData.__REF__tauri_file-extra'], tauriEditedSnapshot,
+    '重启后应从 Tauri 业务数据文件恢复导图内容');
+
+console.log('存储同步校验通过：Tauri 文件、Quicker 原生变量与普通浏览器本地存储均可读写并恢复数据。');

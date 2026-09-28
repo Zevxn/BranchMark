@@ -254,6 +254,9 @@
         }
         .toolbar.hide-bar{ top: -65px; } 
         #btn-settings { flex: 0 0 auto; }
+        #btn-storage-location { flex: 0 0 auto; }
+        #btn-storage-location[hidden],
+        .mindmap-tauri-storage[hidden] { display: none !important; }
         .mindmap-settings-popover {
             position: fixed;
             z-index: 1100;
@@ -318,6 +321,20 @@
             font-size: 11px;
             line-height: 1.3;
         }
+        .mindmap-tauri-storage { cursor: default; }
+        .mindmap-tauri-storage .mindmap-setting-copy { overflow: hidden; }
+        .mindmap-tauri-storage .mindmap-setting-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mindmap-storage-reset {
+            border: 1px solid var(--toolbar-border);
+            border-radius: 6px;
+            padding: 5px 8px;
+            background: transparent;
+            color: var(--text-color-secondary);
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .mindmap-storage-reset:hover:not(:disabled) { color: var(--primary); background: var(--btn-hover); }
+        .mindmap-storage-reset:disabled { opacity: 0.45; cursor: not-allowed; }
         .mindmap-setting-toggle {
             position: relative;
             width: 34px;
@@ -2650,6 +2667,9 @@
             <i class="ri-folder-settings-line"></i>
         </button>
         <div class="divider"></div>
+        <button class="btn" id="btn-storage-location" type="button" title="设置桌面版数据存储位置" aria-label="设置桌面版数据存储位置" hidden>
+            <i class="ri-database-2-line" aria-hidden="true"></i>
+        </button>
         <button class="btn" id="btn-settings" type="button" title="设置" aria-label="打开设置" aria-haspopup="dialog" aria-controls="mindMapSettingsPopover" aria-expanded="false">
             <i class="ri-settings-3-line"></i>
         </button>
@@ -2659,6 +2679,14 @@
     <!-- SECTION 设置、搜索与关联面板 -->
     <section class="mindmap-settings-popover" id="mindMapSettingsPopover" role="dialog" aria-label="思维导图设置" aria-hidden="true">
         <div class="mindmap-settings-title">设置</div>
+        <div class="mindmap-setting-row mindmap-tauri-storage" id="tauriStorageSetting" hidden>
+            <span class="mindmap-setting-icon"><i class="ri-database-2-line" aria-hidden="true"></i></span>
+            <span class="mindmap-setting-copy">
+                <span class="mindmap-setting-name">桌面版数据位置</span>
+                <span class="mindmap-setting-value" id="tauriStoragePath" title="">默认位置</span>
+            </span>
+            <button class="mindmap-storage-reset" id="btn-storage-default" type="button" title="恢复默认存储位置">默认</button>
+        </div>
         <label class="mindmap-setting-row" for="settingThemeToggle">
             <span class="mindmap-setting-icon"><i class="ri-contrast-2-line" aria-hidden="true"></i></span>
             <span class="mindmap-setting-copy">

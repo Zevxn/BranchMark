@@ -121,7 +121,110 @@ function setMindMapSettingsPopoverOpen(open) {
     if (open) requestAnimationFrame(positionMindMapSettingsPopover);
 }
 
+async function initializeTauriStorageLocation() {
+    const tauriCore = window.__TAURI__?.core;
+    const storageButton = $('#btn-storage-location');
+    const storagePath = $('#tauriStoragePath');
+    const storageSetting = $('#tauriStorageSetting');
+    const defaultButton = $('#btn-storage-default');
+    if (!tauriCore || typeof tauriCore.invoke !== 'function' || !storageButton || !storagePath || !storageSetting) return;
+
+    const invoke = (command, args) => tauriCore.invoke(command, args);
+    storageButton.hidden = false;
+    storageSetting.hidden = false;
+
+    const refreshStorageStatus = async () => {
+        const status = await invoke('get_storage_location');
+        const displayPath = status.pending_default
+            ? '重启后恢复默认位置'
+            : status.pending_directory
+                ? `重启后切换至：${status.pending_directory}`
+                : status.is_default
+                    ? `默认位置：${status.current_directory}`
+                    : status.current_directory;
+        storagePath.textContent = displayPath;
+        storagePath.title = displayPath;
+        storageButton.title = `设置桌面版数据存储位置\n${displayPath}`;
+        if (defaultButton) defaultButton.disabled = status.is_default && !status.pending_directory;
+        return status;
+    };
+
+    const showFeedback = (message, isError = false) => {
+        const text = `${isError ? '❌' : '✅'} ${message}`;
+        if (typeof showTopToast === 'function') showTopToast(text, 3500);
+        else window.alert(text);
+    };
+
+    const flushCurrentMindMap = async () => {
+        if (!sessionStorage.getItem('currentFileID')) return;
+        if (typeof saveMindMapData !== 'function' || !await saveMindMapData(true, false)) {
+            throw new Error('当前导图保存失败，存储位置没有更改');
+        }
+    };
+
+    storageButton.addEventListener('click', async () => {
+        storageButton.disabled = true;
+        try {
+            const status = await refreshStorageStatus();
+            const selectedDirectory = await invoke('choose_storage_directory');
+            if (!selectedDirectory) return;
+
+            const currentDirectory = status.pending_directory || status.current_directory;
+            const confirmed = window.confirm(
+                `当前数据位置：\n${currentDirectory}\n\n新位置：\n${selectedDirectory}\n\n` +
+                '若新位置已有本软件的数据，将使用已有数据并保留原数据文件；否则会迁移当前数据，成功后删除原数据文件。设置在完全退出并重新打开软件后生效。继续吗？'
+            );
+            if (!confirmed) return;
+
+            await flushCurrentMindMap();
+            await invoke('schedule_storage_directory', { path: selectedDirectory });
+            await refreshStorageStatus();
+            showFeedback('存储位置已设置，重启后生效');
+        } catch (error) {
+            showFeedback(`存储位置设置失败：${error?.message || error}`, true);
+        } finally {
+            storageButton.disabled = false;
+        }
+    });
+
+    defaultButton?.addEventListener('click', async event => {
+        event.stopPropagation();
+        defaultButton.disabled = true;
+        try {
+            const confirmed = window.confirm(
+                '恢复默认存储位置？默认位置已有本软件数据时会使用其中的数据并保留原数据文件；否则会迁移当前数据，成功后删除原数据文件。重启后生效。'
+            );
+            if (!confirmed) return;
+
+            let exportWarning = '';
+            try {
+                await flushCurrentMindMap();
+            } catch (error) {
+                exportWarning = '当前导图未能立即保存：'
+                    + (error?.message || error)
+                    + '。系统仍会尝试迁移原位置的业务数据文件。';
+            }
+            await invoke('schedule_default_storage_directory');
+            await refreshStorageStatus();
+            showFeedback(exportWarning
+                ? exportWarning + '已安排恢复默认位置，重启后生效'
+                : '已设置恢复默认位置，重启后生效');
+        } catch (error) {
+            showFeedback(`恢复默认位置失败：${error?.message || error}`, true);
+        } finally {
+            defaultButton.disabled = false;
+        }
+    });
+
+    try {
+        await refreshStorageStatus();
+    } catch (error) {
+        console.warn('[Tauri] 读取存储位置失败:', error);
+    }
+}
+
 async function initializeMindMapTheme() {
+    void initializeTauriStorageLocation();
     const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     const result = await chrome.storage.local.get({
         [MINDMAP_THEME_STORAGE_KEY]: systemTheme,

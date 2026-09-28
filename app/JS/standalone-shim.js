@@ -46,8 +46,16 @@
                 : {},
         }
         : null;
+    const tauriCore = !nativeQuickerBridge
+        && window.__TAURI__?.core
+        && typeof window.__TAURI__.core.invoke === 'function'
+        ? window.__TAURI__.core
+        : null;
     window.__DEEPCONVO_NATIVE_QUICKER_HOST__ = Boolean(nativeQuickerBridge);    // 前是否检测到 Quicker 原生接口
     let databasePromise = null;
+    let tauriStorageData = null;
+    let tauriStorageLoadPromise = null;
+    let tauriStorageWriteQueue = Promise.resolve();
 
     // !SECTION 宿主环境与 Quicker 状态初始化
     // SECTION Quicker 状态与本地存储适配
@@ -102,11 +110,7 @@
         return Promise.resolve();
     }
     // SECTION 通用数据读取
-    function readLocalValue(prefix, key) {
-        const quickerBucket = getQuickerBucket(prefix);
-        // Quicker 模式 → 从对应数据区读取 key，然后返回复制值
-        if (quickerBucket) return clone(quickerBucket[key]);
-        // 浏览器模式：从 localStorage 读取 key，然后返回复制值
+    function readBrowserLocalValue(prefix, key) {
         try {
             const raw = localStorage.getItem(prefix + key);
             return raw === null ? undefined : JSON.parse(raw);
@@ -114,6 +118,22 @@
             console.warn('[Standalone] 本地数据读取失败:', key, error);
             return undefined;
         }
+    }
+
+    function getTauriStorageBucket(prefix) {
+        if (!tauriStorageData) return null;
+        if (prefix === chromePrefix) return tauriStorageData.chrome;
+        if (prefix === idbFallbackPrefix) return tauriStorageData.idb;
+        return null;
+    }
+
+    function readLocalValue(prefix, key) {
+        const quickerBucket = getQuickerBucket(prefix);
+        // Quicker 模式 → 从对应数据区读取 key，然后返回复制值
+        if (quickerBucket) return clone(quickerBucket[key]);
+        if (tauriCore) return clone(getTauriStorageBucket(prefix)?.[key]);
+        // 浏览器模式：从 localStorage 读取 key，然后返回复制值
+        return readBrowserLocalValue(prefix, key);
     }
     // !SECTION 通用数据读取
     // SECTION 通用数据写入
@@ -125,6 +145,10 @@
                 quickerBucket[key] = clone(value);
             });
             return persistQuickerState();
+        }
+        if (tauriCore) {
+            const bucketName = prefix === chromePrefix ? 'chrome' : 'idb';
+            return updateTauriStorage(bucketName, values);
         }
         // 浏览器模式  → 写入 localStorage，键名为 prefix + key
         Object.entries(values || {}).forEach(([key, value]) => {
@@ -141,6 +165,10 @@
             delete quickerBucket[key];
             return persistQuickerState();
         }
+        if (tauriCore) {
+            const bucketName = prefix === chromePrefix ? 'chrome' : 'idb';
+            return updateTauriStorage(bucketName, null, [key]);
+        }
         // 浏览器模式  → 删除名为 prefix + key 的 localStorage 项
         localStorage.removeItem(prefix + key);
         return Promise.resolve();
@@ -150,16 +178,102 @@
         const quickerBucket = getQuickerBucket(prefix);
         // Quicker 模式：复制并返回 chrome 或 idb 数据区。
         if (quickerBucket) return clone(quickerBucket);
+        if (tauriCore) return clone(getTauriStorageBucket(prefix) || {});
+        return listBrowserLocalValues(prefix);
+    }
+
+    function listBrowserLocalValues(prefix) {
         // 浏览器模式：遍历 localStorage，只取以 prefix 开头的键，去掉前缀后组成一个对象
         const data = {};
         for (let index = 0; index < localStorage.length; index++) {
             const storageKey = localStorage.key(index);
             if (!storageKey || !storageKey.startsWith(prefix)) continue;
             const key = storageKey.slice(prefix.length);
-            data[key] = readLocalValue(prefix, key);
+            data[key] = readBrowserLocalValue(prefix, key);
         }
         return data;
     }
+
+    // SECTION Tauri 文件存储适配
+    function normalizeTauriStorageDocument(document) {
+        if (!document || typeof document !== 'object' || Array.isArray(document)
+            || document.version !== 1
+            || !document.chrome || typeof document.chrome !== 'object' || Array.isArray(document.chrome)
+            || !document.idb || typeof document.idb !== 'object' || Array.isArray(document.idb)) {
+            throw new Error('Tauri 导图数据文件格式无效；原文件已保留。');
+        }
+        return {
+            version: 1,
+            chrome: clone(document.chrome),
+            idb: clone(document.idb),
+        };
+    }
+
+    async function readLegacyTauriStorageDocument() {
+        const indexedDbValues = await readIndexedDbValues(null);
+        if (indexedDbValues === null && 'indexedDB' in window) {
+            throw new Error('无法读取当前 WebView2 的 IndexedDB；迁移未完成，旧数据保持不变。');
+        }
+        const fallbackValues = listBrowserLocalValues(idbFallbackPrefix);
+        return normalizeTauriStorageDocument({
+            version: 1,
+            chrome: listBrowserLocalValues(chromePrefix),
+            idb: { ...fallbackValues, ...(indexedDbValues || {}) },
+        });
+    }
+
+    function ensureTauriStorageLoaded() {
+        if (!tauriCore) return Promise.resolve(null);
+        if (tauriStorageData) return Promise.resolve(tauriStorageData);
+        if (!tauriStorageLoadPromise) {
+            tauriStorageLoadPromise = (async () => {
+                const savedDocument = await tauriCore.invoke('read_storage_data');
+                if (savedDocument) {
+                    tauriStorageData = normalizeTauriStorageDocument(savedDocument);
+                    return tauriStorageData;
+                }
+
+                const legacyDocument = await readLegacyTauriStorageDocument();
+                const migratedDocument = await tauriCore.invoke('write_storage_data', {
+                    data: legacyDocument,
+                    ifMissing: true,
+                });
+                tauriStorageData = normalizeTauriStorageDocument(migratedDocument);
+                return tauriStorageData;
+            })().catch(error => {
+                tauriStorageLoadPromise = null;
+                throw error;
+            });
+        }
+        return tauriStorageLoadPromise;
+    }
+
+    async function waitForTauriStorage() {
+        await ensureTauriStorageLoaded();
+        await tauriStorageWriteQueue;
+        return tauriStorageData;
+    }
+
+    function updateTauriStorage(bucketName, values, removedKeys = []) {
+        const operation = tauriStorageWriteQueue.then(async () => {
+            await ensureTauriStorageLoaded();
+            const nextDocument = clone(tauriStorageData);
+            const bucket = nextDocument[bucketName];
+            Object.entries(values || {}).forEach(([key, value]) => {
+                bucket[key] = clone(value);
+            });
+            removedKeys.filter(Boolean).forEach(key => delete bucket[key]);
+
+            const savedDocument = await tauriCore.invoke('write_storage_data', {
+                data: nextDocument,
+                ifMissing: false,
+            });
+            tauriStorageData = normalizeTauriStorageDocument(savedDocument);
+        });
+        tauriStorageWriteQueue = operation.catch(() => {});
+        return operation;
+    }
+    // !SECTION Tauri 文件存储适配
 
     // 统一 get 的不同参数格式，返回一个对象
     function normalizeGetResult(keys, prefix) {
@@ -214,22 +328,22 @@
     }
     // !SECTION 打开数据库
     // SECTION 读取indexedDB数据
-    async function idbRead(keys) {
-        const db = await openDatabase();    // Quicker 中使用 IndexedDB 时会返回 null
-        const list = keys === null || keys === undefined    // 
+    async function readIndexedDbValues(keys) {
+        const db = await openDatabase();
+        if (!db) return null;
+
+        const list = keys === null || keys === undefined
             ? null
             : (Array.isArray(keys) ? keys : [keys]);
-        if (!db) {
-            if (list === null) return listLocalValues(idbFallbackPrefix);   // 未指定键时，读取全部数据
-            return Object.fromEntries(list.map(key => [key, readLocalValue(idbFallbackPrefix, key)]));   // 指定键时，读取指定键
-        }
         if (list === null) {
             return new Promise((resolve, reject) => {
                 const transaction = db.transaction('keyval', 'readonly');
                 const store = transaction.objectStore('keyval');
                 const keyRequest = store.getAllKeys();
                 const valueRequest = store.getAll();
-                transaction.oncomplete = () => resolve(Object.fromEntries(keyRequest.result.map((key, index) => [key, valueRequest.result[index]])));
+                transaction.oncomplete = () => resolve(Object.fromEntries(
+                    keyRequest.result.map((key, index) => [key, valueRequest.result[index]]),
+                ));
                 transaction.onerror = () => reject(transaction.error);
             });
         }
@@ -245,9 +359,34 @@
             transaction.onerror = () => reject(transaction.error);
         });
     }
+
+    async function idbRead(keys) {
+        if (tauriCore) {
+            const storage = await waitForTauriStorage();
+            const list = keys === null || keys === undefined
+                ? null
+                : (Array.isArray(keys) ? keys : [keys]);
+            if (list === null) return clone(storage.idb);
+            return Object.fromEntries(list.map(key => [key, clone(storage.idb[key])]));
+        }
+
+        const db = await openDatabase();    // Quicker 中使用 IndexedDB 时会返回 null
+        const list = keys === null || keys === undefined
+            ? null
+            : (Array.isArray(keys) ? keys : [keys]);
+        if (!db) {
+            if (list === null) return listLocalValues(idbFallbackPrefix);   // 未指定键时，读取全部数据
+            return Object.fromEntries(list.map(key => [key, readLocalValue(idbFallbackPrefix, key)]));   // 指定键时，读取指定键
+        }
+        return readIndexedDbValues(keys);
+    }
     // !SECTION 读取indexedDB数据
     // SECTION 写入indexedDB数据
     async function idbWrite(values) {
+        if (tauriCore) {
+            await updateTauriStorage('idb', values);
+            return;
+        }
         const db = await openDatabase();    // Quicker 中使用 IndexedDB 时会返回 null
         if (!db) {
             await writeLocalValues(idbFallbackPrefix, values);
@@ -265,6 +404,10 @@
     // SECTION 删除indexedDB数据
     async function idbDelete(keys) {
         const list = Array.isArray(keys) ? keys : [keys];
+        if (tauriCore) {
+            await updateTauriStorage('idb', null, list);
+            return;
+        }
         const db = await openDatabase();    // Quicker 中使用 IndexedDB 时会返回 null
         if (!db) {
             for (const key of list.filter(Boolean)) {
@@ -344,10 +487,15 @@
 
     const storageLocal = {
         get(keys, callback) {
-            return withOptionalCallback(Promise.resolve(normalizeGetResult(keys, chromePrefix)), callback);
+            const promise = (async () => {
+                await waitForTauriStorage();
+                return normalizeGetResult(keys, chromePrefix);
+            })();
+            return withOptionalCallback(promise, callback);
         },
         set(values, callback) {
             const promise = Promise.resolve().then(async () => {
+                await waitForTauriStorage();
                 const changes = {};
                 Object.entries(values || {}).forEach(([key, value]) => {
                     const oldValue = readLocalValue(chromePrefix, key);
@@ -363,6 +511,7 @@
         remove(keys, callback) {
             const list = Array.isArray(keys) ? keys : [keys];
             const promise = Promise.resolve().then(async () => {
+                await waitForTauriStorage();
                 const changes = {};
                 for (const key of list.filter(Boolean)) {
                     const oldValue = readLocalValue(chromePrefix, key);
@@ -375,6 +524,7 @@
         },
         clear(callback) {
             const promise = Promise.resolve().then(async () => {
+                await waitForTauriStorage();
                 for (const key of Object.keys(listLocalValues(chromePrefix))) {
                     await removeLocalValue(chromePrefix, key);
                 }
