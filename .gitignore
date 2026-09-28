@@ -10,6 +10,8 @@ node_modules/
 /desktop/release*/
 /desktop/.tmp/
 /desktop/build/
+/desktop-tauri/src-tauri/target/
+/desktop-tauri/src-tauri/gen/schemas/
 
 # Test and coverage output
 /coverage/

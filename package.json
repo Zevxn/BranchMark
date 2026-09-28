@@ -14,6 +14,8 @@
     "desktop:build": "npm --prefix desktop run build:win",
     "desktop:portable": "npm --prefix desktop run build:portable",
     "desktop:smoke": "npm --prefix desktop run smoke",
-    "desktop:verify": "npm --prefix desktop run verify"
+    "desktop:verify": "npm --prefix desktop run verify",
+    "tauri:dev": "npm --prefix desktop-tauri run dev",
+    "tauri:build": "npm --prefix desktop-tauri run build:win"
   }
 }
