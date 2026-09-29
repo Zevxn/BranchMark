@@ -1693,6 +1693,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // F11 切换 Tauri 窗口全屏；捕获阶段处理，编辑器内也可使用。
+    window.addEventListener('keydown', (e) => {
+        const tauriCore = window.__TAURI__?.core;
+        if (e.key !== 'F11' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey
+            || window.__DEEPCONVO_NATIVE_QUICKER_HOST__ || typeof tauriCore?.invoke !== 'function') return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.repeat) return;
+        tauriCore.invoke('toggle_window_fullscreen').catch(error => {
+            console.warn('[Tauri] 切换窗口全屏失败:', error);
+            showTopToast('❌ 切换窗口全屏失败：' + (error.message || error));
+        });
+    }, { capture: true });
+
     /* --- MindMap.js 中的键盘监听部分 --- */
 
     window.addEventListener('keydown', (e) => {

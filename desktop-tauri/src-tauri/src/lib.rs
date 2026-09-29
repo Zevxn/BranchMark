@@ -565,7 +565,7 @@ mod json_export_tests {
 
 // !SECTION JSON 脑图文件导出
 
-// SECTION 应用启动与窗口主题
+// SECTION 应用启动与窗口控制
 
 #[tauri::command]
 fn set_window_theme(window: tauri::WebviewWindow, dark: bool) -> Result<(), String> {
@@ -577,6 +577,16 @@ fn set_window_theme(window: tauri::WebviewWindow, dark: bool) -> Result<(), Stri
     window
         .set_theme(Some(theme))
         .map_err(|error| format!("切换窗口主题失败：{error}"))
+}
+
+#[tauri::command]
+fn toggle_window_fullscreen(window: tauri::WebviewWindow) -> Result<(), String> {
+    let fullscreen = window
+        .is_fullscreen()
+        .map_err(|error| format!("读取窗口全屏状态失败：{error}"))?;
+    window
+        .set_fullscreen(!fullscreen)
+        .map_err(|error| format!("切换窗口全屏失败：{error}"))
 }
 
 pub fn run() {
@@ -591,6 +601,7 @@ pub fn run() {
             choose_json_export_directory,
             write_mindmap_json,
             set_window_theme,
+            toggle_window_fullscreen,
         ])
         .setup(|app| {
             match apply_pending_storage_directory(app.handle()) {
@@ -606,6 +617,8 @@ pub fn run() {
                 .inner_size(1440.0, 920.0)
                 .min_inner_size(960.0, 640.0)
                 .center()
+                // Windows 下使用网页原生拖放，保证目录中的脑图可拖拽移动。
+                .disable_drag_drop_handler()
                 .build()?;
             Ok(())
         })
@@ -613,4 +626,4 @@ pub fn run() {
         .expect("启动 BranchMark Tauri 桌面版失败");
 }
 
-// !SECTION 应用启动与窗口主题
+// !SECTION 应用启动与窗口控制
