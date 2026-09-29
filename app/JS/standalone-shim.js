@@ -52,6 +52,7 @@
         ? window.__TAURI__.core
         : null;
     window.__DEEPCONVO_NATIVE_QUICKER_HOST__ = Boolean(nativeQuickerBridge);    // 前是否检测到 Quicker 原生接口
+    window.__DEEPCONVO_NATIVE_TAURI_HOST__ = Boolean(tauriCore);
     let databasePromise = null;
     let tauriStorageData = null;
     let tauriStorageLoadPromise = null;
@@ -195,31 +196,11 @@
     }
 
     // SECTION Tauri 文件存储适配
-    function normalizeTauriStorageDocument(document) {
-        if (!document || typeof document !== 'object' || Array.isArray(document)
-            || document.version !== 1
-            || !document.chrome || typeof document.chrome !== 'object' || Array.isArray(document.chrome)
-            || !document.idb || typeof document.idb !== 'object' || Array.isArray(document.idb)) {
+    function normalizeTauriStorageValues(values) {
+        if (!values || typeof values !== 'object' || Array.isArray(values)) {
             throw new Error('Tauri 导图数据文件格式无效；原文件已保留。');
         }
-        return {
-            version: 1,
-            chrome: clone(document.chrome),
-            idb: clone(document.idb),
-        };
-    }
-
-    async function readLegacyTauriStorageDocument() {
-        const indexedDbValues = await readIndexedDbValues(null);
-        if (indexedDbValues === null && 'indexedDB' in window) {
-            throw new Error('无法读取当前 WebView2 的 IndexedDB；迁移未完成，旧数据保持不变。');
-        }
-        const fallbackValues = listBrowserLocalValues(idbFallbackPrefix);
-        return normalizeTauriStorageDocument({
-            version: 1,
-            chrome: listBrowserLocalValues(chromePrefix),
-            idb: { ...fallbackValues, ...(indexedDbValues || {}) },
-        });
+        return values;
     }
 
     function ensureTauriStorageLoaded() {
@@ -227,18 +208,8 @@
         if (tauriStorageData) return Promise.resolve(tauriStorageData);
         if (!tauriStorageLoadPromise) {
             tauriStorageLoadPromise = (async () => {
-                const savedDocument = await tauriCore.invoke('read_storage_data');
-                if (savedDocument) {
-                    tauriStorageData = normalizeTauriStorageDocument(savedDocument);
-                    return tauriStorageData;
-                }
-
-                const legacyDocument = await readLegacyTauriStorageDocument();
-                const migratedDocument = await tauriCore.invoke('write_storage_data', {
-                    data: legacyDocument,
-                    ifMissing: true,
-                });
-                tauriStorageData = normalizeTauriStorageDocument(migratedDocument);
+                const values = await tauriCore.invoke('read_storage_values', { bucket: 'chrome', keys: null });
+                tauriStorageData = { chrome: normalizeTauriStorageValues(values), idb: {} };
                 return tauriStorageData;
             })().catch(error => {
                 tauriStorageLoadPromise = null;
@@ -255,23 +226,45 @@
     }
 
     function updateTauriStorage(bucketName, values, removedKeys = []) {
+        const nextValues = clone(values || {});
+        const nextRemovedKeys = [...removedKeys].filter(Boolean);
         const operation = tauriStorageWriteQueue.then(async () => {
             await ensureTauriStorageLoaded();
-            const nextDocument = clone(tauriStorageData);
-            const bucket = nextDocument[bucketName];
-            Object.entries(values || {}).forEach(([key, value]) => {
-                bucket[key] = clone(value);
-            });
-            removedKeys.filter(Boolean).forEach(key => delete bucket[key]);
-
-            const savedDocument = await tauriCore.invoke('write_storage_data', {
-                data: nextDocument,
-                ifMissing: false,
-            });
-            tauriStorageData = normalizeTauriStorageDocument(savedDocument);
+            const bucket = tauriStorageData[bucketName];
+            // MindMapData 是当前导图的内存快照，业务状态文件只保存导图 ID。
+            const persistedValues = Object.fromEntries(Object.entries(nextValues).filter(([key, value]) =>
+                bucketName !== 'chrome' || (key !== 'MindMapData'
+                    && JSON.stringify(bucket[key]) !== JSON.stringify(value))));
+            const persistedRemovedKeys = nextRemovedKeys.filter(key => bucketName !== 'chrome' || key !== 'MindMapData');
+            if (Object.keys(persistedValues).length || persistedRemovedKeys.length) {
+                await tauriCore.invoke('write_storage_values', {
+                    bucket: bucketName,
+                    values: persistedValues,
+                    removedKeys: persistedRemovedKeys,
+                });
+            }
+            if (bucketName === 'chrome') {
+                if (Object.hasOwn(nextValues, 'currentFileID') && nextValues.currentFileID !== bucket.currentFileID) {
+                    delete bucket.MindMapData;
+                }
+                Object.assign(bucket, nextValues);
+                nextRemovedKeys.forEach(key => delete bucket[key]);
+            }
         });
         tauriStorageWriteQueue = operation.catch(() => {});
         return operation;
+    }
+
+    async function loadTauriCurrentMindMap(keys) {
+        const requested = keys == null || keys === 'MindMapData'
+            || (Array.isArray(keys) ? keys.includes('MindMapData') : Object.hasOwn(keys, 'MindMapData'));
+        if (!tauriCore || !requested) return;
+        const bucket = tauriStorageData.chrome;
+        if (bucket.currentFileID == null) return;
+        const key = `MindMapData.__REF__${bucket.currentFileID}-extra`;
+        const values = await idbRead([key]);
+        if (Object.hasOwn(values, key)) bucket.MindMapData = values[key];
+        else delete bucket.MindMapData;
     }
     // !SECTION Tauri 文件存储适配
 
@@ -362,12 +355,11 @@
 
     async function idbRead(keys) {
         if (tauriCore) {
-            const storage = await waitForTauriStorage();
+            await waitForTauriStorage();
             const list = keys === null || keys === undefined
                 ? null
                 : (Array.isArray(keys) ? keys : [keys]);
-            if (list === null) return clone(storage.idb);
-            return Object.fromEntries(list.map(key => [key, clone(storage.idb[key])]));
+            return normalizeTauriStorageValues(await tauriCore.invoke('read_storage_values', { bucket: 'idb', keys: list }));
         }
 
         const db = await openDatabase();    // Quicker 中使用 IndexedDB 时会返回 null
@@ -406,6 +398,10 @@
         const list = Array.isArray(keys) ? keys : [keys];
         if (tauriCore) {
             await updateTauriStorage('idb', null, list);
+            const currentFileId = tauriStorageData.chrome.currentFileID;
+            if (currentFileId != null && list.includes(`MindMapData.__REF__${currentFileId}-extra`)) {
+                await updateTauriStorage('chrome', { currentFileID: null, MindMapAction: null }, ['MindMapData']);
+            }
             return;
         }
         const db = await openDatabase();    // Quicker 中使用 IndexedDB 时会返回 null
@@ -489,6 +485,7 @@
         get(keys, callback) {
             const promise = (async () => {
                 await waitForTauriStorage();
+                await loadTauriCurrentMindMap(keys);
                 return normalizeGetResult(keys, chromePrefix);
             })();
             return withOptionalCallback(promise, callback);

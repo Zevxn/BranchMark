@@ -385,8 +385,10 @@ class myBookmarkManager {
                 'currentFolderId': this.currentFolderId,
                 'changeTime': Date.now()
             });
+            return true;
         } catch (e) {
             console.log('[BookmarkManager] 保存数据失败', e);
+            return false;
         }
     }
 
@@ -1934,8 +1936,13 @@ class myBookmarkManager {
     }
     async openMindMap(id,fileName,newTab=false, sidebar=false,options = {}){    // 打开思维导图
         const refkey=`MindMapData.__REF__${id}-extra`;
-        const MindMapData = await idbGet([refkey]) || {};
         try {
+            const savedMindMapData = await idbGet([refkey]);
+            if (window.__DEEPCONVO_NATIVE_TAURI_HOST__ && !savedMindMapData) {
+                showTopToast('❌ 导图文件不存在，收藏夹条目已保留。');
+                return false;
+            }
+            const MindMapData = savedMindMapData || {};
             // 打开预览窗口
             let win=null;
             await chrome.storage.local.set({'MindMapData': MindMapData, 'currentFileID': id,'MindMapAction':'open','fileName':fileName});// 防止刷新后数据丢失
@@ -1965,6 +1972,10 @@ class myBookmarkManager {
             return true;
         } catch (error) {
             console.log('[openMindMap] 打开预览失败:', error);
+            if (window.__DEEPCONVO_NATIVE_TAURI_HOST__) {
+                showTopToast('❌ 导图文件读取失败，请检查文件是否完整。');
+                return false;
+            }
             
             // 特定错误处理
             if (error.name === 'QuotaExceededError') {
@@ -2110,6 +2121,11 @@ class myBookmarkManager {
         }   
 
         const itemId = this.indexData.id||this.generateId();
+        const isTauriMindMap = window.__DEEPCONVO_NATIVE_TAURI_HOST__ && this.action === 'save_mindmap';
+        if (isTauriMindMap) {
+            // 先落盘完整导图，成功后再把引用写入收藏夹。
+            await idbSet({[`MindMapData.__REF__${itemId}-extra`]:this.replyData});
+        }
         if (this.action==='save_mindmap'){
             this.data.items[itemId] = {
                 id: itemId,
@@ -2150,14 +2166,21 @@ class myBookmarkManager {
         }
         // ======== 【新增这一块】 ========
         if (this.visibleIds) this.visibleIds.add(itemId);
-        if (!isAuto){
-            await this.saveToStorage(); // ✅ 等待保存完成
+        if (!isAuto || isTauriMindMap){
+            const saved = await this.saveToStorage();
+            if (isTauriMindMap && !saved) {
+                await this.loadFromStorage();
+                return null;
+            }
             this.renderInsertNode(itemId, dropdownValue);
         }
         
         this.hideModal('newItemModal');
         if (this.action==='save_mindmap'){
-            await idbSet({[`MindMapData.__REF__${itemId}-extra`]:this.replyData});
+            if (!isTauriMindMap) await idbSet({[`MindMapData.__REF__${itemId}-extra`]:this.replyData});
+            else await chrome.storage.local.set({
+                currentFileID: itemId, MindMapData: this.replyData, MindMapAction: 'open', fileName: name
+            });
             sessionStorage.setItem('currentFileID', itemId);
             console.log('confirmNewItem 调用-this.data.items[itemId]',this.replyData);
         }else if (this.action==='save_markdown'){    // 只有脑图页面才有保存思维导图的动作
@@ -2242,8 +2265,8 @@ class myBookmarkManager {
         if (folder) {
             const children = [...folder.children];
             for (const childId of children) {
-                if (this.data.folders[childId]) {
-                    await this.deleteItem(childId); // 等待删除完成，递归删除子文件夹
+                if (this.data.folders[childId] || window.__DEEPCONVO_NATIVE_TAURI_HOST__) {
+                    if (await this.deleteItem(childId) === false) return false;
                 } else {
                     delete this.data.items[childId];
                 }
@@ -2259,7 +2282,10 @@ class myBookmarkManager {
 
             delete this.data.folders[id];
             this.expandedFolders.delete(id);
-            await this.saveToStorage();
+            if (!await this.saveToStorage() && window.__DEEPCONVO_NATIVE_TAURI_HOST__) {
+                await this.loadFromStorage();
+                return false;
+            }
         } else if (this.data.items[id]) {
             const item = this.data.items[id];
             const url=item.url;
@@ -2270,6 +2296,14 @@ class myBookmarkManager {
                 this.data.rootOrder = this.data.rootOrder.filter(cid => cid !== id);
             }
 
+            if (window.__DEEPCONVO_NATIVE_TAURI_HOST__) {
+                // 先保存移除引用后的索引，文件清理失败时内容仍可保留。
+                delete this.data.items[id];
+                if (!await this.saveToStorage()) {
+                    await this.loadFromStorage();
+                    return false;
+                }
+            }
             if (item.type==='mindmap'){
                 await idbRemove(`MindMapData.__REF__${id}-extra`);
                 console.log(`已清理 ${item.data}`);
@@ -2292,8 +2326,10 @@ class myBookmarkManager {
                 }
             }
             
-            delete this.data.items[id];     // 属性不存在，则静默返回 true，不会抛出任何错误。
-            await this.saveToStorage();
+            if (!window.__DEEPCONVO_NATIVE_TAURI_HOST__) {
+                delete this.data.items[id];
+                await this.saveToStorage();
+            }
         }
         // this.render();
         this.renderDeleteNode(id);

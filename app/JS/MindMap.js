@@ -1588,6 +1588,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }else if (action ==='open') {
                 (async () => {
                     const MindMapData=await readmapData('MindMapData');
+                    if (window.__DEEPCONVO_NATIVE_TAURI_HOST__ && !MindMapData) {
+                        // 文件缺失或读取失败时打开空白画布，不把它绑定到原导图 ID。
+                        sessionStorage.removeItem('currentFileID');
+                        showTopToast('❌ 当前导图无法读取，请从收藏夹打开其他导图。');
+                        renderTree();
+                        renderDock();
+                        return;
+                    }
                     const currentFileID = await readmapData('currentFileID');
                     console.log('MindMapData',MindMapData)
                     updateState(MindMapData,currentFileID,pageTitle,true);

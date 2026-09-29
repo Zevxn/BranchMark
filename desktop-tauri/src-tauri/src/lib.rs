@@ -10,10 +10,10 @@ use std::{
 };
 use tauri::{path::BaseDirectory, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod storage;
+
 const APP_IDENTIFIER: &str = "com.deepconvo.mindmap.tauri";
 const STORAGE_CONFIG_FILE: &str = "storage-location.json";
-const STORAGE_DATA_FILE: &str = "deepconvo-mindmap-data.json";
-const STORAGE_DOCUMENT_VERSION: u32 = 1;
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 // SECTION 存储配置与业务数据文件
@@ -33,31 +33,12 @@ enum PendingStorageDirectory {
     Default,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-struct StorageDocument {
-    version: u32,
-    #[serde(default)]
-    chrome: BTreeMap<String, Value>,
-    #[serde(default)]
-    idb: BTreeMap<String, Value>,
-}
-
 #[derive(Serialize)]
 struct StorageLocationStatus {
     current_directory: String,
     pending_directory: Option<String>,
     pending_default: bool,
     is_default: bool,
-}
-
-fn validate_storage_document(document: StorageDocument) -> Result<StorageDocument, String> {
-    if document.version != STORAGE_DOCUMENT_VERSION {
-        return Err(format!(
-            "数据文件版本 {} 不受支持；原文件已保留。",
-            document.version
-        ));
-    }
-    Ok(document)
 }
 
 fn storage_config_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -202,45 +183,13 @@ fn validate_custom_directory(app: &AppHandle, directory: &Path) -> Result<(), St
     Ok(())
 }
 
-fn storage_data_path(directory: &Path) -> PathBuf {
-    directory.join(STORAGE_DATA_FILE)
-}
-
-fn read_storage_document(path: &Path) -> Result<Option<StorageDocument>, String> {
-    let Some(contents) = read_regular_file(path, "导图业务数据文件")? else {
-        return Ok(None);
-    };
-    let document: StorageDocument = serde_json::from_slice(&contents)
-        .map_err(|error| format!("导图业务数据文件无法解析，原文件已保留：{error}"))?;
-    validate_storage_document(document).map(Some)
-}
-
-fn save_storage_document_at(
-    directory: &Path,
-    document: StorageDocument,
-    only_if_missing: bool,
-) -> Result<StorageDocument, String> {
-    let document = validate_storage_document(document)?;
-    let path = storage_data_path(directory);
-    if only_if_missing {
-        if let Some(existing) = read_storage_document(&path)? {
-            return Ok(existing);
-        }
-    }
-
-    let contents = serde_json::to_vec_pretty(&document)
-        .map_err(|error| format!("序列化导图业务数据失败：{error}"))?;
-    atomic_write(&path, &contents).map_err(|error| format!("写入导图业务数据失败：{error}"))?;
-    Ok(document)
-}
-
 enum StorageCopyOutcome {
     Existing,
-    Copied,
+    Copied(Vec<PathBuf>),
     SourceUnavailable,
 }
 
-fn copy_storage_document_if_missing(
+fn copy_storage_files_if_missing(
     source_directory: &Path,
     destination_directory: &Path,
     allow_missing_source: bool,
@@ -249,30 +198,25 @@ fn copy_storage_document_if_missing(
         return Ok(StorageCopyOutcome::Existing);
     }
 
-    let destination_path = storage_data_path(destination_directory);
-    if read_storage_document(&destination_path)?.is_some() {
+    if !storage::files(destination_directory)?.is_empty() {
         return Ok(StorageCopyOutcome::Existing);
     }
 
-    let source_path = storage_data_path(source_directory);
-    let document = match read_storage_document(&source_path) {
-        Ok(Some(document)) => document,
-        Ok(None) | Err(_) if allow_missing_source => {
+    let files = match storage::files(source_directory) {
+        Ok(files) if !files.is_empty() => files,
+        Ok(_) | Err(_) if allow_missing_source => {
             return Ok(StorageCopyOutcome::SourceUnavailable)
         }
-        Ok(None) => {
+        Ok(_) => {
             return Err(format!(
-                "当前数据文件不存在：{}。存储位置保持不变，原数据未删除。",
-                source_path.display()
+                "当前业务数据不存在：{}。存储位置保持不变，原数据未删除。",
+                source_directory.display()
             ));
         }
         Err(error) => return Err(error),
     };
-    save_storage_document_at(destination_directory, document.clone(), true)?;
-    if read_storage_document(&destination_path)?.as_ref() != Some(&document) {
-        return Err("目标数据文件校验失败；存储位置保持不变，原文件已保留。".to_string());
-    }
-    Ok(StorageCopyOutcome::Copied)
+    storage::copy_files(source_directory, destination_directory, &files)?;
+    Ok(StorageCopyOutcome::Copied(files))
 }
 
 fn apply_pending_storage_directory(app: &AppHandle) -> Result<Option<String>, String> {
@@ -290,7 +234,7 @@ fn apply_pending_storage_directory(app: &AppHandle) -> Result<Option<String>, St
         PendingStorageDirectory::Default => (default_storage_directory(app)?, None, true),
     };
 
-    let copy_outcome = copy_storage_document_if_missing(
+    let copy_outcome = copy_storage_files_if_missing(
         &current_directory,
         &destination_directory,
         allow_missing_source,
@@ -298,20 +242,24 @@ fn apply_pending_storage_directory(app: &AppHandle) -> Result<Option<String>, St
 
     config.active_directory = next_active_directory;
     config.pending_directory = None;
-    save_storage_config(app, &config)?;
+    if let Err(error) = save_storage_config(app, &config) {
+        if let StorageCopyOutcome::Copied(files) = &copy_outcome {
+            let _ = storage::remove_files(&destination_directory, files);
+        }
+        return Err(error);
+    }
     Ok(match copy_outcome {
-        StorageCopyOutcome::Copied => {
-            // 目标数据校验和目录配置保存成功后，只删除原位置的业务数据文件。
-            let source_path = storage_data_path(&current_directory);
-            fs::remove_file(&source_path).err().map(|error| {
+        StorageCopyOutcome::Copied(files) => {
+            // 目标文件校验和配置保存成功后，只清理原位置的应用业务文件。
+            storage::remove_files(&current_directory, &files).err().map(|error| {
                 format!(
-                    "存储位置已切换，但原数据文件删除失败，仍保留在 {}：{error}",
-                    source_path.display()
+                    "存储位置已切换，但部分原数据文件仍保留在 {}：{error}",
+                    current_directory.display()
                 )
             })
         }
         StorageCopyOutcome::SourceUnavailable => Some(
-            "恢复默认时无法读取原位置的数据文件；原文件仍保留，默认位置会读取其中现有的数据。"
+            "恢复默认时无法读取原位置的业务数据；原文件仍保留，默认位置会读取其中现有的数据。"
                 .to_string(),
         ),
         StorageCopyOutcome::Existing => None,
@@ -375,7 +323,11 @@ fn get_storage_location(app: AppHandle) -> Result<StorageLocationStatus, String>
 }
 
 #[tauri::command]
-fn read_storage_data(app: AppHandle) -> Result<Option<StorageDocument>, String> {
+fn read_storage_values(
+    app: AppHandle,
+    bucket: String,
+    keys: Option<Vec<String>>,
+) -> Result<BTreeMap<String, Value>, String> {
     let config = load_storage_config(&app)?;
     let directory = active_storage_directory(&app, config.active_directory.as_deref())?;
     if config.active_directory.is_some() && !directory.is_dir() {
@@ -384,15 +336,16 @@ fn read_storage_data(app: AppHandle) -> Result<Option<StorageDocument>, String> 
             directory.display()
         ));
     }
-    read_storage_document(&storage_data_path(&directory))
+    storage::read_values(&directory, &bucket, keys)
 }
 
 #[tauri::command]
-fn write_storage_data(
+fn write_storage_values(
     app: AppHandle,
-    data: StorageDocument,
-    if_missing: bool,
-) -> Result<StorageDocument, String> {
+    bucket: String,
+    values: BTreeMap<String, Value>,
+    removed_keys: Vec<String>,
+) -> Result<(), String> {
     let config = load_storage_config(&app)?;
     let directory = active_storage_directory(&app, config.active_directory.as_deref())?;
     if config.active_directory.is_some() && !directory.is_dir() {
@@ -401,7 +354,7 @@ fn write_storage_data(
             directory.display()
         ));
     }
-    save_storage_document_at(&directory, data, if_missing)
+    storage::write_values(&directory, &bucket, values, removed_keys)
 }
 
 #[tauri::command]
@@ -416,7 +369,7 @@ fn schedule_storage_directory(app: AppHandle, path: String) -> Result<(), String
 
     let mut config = load_storage_config(&app)?;
     let current_directory = active_storage_directory(&app, config.active_directory.as_deref())?;
-    read_storage_document(&storage_data_path(&selected_directory))?;
+    storage::files(&selected_directory)?;
 
     if paths_equal(&selected_directory, &current_directory) {
         config.pending_directory = None;
@@ -431,7 +384,7 @@ fn schedule_default_storage_directory(app: AppHandle) -> Result<(), String> {
     let default_directory = default_storage_directory(&app)?;
     let mut config = load_storage_config(&app)?;
     let current_directory = active_storage_directory(&app, config.active_directory.as_deref())?;
-    read_storage_document(&storage_data_path(&default_directory))?;
+    storage::files(&default_directory)?;
 
     if paths_equal(&current_directory, &default_directory) {
         config.pending_directory = None;
@@ -594,8 +547,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             choose_storage_directory,
             get_storage_location,
-            read_storage_data,
-            write_storage_data,
+            read_storage_values,
+            write_storage_values,
             schedule_storage_directory,
             schedule_default_storage_directory,
             choose_json_export_directory,
