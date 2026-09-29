@@ -91,8 +91,12 @@ const tauri = createRuntime({
         if (command === 'write_mindmap_json') return !exists || args.overwrite;
         throw new Error(`未知命令：${command}`);
     } } },
-    confirm() { confirmations += 1; return overwriteAccepted; },
 });
+tauri.context.confirmMindMapJsonOverwrite = async name => {
+    assert.equal(name, filename);
+    confirmations += 1;
+    return overwriteAccepted;
+};
 assert.equal(await tauri.context.saveMindMapJsonFile(filename, content), true);
 assert.equal(confirmations, 0, '新文件不需要询问覆盖');
 assert.deepEqual({ ...tauriCalls[1].args }, {
@@ -145,8 +149,11 @@ const browser = createRuntime({
             },
         };
     },
-    confirm() { return browserConfirmation; },
 });
+browser.context.confirmMindMapJsonOverwrite = async name => {
+    assert.equal(name, filename);
+    return browserConfirmation;
+};
 assert.equal(await browser.context.saveMindMapJsonFile(filename, content), true);
 assert.deepEqual(JSON.parse(files.get(filename)), workbook);
 assert.equal(await browser.context.saveMindMapJsonFile(filename, 'changed'), false);

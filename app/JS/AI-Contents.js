@@ -290,7 +290,7 @@ async function saveMindMapJsonFile(filename, content) {
         if (core) {
             const args = { directoryPath, filename, content, overwrite: false };
             if (await core.invoke('write_mindmap_json', args)) return true;
-            if (!window.confirm(`“${filename}”已存在，是否覆盖？\n取消将保留原文件。`)) return false;
+            if (!await confirmMindMapJsonOverwrite(filename)) return false;
             return core.invoke('write_mindmap_json', { ...args, overwrite: true });
         }
         const result = await getQuickerSubprogramBridge()(QUICKER_SAVE_EXPORT_FILE_SP, {
@@ -318,7 +318,7 @@ async function saveMindMapJsonFile(filename, content) {
     } catch (error) {
         if (error?.name !== 'NotFoundError') throw error;
     }
-    if (fileHandle && !window.confirm(`“${filename}”已存在，是否覆盖？\n取消将保留原文件。`)) return false;
+    if (fileHandle && !await confirmMindMapJsonOverwrite(filename)) return false;
     if (!fileHandle) fileHandle = await directoryHandle.getFileHandle(filename, { create: true });
     const writable = await fileHandle.createWritable();
     try {

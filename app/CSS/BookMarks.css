@@ -7,6 +7,7 @@
     --bg-panel: rgba(255, 255, 255, 0.92);
     --bg-popup: rgba(255, 255, 255, 0.95);
     --bg-input: rgba(255, 255, 255, 0.7);
+    --bg-input-focus: rgba(255, 255, 255, 0.95);
     
     /* 列表项背景色 */
     --bg-item-hover: rgba(208, 208, 208, 0.221);
@@ -56,6 +57,7 @@
         --bg-panel: #1e1e1e;
         --bg-popup: #1e1e1e;
         --bg-input: #2d2d2d;
+        --bg-input-focus: #333;
         
         --bg-item-hover: rgba(130, 129, 129, 0.25);
         --bg-item-selected: rgba(250, 173, 20, 0.15);
@@ -487,7 +489,16 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
     border-radius: 10px; font-size: 15px; background: var(--bg-input); color: var(--text-primary);
     transition: all 0.2s ease;
 }
-.mymodal .form-group input:focus, .dropdown-display.open {
+.mymodal .form-group input {
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.mymodal .form-group input:focus {
+    outline: none; border: 2px solid #d49a46; box-shadow: none;
+    background: var(--bg-input-focus);
+    /* 加粗边框时收回 1px 内边距，保持输入框尺寸和文字位置稳定。 */
+    padding: 11px 15px;
+}
+.dropdown-display.open {
     outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.15);
 }
 .custom-dropdown { position: relative; width: 100%; }

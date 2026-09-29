@@ -35,6 +35,9 @@ function getMindMapExportBaseName() {
 function applyMindMapTheme(theme) {
     const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
     document.documentElement.dataset.theme = normalizedTheme;
+    if (typeof updateMermaidTheme === 'function') {
+        updateMermaidTheme().catch(error => console.warn('[Mermaid] 同步图表主题失败:', error));
+    }
     const tauriCore = window.__TAURI__?.core;
     if (!window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && typeof tauriCore?.invoke === 'function') {
         tauriCore.invoke('set_window_theme', { dark: normalizedTheme === 'dark' }).catch(error => {
@@ -1103,6 +1106,7 @@ let mindMapTabContextTargetId = null;
 let draggedMindMapTabId = null;
 let mindMapTabRenameTargetId = null;
 let mindMapTabDeleteTargetId = null;
+let mindMapFileOverwriteResolve = null;
 let mindMapTabModalReturnFocus = null;
 
 function getUniqueMindMapTabName(baseName) {
@@ -1172,6 +1176,27 @@ function hideMindMapTabModal(modal) {
     if (!document.querySelector('.mymodal.show')) document.body.classList.remove('modal-open');
     if (mindMapTabModalReturnFocus?.isConnected) mindMapTabModalReturnFocus.focus();
     mindMapTabModalReturnFocus = null;
+}
+
+function confirmMindMapJsonOverwrite(filename) {
+    const modal = $('#mindMapTabDeleteModal');
+    const title = $('#mindMapTabDeleteTitle');
+    const text = $('#mindMapTabDeleteText');
+    const confirmButton = $('#confirmMindMapTabDelete');
+    if (!modal || !title || !text || !confirmButton) {
+        return Promise.reject(new Error('覆盖确认弹窗不可用'));
+    }
+    if (document.querySelector('.mymodal.show')) return Promise.resolve(false);
+
+    mindMapTabDeleteTargetId = null;
+    title.textContent = '确认覆盖';
+    text.textContent = `文件“${filename}”已存在，是否覆盖？取消将保留原文件。`;
+    confirmButton.textContent = '覆盖';
+    return new Promise(resolve => {
+        mindMapFileOverwriteResolve = resolve;
+        showMindMapTabModal(modal);
+        requestAnimationFrame(() => $('#cancelMindMapTabDelete')?.focus());
+    });
 }
 
 function cancelMindMapTabRename() {
@@ -1313,6 +1338,9 @@ function deleteMindMapTab(tabId) {
     const modal = $('#mindMapTabDeleteModal');
     const text = $('#mindMapTabDeleteText');
     if (!modal || !text) return;
+    if (mindMapFileOverwriteResolve) cancelMindMapTabDelete();
+    $('#mindMapTabDeleteTitle').textContent = '确认删除';
+    $('#confirmMindMapTabDelete').textContent = '删除';
     mindMapTabDeleteTargetId = tabId;
     text.textContent = `确定删除页面“${tab.name}”吗？此操作无法撤销。`;
     showMindMapTabModal(modal);
@@ -1320,11 +1348,21 @@ function deleteMindMapTab(tabId) {
 }
 
 function cancelMindMapTabDelete() {
+    const resolveOverwrite = mindMapFileOverwriteResolve;
+    mindMapFileOverwriteResolve = null;
     mindMapTabDeleteTargetId = null;
     hideMindMapTabModal($('#mindMapTabDeleteModal'));
+    resolveOverwrite?.(false);
 }
 
 function confirmMindMapTabDelete() {
+    if (mindMapFileOverwriteResolve) {
+        const resolveOverwrite = mindMapFileOverwriteResolve;
+        mindMapFileOverwriteResolve = null;
+        cancelMindMapTabDelete();
+        resolveOverwrite(true);
+        return;
+    }
     const tabId = mindMapTabDeleteTargetId;
     const index = mindMapWorkbook.tabs.findIndex(tab => tab.id === tabId);
     if (index < 0 || mindMapWorkbook.tabs.length <= 1) {

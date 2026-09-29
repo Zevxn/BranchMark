@@ -7,18 +7,6 @@ marked.setOptions({
 });
 
 const imgStyleSheet = document.createElement('style');
-// 1. 初始化 Mermaid
-if (typeof mermaid !== 'undefined') {
-    mermaid.initialize({
-        startOnLoad: false,
-        theme: 'base',
-        securityLevel: 'loose',
-        themeVariables: {
-            fontFamily: 'var(--code-font-family)',
-            fontSize: '14px'
-        }
-    });
-}
 imgStyleSheet.textContent = `
     :root[data-theme="dark"] {
             .md-content pre { color: #c9d1d9; } 
@@ -116,6 +104,7 @@ imgStyleSheet.textContent = `
         z-index: 10;
         user-select: none;
     }
+    .mermaid-fs-btn[hidden] { display: none; }
     .mermaid-wrapper:hover .mermaid-fs-btn {
         opacity: 1;
     }
@@ -226,8 +215,6 @@ imgStyleSheet.textContent = `
     }
 
     :root[data-theme="dark"] {
-        #mermaidModalBody svg,
-        .mermaid-container svg { filter: invert(1) hue-rotate(180deg); }
         .mermaid-modal { background: rgba(0,0,0,0.8); }
         .mermaid-modal-content { background: #1e1e1e; border: 1px solid #333; }
         
@@ -825,6 +812,95 @@ async function openMarkdownLinkWithQuicker(href) {
 
 // !SECTION 页面初始化与 Markdown 解析
 
+// SECTION Mermaid 原生主题与渲染
+const mermaidDiagramStates = new WeakMap();
+let mermaidRenderQueue = Promise.resolve();
+let mermaidFullscreenDiagram = null;
+
+function getMermaidTheme() {
+    return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+
+function initializeMermaidTheme(theme) {
+    const dark = theme === 'dark';
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: dark ? 'dark' : 'base',  // 暗色支持dark、neo-dark、redux-dark、redux-dark-color
+        securityLevel: 'loose',
+        themeVariables: {
+            darkMode: dark,
+            fontFamily: 'var(--code-font-family)',
+            fontSize: '14px',
+        },
+    });
+}
+
+function updateMermaidFullscreenDiagram(diagram, content) {
+    if (mermaidFullscreenDiagram !== diagram) return;
+    if (!document.getElementById('mermaidModal')?.classList.contains('active')) return;
+    const body = document.getElementById('mermaidModalBody');
+    if (body) body.innerHTML = content;
+}
+
+function renderMermaidDiagram(diagram) {
+    const revision = ++diagram.revision;
+    const theme = getMermaidTheme();
+    const isCurrent = () => diagram.revision === revision && getMermaidTheme() === theme;
+
+    // 初始化配置与渲染共用队列，避免多个图表或主题切换相互覆盖全局配置。
+    const task = mermaidRenderQueue.then(async () => {
+        if (!isCurrent()) return;
+        if (!diagram.wrapper.isConnected && mermaidFullscreenDiagram !== diagram) return;
+
+        try {
+            initializeMermaidTheme(theme);
+            const uniqueId = 'mermaid-' + Math.random().toString(36).slice(2, 11);
+            const { svg } = await mermaid.render(uniqueId, diagram.source);
+            if (!isCurrent()) return;
+
+            diagram.container.innerHTML = svg;
+            const svgElement = diagram.container.querySelector('svg');
+            svgElement?.setAttribute('data-mermaid-theme', theme);
+            diagram.svg = svgElement?.outerHTML || svg;
+            diagram.theme = theme;
+            diagram.fullscreenButton.hidden = false;
+            updateMermaidFullscreenDiagram(diagram, diagram.svg);
+
+            if (diagram.wrapper.isConnected && diagram.wrapper.closest('.node-card')) {
+                if (typeof stabilizeRoot === 'function') stabilizeRoot();
+                if (typeof updateTransform === 'function') updateTransform();
+            }
+        } catch (error) {
+            if (!isCurrent()) return;
+            console.warn('[Mermaid] 图表渲染失败:', error);
+            const errorContent = '<div style="color:#ff4d4f;font-size:12px;">渲染失败</div>';
+            diagram.container.innerHTML = errorContent;
+            diagram.svg = '';
+            diagram.fullscreenButton.hidden = true;
+            updateMermaidFullscreenDiagram(diagram, errorContent);
+        }
+    });
+    mermaidRenderQueue = task.catch(() => {});
+    return task;
+}
+
+async function updateMermaidTheme() {
+    if (typeof mermaid === 'undefined') return;
+    const theme = getMermaidTheme();
+    const diagrams = new Set();
+    document.querySelectorAll('.mermaid-wrapper').forEach(wrapper => {
+        const diagram = mermaidDiagramStates.get(wrapper);
+        if (diagram) diagrams.add(diagram);
+    });
+    if (mermaidFullscreenDiagram) diagrams.add(mermaidFullscreenDiagram);
+    await Promise.all([...diagrams]
+        .filter(diagram => diagram.theme !== theme)
+        .map(diagram => renderMermaidDiagram(diagram)));
+}
+
+if (typeof mermaid !== 'undefined') initializeMermaidTheme(getMermaidTheme());
+// !SECTION Mermaid 原生主题与渲染
+
 // =============================================================================
 // SECTION 富文本渲染
 // =============================================================================
@@ -911,7 +987,6 @@ async function processRichContent(element) {
         for (const block of mermaidCodes) {
             const preElement = block.parentElement;
             const rawCode = block.textContent;
-            const uniqueId = 'mermaid-' + Math.random().toString(36).substr(2, 9);
             
             // --- 改动开始：创建 Wrapper 结构 ---
             
@@ -924,11 +999,12 @@ async function processRichContent(element) {
             fsBtn.className = 'mermaid-fs-btn';
             fsBtn.title = '全屏查看';
             fsBtn.innerHTML = '<i class="ri-fullscreen-line"></i>'; 
+            fsBtn.hidden = true;
             
             // 3. 创建实际的 Mermaid 容器
             const container = document.createElement('div');
             container.className = 'mermaid-container';
-            container.innerHTML = `<div id="${uniqueId}" style="color:var(--text-color-secondary)">Loading...</div>`;
+            container.innerHTML = '<div style="color:var(--text-color-secondary)">Loading...</div>';
 
             // 4. 组装 DOM
             wrapper.appendChild(fsBtn);
@@ -937,28 +1013,22 @@ async function processRichContent(element) {
             // 5. 替换原有 pre
             preElement.replaceWith(wrapper);
 
-            try {
-                const { svg } = await mermaid.render(uniqueId, rawCode);
-                container.innerHTML = svg;
-                
-                // --- 绑定全屏事件 ---
-                fsBtn.onclick = (e) => {
-                    e.stopPropagation(); 
-                    e.preventDefault();
-                    showMermaidFullscreen(svg); 
-                };
-
-                // 触发布局重算
-                if (element.closest('.node-card')) {
-                    if (typeof stabilizeRoot === 'function') stabilizeRoot();
-                    if (typeof updateTransform === 'function') updateTransform();
-                }
-
-            } catch (error) {
-                console.log('Mermaid Error', error);
-                container.innerHTML = `<div style="color:#ff4d4f;font-size:12px;">渲染失败</div>`;
-                fsBtn.remove(); 
-            }
+            const diagram = {
+                wrapper,
+                container,
+                fullscreenButton: fsBtn,
+                source: rawCode,
+                svg: '',
+                theme: null,
+                revision: 0,
+            };
+            mermaidDiagramStates.set(wrapper, diagram);
+            fsBtn.onclick = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                showMermaidFullscreen(diagram.svg, diagram);
+            };
+            await renderMermaidDiagram(diagram);
         }
     }
     
@@ -1188,13 +1258,14 @@ let mermaidState = {
     startTy: 0
 };
 
-function showMermaidFullscreen(svgContent) {
+function showMermaidFullscreen(svgContent, diagram = null) {
     const modal = document.getElementById('mermaidModal');
     const container = document.getElementById('mermaidModalContent'); 
     const body = document.getElementById('mermaidModalBody');       
     
     if (!modal || !container || !body) return;
 
+    mermaidFullscreenDiagram = diagram;
     // 1. 注入 SVG
     body.innerHTML = svgContent;
     modal.classList.add('active');
@@ -1217,12 +1288,13 @@ function showMermaidFullscreen(svgContent) {
 }
 
 function closeMermaidFullscreen() {
+    mermaidFullscreenDiagram = null;
     const modal = document.getElementById('mermaidModal');
     if (modal) {
         modal.classList.remove('active');
         setTimeout(() => {
             const body = document.getElementById('mermaidModalBody');
-            if(body) body.innerHTML = '';
+            if (body && !modal.classList.contains('active')) body.innerHTML = '';
         }, 200);
     }
 }
@@ -1395,8 +1467,8 @@ function downloadMermaidSvg() {
     const computedStyle = window.getComputedStyle(svgOriginal);
     svgClone.style.fontFamily = computedStyle.fontFamily;
     svgClone.style.color = computedStyle.color;
-    // 强制白色背景，防止在 PPT 暗色背景中看不清透明图
-    svgClone.style.backgroundColor = '#ffffff'; 
+    // 背景与实际渲染的主题一致，避免暗色文字和连线落在白底上。
+    svgClone.style.backgroundColor = svgOriginal.getAttribute('data-mermaid-theme') === 'dark' ? '#1e1e1e' : '#ffffff';
 
     const serializer = new XMLSerializer();
     let source = serializer.serializeToString(svgClone);
@@ -1463,10 +1535,11 @@ function copyMermaidAsPng() {
     const computedStyle = window.getComputedStyle(svgOriginal);
     const textColor = computedStyle.color || '#333';
     const fontFamily = computedStyle.fontFamily;
+    const exportBackground = svgOriginal.getAttribute('data-mermaid-theme') === 'dark' ? '#1e1e1e' : null;
     
     svg.style.color = textColor;
     svg.style.fontFamily = fontFamily;
-    svg.style.backgroundColor = 'transparent'; 
+    svg.style.backgroundColor = exportBackground || 'transparent';
 
     const serializer = new XMLSerializer();
     let source = serializer.serializeToString(svg);
@@ -1496,6 +1569,10 @@ function copyMermaidAsPng() {
             const ctx = canvas.getContext('2d');
             if (!ctx) throw new Error('无法创建 Canvas 2D 上下文');
             ctx.scale(scale, scale);
+            if (exportBackground) {
+                ctx.fillStyle = exportBackground;
+                ctx.fillRect(0, 0, w, h);
+            }
             ctx.drawImage(img, 0, 0, w, h);
 
             const blob = await canvasToPngBlob(canvas);
