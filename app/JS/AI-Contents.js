@@ -90,7 +90,7 @@ async function readQuickerExportDirectory() {
     return String(result?.[QUICKER_EXPORT_DIRECTORY_KEY] || '').trim();
 }
 
-async function selectQuickerExportDirectory() {
+async function selectQuickerExportDirectory(storageKey = QUICKER_EXPORT_DIRECTORY_KEY) {
     const quickerSubprogram = getQuickerSubprogramBridge();
     if (typeof quickerSubprogram !== 'function') return null;
     try {
@@ -100,7 +100,7 @@ async function selectQuickerExportDirectory() {
 
         const directoryPath = String(result.directoryPath || '').trim();
         if (!directoryPath) throw new Error('选择目录子程序没有返回 directoryPath');
-        await chrome.storage.local.set({ [QUICKER_EXPORT_DIRECTORY_KEY]: directoryPath });
+        if (storageKey) await chrome.storage.local.set({ [storageKey]: directoryPath });
         return directoryPath;
     } catch (error) {
         console.warn('[Export] Quicker 选择保存目录失败:', error);
@@ -256,6 +256,81 @@ async function saveFileDirectly(filename, content) {
         return false;
     }
 }
+
+// SECTION JSON 脑图目录选择与文件导出
+function getMindMapJsonExportTauriCore() {
+    const core = window.__TAURI__?.core;
+    return !isNativeQuickerExport() && typeof core?.invoke === 'function' ? core : null;
+}
+
+async function chooseMindMapJsonExportDirectory() {
+    if (isNativeQuickerExport()) {
+        return selectQuickerExportDirectory(null);
+    }
+    const core = getMindMapJsonExportTauriCore();
+    if (core) return core.invoke('choose_json_export_directory');
+    if (typeof window.showDirectoryPicker !== 'function') return null;
+    try {
+        return await window.showDirectoryPicker({
+            id: 'mindmap-json-export',
+            mode: 'readwrite',
+            startIn: 'documents',
+        });
+    } catch (error) {
+        if (error?.name === 'AbortError') return null;
+        throw error;
+    }
+}
+
+async function saveMindMapJsonFile(filename, content) {
+    const core = getMindMapJsonExportTauriCore();
+    if (isNativeQuickerExport() || core) {
+        const directoryPath = await chooseMindMapJsonExportDirectory();
+        if (!directoryPath) return false;
+        if (core) {
+            const args = { directoryPath, filename, content, overwrite: false };
+            if (await core.invoke('write_mindmap_json', args)) return true;
+            if (!window.confirm(`“${filename}”已存在，是否覆盖？\n取消将保留原文件。`)) return false;
+            return core.invoke('write_mindmap_json', { ...args, overwrite: true });
+        }
+        const result = await getQuickerSubprogramBridge()(QUICKER_SAVE_EXPORT_FILE_SP, {
+            directoryPath,
+            filename,
+            content,
+            confirmOverwrite: true,
+        });
+        if (result?.error) throw new Error(String(result.error));
+        if (result?.cancelled) return false;
+        if (result?.success !== true) throw new Error('保存动作未成功写入 JSON 文件');
+        return true;
+    }
+
+    if (typeof window.showDirectoryPicker !== 'function') {
+        downloadFile(content, filename, 'application/json');
+        return true;
+    }
+    const directoryHandle = await chooseMindMapJsonExportDirectory();
+    if (!directoryHandle) return false;
+
+    let fileHandle;
+    try {
+        fileHandle = await directoryHandle.getFileHandle(filename);
+    } catch (error) {
+        if (error?.name !== 'NotFoundError') throw error;
+    }
+    if (fileHandle && !window.confirm(`“${filename}”已存在，是否覆盖？\n取消将保留原文件。`)) return false;
+    if (!fileHandle) fileHandle = await directoryHandle.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable();
+    try {
+        await writable.write(content);
+        await writable.close();
+    } catch (error) {
+        await writable.abort().catch(() => {});
+        throw error;
+    }
+    return true;
+}
+// !SECTION JSON 脑图目录选择与文件导出
 
 
 document.addEventListener('dblclick', (e) => {

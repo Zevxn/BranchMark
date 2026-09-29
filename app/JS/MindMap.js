@@ -35,6 +35,12 @@ function getMindMapExportBaseName() {
 function applyMindMapTheme(theme) {
     const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
     document.documentElement.dataset.theme = normalizedTheme;
+    const tauriCore = window.__TAURI__?.core;
+    if (!window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && typeof tauriCore?.invoke === 'function') {
+        tauriCore.invoke('set_window_theme', { dark: normalizedTheme === 'dark' }).catch(error => {
+            console.warn('[Tauri] 同步标题栏主题失败:', error);
+        });
+    }
     const themeToggle = $('#settingThemeToggle');
     if (themeToggle) themeToggle.checked = normalizedTheme === 'dark';
     const themeValue = $('#settingThemeValue');

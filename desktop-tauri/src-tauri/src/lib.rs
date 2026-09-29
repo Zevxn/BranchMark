@@ -443,7 +443,141 @@ fn schedule_default_storage_directory(app: AppHandle) -> Result<(), String> {
 
 // !SECTION Tauri 存储位置与文件命令
 
-// SECTION 应用启动
+// SECTION JSON 脑图文件导出
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn choose_json_export_directory() -> Option<String> {
+    rfd::FileDialog::new()
+        .set_title("选择 JSON 脑图导出目录")
+        .pick_folder()
+        .map(|directory| directory.to_string_lossy().into_owned())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn choose_json_export_directory() -> Option<String> {
+    None
+}
+
+#[tauri::command]
+fn write_mindmap_json(
+    directory_path: String,
+    filename: String,
+    content: String,
+    overwrite: bool,
+) -> Result<bool, String> {
+    if !filename.to_lowercase().ends_with(".json")
+        || filename
+            .chars()
+            .any(|character| character.is_control() || "\\/:*?\"<>|".contains(character))
+    {
+        return Err("JSON 文件名无效".to_string());
+    }
+    let directory = PathBuf::from(directory_path);
+    if !directory.is_absolute() || !directory.is_dir() {
+        return Err("导出目录不可用，请重新选择目录".to_string());
+    }
+    let destination = directory.join(filename);
+    if overwrite {
+        atomic_write(&destination, content.as_bytes())
+            .map_err(|error| format!("写入 JSON 文件失败：{error}"))?;
+        return Ok(true);
+    }
+
+    // create_new 保证首次写入不会覆盖选择目录后出现的同名文件。
+    let mut file = match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&destination)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let metadata = fs::symlink_metadata(&destination)
+                .map_err(|error| format!("检查同名文件失败：{error}"))?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err("同名路径不是普通文件，无法覆盖".to_string());
+            }
+            return Ok(false);
+        }
+        Err(error) => return Err(format!("创建 JSON 文件失败：{error}")),
+    };
+    let result = file
+        .write_all(content.as_bytes())
+        .and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(error) = result {
+        let _ = fs::remove_file(&destination);
+        return Err(format!("写入 JSON 文件失败：{error}"));
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod json_export_tests {
+    use super::*;
+
+    #[test]
+    fn export_requires_permission_to_overwrite_existing_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "branchmark-json-export-{}-{}",
+            process::id(),
+            TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&directory).unwrap();
+        let directory_path = directory.to_string_lossy().into_owned();
+        let export = |filename: &str, content: &str, overwrite| {
+            write_mindmap_json(
+                directory_path.clone(),
+                filename.to_string(),
+                content.to_string(),
+                overwrite,
+            )
+        };
+
+        assert_eq!(export("示例.json", "old", false), Ok(true));
+        assert_eq!(export("示例.json", "new", false), Ok(false));
+        assert_eq!(
+            fs::read_to_string(directory.join("示例.json")).unwrap(),
+            "old"
+        );
+        assert_eq!(export("示例.json", "new", true), Ok(true));
+        assert_eq!(
+            fs::read_to_string(directory.join("示例.json")).unwrap(),
+            "new"
+        );
+        for filename in [
+            "../outside.json",
+            "..\\outside.json",
+            "D:outside.json",
+            "示例.txt",
+        ] {
+            assert!(export(filename, "invalid", false).is_err());
+        }
+        fs::create_dir(directory.join("目录.json")).unwrap();
+        assert!(export("目录.json", "invalid", false).is_err());
+        assert!(export("目录.json", "invalid", true).is_err());
+        fs::remove_file(directory.join("示例.json")).unwrap();
+        fs::remove_dir(directory.join("目录.json")).unwrap();
+        fs::remove_dir(directory).unwrap();
+    }
+}
+
+// !SECTION JSON 脑图文件导出
+
+// SECTION 应用启动与窗口主题
+
+#[tauri::command]
+fn set_window_theme(window: tauri::WebviewWindow, dark: bool) -> Result<(), String> {
+    let theme = if dark {
+        tauri::Theme::Dark
+    } else {
+        tauri::Theme::Light
+    };
+    window
+        .set_theme(Some(theme))
+        .map_err(|error| format!("切换窗口主题失败：{error}"))
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -454,6 +588,9 @@ pub fn run() {
             write_storage_data,
             schedule_storage_directory,
             schedule_default_storage_directory,
+            choose_json_export_directory,
+            write_mindmap_json,
+            set_window_theme,
         ])
         .setup(|app| {
             match apply_pending_storage_directory(app.handle()) {
@@ -476,4 +613,4 @@ pub fn run() {
         .expect("启动 BranchMark Tauri 桌面版失败");
 }
 
-// !SECTION 应用启动
+// !SECTION 应用启动与窗口主题

@@ -133,8 +133,9 @@ Quicker WebView2 不能可靠地使用网页 `showDirectoryPicker()`，而且 Qu
 | 输入变量 | 类型 | 说明 |
 | --- | --- | --- |
 | `directoryPath` | 文本 | 上一个子程序选择的文件夹 |
-| `filename` | 文本 | 要保存的 `.canvas` 文件名 |
+| `filename` | 文本 | 要保存的 `.canvas` 或 `.json` 文件名 |
 | `content` | 文本 | 完整文件内容 |
+| `confirmOverwrite` | 布尔 | 可选，默认 `false`；JSON 脑图导出传入 `true`，同名时必须先询问是否覆盖 |
 
 将 `directoryPath` 和 `filename` 组合为完整路径后，通过 Quicker 的文件写入模块保存 `content`，并返回：
 
@@ -144,9 +145,18 @@ Quicker WebView2 不能可靠地使用网页 `showDirectoryPicker()`，而且 Qu
 | `cancelled` | 布尔 | 正常写入时为 `false` |
 | `error` | 文本 | 可选；失败原因，没有错误时留空 |
 
+当 `confirmOverwrite = true` 时，保存动作需要先检查完整文件路径是否已存在：不存在就直接写入；
+存在则询问是否覆盖，仅在用户同意后写入。拒绝覆盖时返回 `success = false`、`cancelled = true`，
+不写入文件。请在使用 JSON 导出前给现有保存动作补充这一逻辑；网页代码不会创建或修改 Quicker 动作。
+未传入此参数时保持原有 Canvas 保存行为。
+
 网页会把已选择路径保存到 `app_data_json.chrome.obsidian_export_directory`。点击“切换保存目录”时调用
 目录选择子程序；导出 Canvas 时调用文件保存子程序。普通浏览器仍使用原来的
 `showDirectoryPicker() + IndexedDB FileSystemHandle`，不会调用 Quicker 子程序。
+
+JSON 脑图导出每次先调用同一个 `DeepConvoSelectExportFolder`，再调用 `DeepConvoSaveExportFile`，
+传入选定目录、JSON 文件名、完整工作簿内容和 `confirmOverwrite = true`。取消目录选择或拒绝覆盖时
+结束本次导出，不触发下载，也不修改 Obsidian 的默认保存目录。
 
 ## 7. 数据如何保存
 
@@ -182,6 +192,7 @@ Quicker WebView2 不能可靠地使用网页 `showDirectoryPicker()`，而且 Qu
 6. 点击“切换保存目录”，确认 `DeepConvoSelectExportFolder` 能返回目录路径。
 7. 导出 Canvas，确认 `DeepConvoSaveExportFile` 将文件写入刚选择的目录。
 8. 在 Markdown 中点击本地文件或网址，确认 `DeepConvoOpenPathOrUrl` 使用系统默认程序打开。
+9. 连续导出两次 JSON 脑图，确认每次均选择目录；在同一目录遇到同名文件时拒绝覆盖，确认原文件内容保留。
 
 如果数据不能恢复，优先检查：变量名是否完全一致、SaveState 是否开启、WebView2 是否提供
 `$quickerSync`，以及动作是否在窗口关闭前就提前结束。

@@ -154,13 +154,23 @@ function initializeMapToolbar() {
     $('#btn-center').onclick=()=>{ state.view={tx:window.innerWidth / 2,ty:window.innerHeight / 2,scale:1}; updateTransform(); saveStorage(); };
     $('#btn-new').onclick=()=>{void newMindMap();}
     $('#btn-save').onclick=()=>{void saveMindMapData(true);}
-    $('#btn-export').onclick=()=>{ 
-        const a=document.createElement('a');
-        const url=URL.createObjectURL(new Blob([JSON.stringify(getMindMapWorkbookSnapshot())],{type:'application/json'}));
-        a.href=url;
-        a.download=`${getMindMapExportBaseName()}.json`;
-        a.click();
-        setTimeout(()=>URL.revokeObjectURL(url),0);
+    const exportButton = $('#btn-export');
+    exportButton.onclick = async () => {
+        if (exportButton.disabled) return;
+        // 部分 Quicker 目录动作取消后不结束 Promise，保留再次点击的入口。
+        exportButton.disabled = !isNativeQuickerExport();
+        try {
+            const filename = `${getMindMapExportBaseName()}.json`;
+            const content = JSON.stringify(getMindMapWorkbookSnapshot());
+            if (await saveMindMapJsonFile(filename, content)) {
+                showTopToast(`✅ 脑图已导出：${filename}`);
+            }
+        } catch (error) {
+            console.warn('[Export] JSON 脑图导出失败:', error);
+            showTopToast(`❌ 导出失败：${error.message || '无法写入文件'}`);
+        } finally {
+            exportButton.disabled = false;
+        }
     };
     $('#fileInput').onchange=(e)=>{ 
         const f=e.target.files[0]; 
