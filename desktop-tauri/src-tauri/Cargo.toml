@@ -2,6 +2,8 @@
 name = "deepconvo-mindmap-tauri"
 version = "1.0.0"
 description = "BranchMark desktop application"
+license = "GPL-3.0-only"
+repository = "https://github.com/Zevxn/BranchMark"
 edition = "2021"
 publish = false
 

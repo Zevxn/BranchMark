@@ -6,7 +6,11 @@
   "description": "BranchMark 桌面版：Electron 外壳加载 app/ 的构建产物 dist/，不修改任何业务代码",
   "main": "main.js",
   "author": "DeepConvo",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Zevxn/BranchMark.git"
+  },
   "scripts": {
     "dist": "cd .. && node scripts/build.mjs",
     "start": "npm run dist && node tools/launch.cjs .",

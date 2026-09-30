@@ -3,7 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "DeepConvo 原版思维导图与文件夹功能的独立迁移",
+  "description": "BranchMark：本地思维导图与 Markdown 知识整理工具",
+  "license": "GPL-3.0-only",
+  "author": "Zevxn",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Zevxn/BranchMark.git"
+  },
+  "homepage": "https://github.com/Zevxn/BranchMark#readme",
+  "bugs": {
+    "url": "https://github.com/Zevxn/BranchMark/issues"
+  },
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
     "build": "node scripts/build.mjs",
