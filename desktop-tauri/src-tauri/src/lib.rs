@@ -549,6 +549,60 @@ mod json_export_tests {
 // SECTION 应用启动与窗口控制
 
 #[tauri::command]
+fn open_branchmark_url(url: String) -> Result<(), String> {
+    let target = tauri::Url::parse(&url).map_err(|_| "项目链接无效".to_string())?;
+    if target.scheme() != "https"
+        || target.host_str() != Some("github.com")
+        || !target.username().is_empty()
+        || target.password().is_some()
+        || target.port().is_some()
+        || target.query().is_some()
+        || target.fragment().is_some()
+        || !(target.path() == "/Zevxn/BranchMark"
+            || target.path().starts_with("/Zevxn/BranchMark/releases/tag/"))
+    {
+        return Err("仅支持打开 BranchMark 项目主页和版本页面".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // 交给系统默认浏览器打开，避免项目网页进入应用 WebView。
+        #[link(name = "shell32")]
+        extern "system" {
+            fn ShellExecuteW(
+                hwnd: *mut std::ffi::c_void,
+                operation: *const u16,
+                file: *const u16,
+                parameters: *const u16,
+                directory: *const u16,
+                show_cmd: i32,
+            ) -> *mut std::ffi::c_void;
+        }
+        let operation: Vec<u16> = "open\0".encode_utf16().collect();
+        let file: Vec<u16> = target.as_str().encode_utf16().chain(Some(0)).collect();
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            )
+        } as isize;
+        if result <= 32 {
+            Err(format!("打开系统浏览器失败：{result}"))
+        } else {
+            Ok(())
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("当前桌面平台暂不支持打开系统浏览器".to_string())
+    }
+}
+
+#[tauri::command]
 fn set_window_theme(window: tauri::WebviewWindow, dark: bool) -> Result<(), String> {
     let theme = if dark {
         tauri::Theme::Dark
@@ -593,6 +647,7 @@ pub fn run() {
             choose_json_export_directory,
             read_markdown_document,
             write_mindmap_json,
+            open_branchmark_url,
             set_window_theme,
             toggle_window_fullscreen,
         ])

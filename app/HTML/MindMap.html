@@ -349,6 +349,37 @@
         }
         .mindmap-storage-reset:hover:not(:disabled) { color: var(--primary); background: var(--btn-hover); }
         .mindmap-storage-reset:disabled { opacity: 0.45; cursor: not-allowed; }
+        .mindmap-project-row {
+            margin-top: 6px;
+            padding-top: 12px;
+            border-top: 1px solid var(--toolbar-border);
+            border-radius: 0;
+            cursor: default;
+        }
+        .mindmap-project-row:hover { background: transparent; }
+        .mindmap-project-row [hidden] { display: none; }
+        .mindmap-project-heading { display: flex; align-items: baseline; gap: 6px; }
+        .mindmap-project-heading .mindmap-setting-name { flex-shrink: 0; }
+        #branchMarkVersion {
+            min-width: 0;
+            margin-top: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .mindmap-project-link {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            cursor: pointer;
+        }
+        .mindmap-project-link:hover { color: var(--primary); background: var(--btn-hover); }
+        .mindmap-project-link:focus-visible,
+        #btn-check-update:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        #btn-check-update { white-space: nowrap; }
         .mindmap-setting-toggle {
             position: relative;
             width: 34px;
@@ -2876,6 +2907,19 @@
                 <span class="mindmap-setting-switch" aria-hidden="true"></span>
             </span>
         </label>
+        <div class="mindmap-setting-row mindmap-project-row">
+            <button class="mindmap-setting-icon mindmap-project-link" id="btn-project-home" type="button" title="打开 GitHub 项目主页" aria-label="打开 BranchMark GitHub 项目主页">
+                <i class="ri-github-line" aria-hidden="true"></i>
+            </button>
+            <span class="mindmap-setting-copy">
+                <span class="mindmap-project-heading">
+                    <span class="mindmap-setting-name">BranchMark</span>
+                    <span class="mindmap-setting-value" id="branchMarkVersion">读取版本中…</span>
+                </span>
+                <span class="mindmap-setting-value" id="branchMarkUpdateStatus" role="status" aria-live="polite" hidden></span>
+            </span>
+            <button class="mindmap-storage-reset" id="btn-check-update" type="button">检查更新</button>
+        </div>
     </section>
 
     <section class="map-search-panel" id="mapSearchPanel" role="dialog" aria-label="搜索卡片" aria-hidden="true">

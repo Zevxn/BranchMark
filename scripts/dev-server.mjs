@@ -2,7 +2,8 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 
-const root = resolve(process.argv.includes('--dist') ? 'dist' : 'app');
+const serveDist = process.argv.includes('--dist');
+const root = resolve(serveDist ? 'dist' : 'app');
 const portArg = process.argv.find((item) => item.startsWith('--port='));
 const port = Number(portArg?.split('=')[1]) || 4173;
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -10,6 +11,12 @@ const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 http.createServer(async (request, response) => {
   try {
     const pathname = decodeURIComponent(new URL(request.url, `http://${request.headers.host}`).pathname);
+    if (!serveDist && pathname === '/version.json') {
+      const { version } = JSON.parse(await readFile(resolve('package.json'), 'utf8'));
+      response.writeHead(200, { 'Content-Type': types['.json'], 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ version }));
+      return;
+    }
     const relative = normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, '').replace(/^[/\\]+/, '');
     let filePath = join(root, relative || 'index.html');
     const info = await stat(filePath).catch(() => null);

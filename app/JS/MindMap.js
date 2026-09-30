@@ -130,6 +130,148 @@ function setMindMapSettingsPopoverOpen(open) {
     if (open) requestAnimationFrame(positionMindMapSettingsPopover);
 }
 
+// SECTION 项目与版本更新
+
+const BRANCHMARK_PROJECT_URL = 'https://github.com/Zevxn/BranchMark';
+
+function parseBranchMarkVersion(value) {
+    const match = String(value || '').trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*))?(?:\+[\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*)?$/);
+    if (!match) return null;
+    const numbers = match.slice(1, 4).map(Number);
+    const prerelease = match[4]?.split('.') || [];
+    if (numbers.some(number => !Number.isSafeInteger(number)) || prerelease.some(part =>
+        /^\d+$/.test(part) && ((part.length > 1 && part.startsWith('0')) || !Number.isSafeInteger(Number(part)))
+    )) return null;
+    return { numbers, prerelease };
+}
+
+function compareBranchMarkVersions(left, right) {
+    for (let index = 0; index < 3; index++) {
+        if (left.numbers[index] !== right.numbers[index]) {
+            return left.numbers[index] > right.numbers[index] ? 1 : -1;
+        }
+    }
+    const a = left.prerelease;
+    const b = right.prerelease;
+    if (!a.length || !b.length) return a.length === b.length ? 0 : a.length ? -1 : 1;
+    for (let index = 0; index < Math.max(a.length, b.length); index++) {
+        if (a[index] === b[index]) continue;
+        if (a[index] === undefined) return -1;
+        if (b[index] === undefined) return 1;
+        const aNumeric = /^\d+$/.test(a[index]);
+        const bNumeric = /^\d+$/.test(b[index]);
+        if (aNumeric && bNumeric) return Number(a[index]) > Number(b[index]) ? 1 : -1;
+        if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+        return a[index] > b[index] ? 1 : -1;
+    }
+    return 0;
+}
+
+async function fetchBranchMarkJson(url) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+        const response = await fetch(url, {
+            signal: controller.signal,
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) {
+            const error = new Error(`HTTP ${response.status}`);
+            error.status = response.status;
+            throw error;
+        }
+        return await response.json();
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function openBranchMarkProjectUrl(url) {
+    try {
+        if (window.__DEEPCONVO_NATIVE_QUICKER_HOST__) {
+            await openMarkdownLinkWithQuicker(url);
+        } else if (typeof window.__TAURI__?.core?.invoke === 'function') {
+            await window.__TAURI__.core.invoke('open_branchmark_url', { url });
+        } else {
+            window.open(url, '_blank', 'noopener,noreferrer');
+        }
+    } catch (error) {
+        console.warn('[BranchMark] 打开项目链接失败:', error);
+        if (typeof showTopToast === 'function') showTopToast('❌ 打开链接失败，请重试');
+    }
+}
+
+function initializeBranchMarkAbout() {
+    const homeButton = $('#btn-project-home');
+    const checkButton = $('#btn-check-update');
+    const versionLabel = $('#branchMarkVersion');
+    const statusLabel = $('#branchMarkUpdateStatus');
+    if (!homeButton || !checkButton || !versionLabel || !statusLabel) return;
+
+    let currentVersion = null;
+    let releaseUrl = '';
+    const setStatus = text => {
+        statusLabel.textContent = text;
+        statusLabel.hidden = !text;
+        positionMindMapSettingsPopover();
+    };
+    const loadVersion = async () => {
+        try {
+            const data = await fetchBranchMarkJson(new URL('../version.json', location.href));
+            currentVersion = parseBranchMarkVersion(data.version);
+            if (!currentVersion) throw new Error('无效的版本号');
+            versionLabel.textContent = `v${String(data.version).replace(/^v/, '')}`;
+        } catch (error) {
+            currentVersion = null;
+            versionLabel.textContent = '当前版本未知';
+            console.warn('[BranchMark] 读取当前版本失败:', error);
+        }
+    };
+    const versionReady = loadVersion();
+    homeButton.addEventListener('click', () => void openBranchMarkProjectUrl(BRANCHMARK_PROJECT_URL));
+    checkButton.addEventListener('click', async () => {
+        if (checkButton.disabled) return;
+        if (releaseUrl) {
+            await openBranchMarkProjectUrl(releaseUrl);
+            return;
+        }
+        checkButton.disabled = true;
+        checkButton.textContent = '检查中…';
+        checkButton.setAttribute('aria-busy', 'true');
+        setStatus('');
+        try {
+            await versionReady;
+            if (!currentVersion) await loadVersion();
+            if (!currentVersion) {
+                setStatus('无法读取当前版本，请重试');
+                return;
+            }
+            const release = await fetchBranchMarkJson('https://api.github.com/repos/Zevxn/BranchMark/releases/latest');
+            const latestVersion = parseBranchMarkVersion(release.tag_name);
+            if (release.draft || release.prerelease || !latestVersion || latestVersion.prerelease.length) {
+                throw new Error('无法识别正式版本信息');
+            }
+            if (compareBranchMarkVersions(latestVersion, currentVersion) > 0) {
+                releaseUrl = `${BRANCHMARK_PROJECT_URL}/releases/tag/${encodeURIComponent(release.tag_name)}`;
+                setStatus(`发现新版 ${release.tag_name}`);
+            } else {
+                setStatus('已是最新版本');
+            }
+        } catch (error) {
+            console.warn('[BranchMark] 检查更新失败:', error);
+            setStatus(error.status === 404 ? '暂无可用的正式版本' : '检查失败，请重试');
+        } finally {
+            checkButton.disabled = false;
+            checkButton.textContent = releaseUrl ? '查看新版' : '检查更新';
+            checkButton.removeAttribute('aria-busy');
+            positionMindMapSettingsPopover();
+        }
+    });
+}
+
+// !SECTION 项目与版本更新
+
 async function initializeTauriStorageLocation() {
     const tauriCore = window.__TAURI__?.core;
     const storageButton = $('#btn-storage-location');
@@ -236,6 +378,7 @@ async function initializeTauriStorageLocation() {
 }
 
 async function initializeMindMapTheme() {
+    initializeBranchMarkAbout();
     void initializeTauriStorageLocation();
     const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     const result = await chrome.storage.local.get({
