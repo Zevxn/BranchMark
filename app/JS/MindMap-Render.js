@@ -659,9 +659,9 @@ function renderTree() {
         const n = findNode(state.data, el.dataset.nodeId);
         if(n) el.dataset.contentHash = n.content || '';
     });
-    // ... (后续 stabilizeRoot 等保持不变) ...
-    stabilizeRoot();
     $('#tree-root').querySelectorAll('.card-body').forEach(processRichContent);
+    // 同步内容处理完成后再测量，避免使用公式、高亮处理前的卡片尺寸。
+    stabilizeRoot();
     restoreGlobalScrolls();
     updateTransform(); 
     scheduleRenderMindMapRelations();
@@ -672,13 +672,11 @@ function renderTree() {
 
     // 2. 创建新的监听器
     // 只要根节点的 DOM 尺寸发生任何自然变化（字体加载、图片加载），就自动归位
-    window.rootObserver = new ResizeObserver(entries => {
-        // 使用 requestAnimationFrame 避免 "ResizeObserver loop limit exceeded" 错误
-        requestAnimationFrame(() => {
-            stabilizeRoot();
-            scheduleRenderMindMapRelations();
-            scheduleRenderMindMapSummaries();
-        });
+    window.rootObserver = new ResizeObserver(() => {
+        // 仅调整 transform，不改变被观察元素的尺寸，可在本次绘制前直接归位。
+        stabilizeRoot();
+        scheduleRenderMindMapRelations();
+        scheduleRenderMindMapSummaries();
     });
 
     // 3. 开始监听根节点包装器

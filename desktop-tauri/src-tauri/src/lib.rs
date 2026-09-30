@@ -544,6 +544,17 @@ fn toggle_window_fullscreen(window: tauri::WebviewWindow) -> Result<(), String> 
 
 pub fn run() {
     tauri::Builder::default()
+        // 单实例检查先于窗口状态插件，避免重复进程进入窗口创建和存储初始化。
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                if window.is_minimized().unwrap_or(false) {
+                    let _ = window.unminimize();
+                }
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             choose_storage_directory,
             get_storage_location,
@@ -570,6 +581,8 @@ pub fn run() {
                 .inner_size(1440.0, 920.0)
                 .min_inner_size(960.0, 640.0)
                 .center()
+                // 由窗口状态插件恢复位置和尺寸后显示，避免启动时先闪现默认布局。
+                .visible(false)
                 // Windows 下使用网页原生拖放，保证目录中的脑图可拖拽移动。
                 .disable_drag_drop_handler()
                 .build()?;
