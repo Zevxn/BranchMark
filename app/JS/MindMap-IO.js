@@ -662,6 +662,10 @@ function initializeNativeDragDrop() {
         }
 
         const targetId = card.dataset.nodeId;
+        // 在异步文件读取前保存本次拖拽的块；dragend 会清理拖拽状态。
+        const documentBlocks = typeof getMindMapDocumentDraggedBlocks === 'function'
+            ? getMindMapDocumentDraggedBlocks(e.dataTransfer)
+            : [];
         let nodePayloads = [];
         let isMarkdownDrop = false;
 
@@ -705,6 +709,7 @@ function initializeNativeDragDrop() {
                 width: 360,
                 children: []
             }));
+            let inserted = false;
 
             // --- 分支 A: 添加子节点 ---
             if (dropType === 'CHILD') {
@@ -725,6 +730,7 @@ function initializeNativeDragDrop() {
                 
                 recordHistory();
                 updateChildrenDOM(targetId);
+                inserted = true;
             } 
             // --- 分支 B: 添加兄弟节点 ---
             else {
@@ -742,9 +748,12 @@ function initializeNativeDragDrop() {
                         
                         recordHistory();
                         updateChildrenDOM(parent.id);
+                        inserted = true;
                     }
                 }
             }
+
+            if (inserted && documentBlocks.length) removeMindMapDocumentBlocks(documentBlocks);
 
             if (isMarkdownDrop) {
                 showTopToast(`✅ 已从 ${newNodes.length} 个 Markdown 文件创建节点`);

@@ -723,6 +723,7 @@ function isMindMapMathClickCopyEnabled() {
 function updateRenderedMathClickCopyState() {
     const enabled = isMindMapMathClickCopyEnabled();
     document.querySelectorAll('.katex').forEach(katexNode => {
+        if (katexNode.closest('.document-material-preview')) return;
         if (!katexNode.querySelector('annotation[encoding="application/x-tex"]')) return;
         katexNode.style.cursor = enabled ? 'pointer' : '';
         katexNode.classList.toggle('clickable-math', enabled);
@@ -993,7 +994,6 @@ async function processRichContent(element) {
             // 1. 创建相对定位的包裹层
             const wrapper = document.createElement('div');
             wrapper.className = 'mermaid-wrapper';
-            if(ENABLE_MARKDOWN_DRAG) wrapper.dataset.mdSource = "```mermaid\n" + rawCode + "\n```";
             // 2. 创建全屏按钮
             const fsBtn = document.createElement('button');
             fsBtn.className = 'mermaid-fs-btn';
@@ -1045,6 +1045,7 @@ async function processRichContent(element) {
 
             // --- 为公式添加点击复制功能 ---
             element.querySelectorAll('.katex').forEach(katexNode => {
+                if (katexNode.closest('.document-material-preview')) return;
                 if (katexNode.dataset.clickBound) return;
                 
                 const annotation = katexNode.querySelector('annotation[encoding="application/x-tex"]');
@@ -1391,7 +1392,6 @@ function enhanceCodeBlock(codeBlock) {
     codeBlock.classList.forEach(cls => {
         if(cls.startsWith('language-')) lang = cls.replace('language-', '');
     });
-    if(ENABLE_MARKDOWN_DRAG) containerDiv.dataset.mdSource = "```" + lang + "\n" + codeBlock.textContent + "\n```";
     
     // 4. 创建行号容器
     const lineNumDiv = document.createElement('div');
@@ -1604,541 +1604,178 @@ function copyMermaidAsPng() {
 // !SECTION Mermaid SVG 转图片并复制功能
 
 // ==========================================
-// SECTION [V5.3 终极修复版] Markdown 拖拽功能 (修复表格富文本 & Ctrl多选)
-// ==========================================
-let ENABLE_MARKDOWN_DRAG = false; // 设置为 false 可关闭此功能
-// 开关：是否在渲染时注入源码以支持高精度拖拽
-if (location.href.includes('MindMap.html')) {
-    ENABLE_MARKDOWN_DRAG = false;
-}
-class RenderedMarkdownDragger {
-    constructor() {
-        if (typeof ENABLE_MARKDOWN_DRAG === 'undefined' || !ENABLE_MARKDOWN_DRAG) return;
-        
-        // --- 配置 ---
-        this.hoverClass = 'md-draggable-hover';
-        this.selectedClass = 'md-selected';
+// SECTION 文档预览内容块框选与拖拽
+const MINDMAP_DOCUMENT_DRAG_MIME = 'application/x-branchmark-document-blocks';
 
-        this.isEnabled = true;     // 拖拽及框选功能开关
+class RenderedMarkdownDragger {
+    constructor(root, { getMarkdown, onSelectionChange }) {
+        this.root = root;
+        this.getMarkdown = getMarkdown;
+        this.onSelectionChange = onSelectionChange;
+        this.selectedElements = new Set();
         this.isBoxSelecting = false;
         this.isDragging = false;
-        this.selectedElements = new Set(); 
-        
-        this.startPos = { x: 0, y: 0 };
-        
-        // 目标选择器 (包含常见块级元素)
-        this.targetSelectors = [
-            'li','ul', 'ol', 'table', 'blockquote', 
-            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 
-            '.mermaid-wrapper', '.code-block-container', '.katex-display', 
-            'p', 'pre'
-        ];
-
-        // 初始化 Turndown 服务
-        this.turndownService = typeof TurndownService !== 'undefined' 
-            ? new TurndownService({ 
-                headingStyle: 'atx', 
-                codeBlockStyle: 'fenced',
-                bulletListMarker: '-', 
-                emDelimiter: '*' 
-              }) 
-            : null;
-
-        if(this.turndownService) {
-            this.turndownService.keep(['sub', 'sup']); 
-            
-            // 【核心规则】Raw Content 
-            // 用于直接输出我们在 sanitizeDomForMarkdown 中手动构建好的 Markdown 源码 (如表格、公式)
-            this.turndownService.addRule('rawContent', {
-                filter: (node) => node.classList.contains('turndown-raw'),
-                replacement: (content, node) => {
-                    // 直接返回文本内容，不进行转义
-                    return node.textContent || node.innerText;
-                }
-            });
-        }
-
-        this.createUI();
-        this.init();
-    }
-
-    createUI() {
+        this.drag = null;
+        this.ignoreNextClick = false;
+        this.scrollFrame = null;
         this.marquee = document.createElement('div');
-        this.marquee.className = 'selection-marquee';
-        // 蓝色系选框，符合 Ctrl 操作直觉
-        this.marquee.style.border = '1px solid rgba(0, 120, 215, 0.8)';
-        this.marquee.style.backgroundColor = 'rgba(0, 120, 215, 0.2)';
-        document.body.appendChild(this.marquee);
-
+        this.marquee.className = 'document-selection-marquee';
+        this.marquee.hidden = true;
         this.badge = document.createElement('div');
-        this.badge.id = 'drag-badge';
-        document.body.appendChild(this.badge);
-    }
-
-    init() {
-        document.addEventListener('mouseover', this.handleMouseOver.bind(this));
-        document.addEventListener('mouseout', this.handleMouseOut.bind(this));
-        
-        document.addEventListener('dragstart', this.handleDragStart.bind(this));
-        
-        // [优化] 增加 50ms 延迟，防止拖拽松手瞬间触发 click 事件，导致刚才拖拽的多选集合被重置
-        document.addEventListener('dragend', () => { 
-            setTimeout(() => { this.isDragging = false; }, 50); 
-        });
-
-        document.addEventListener('mousedown', this.handleMouseDown.bind(this));
-        document.addEventListener('mousemove', this.handleMouseMove.bind(this));
-        document.addEventListener('mouseup', this.handleMouseUp.bind(this));
-        
-        // 使用捕获阶段 true，确保优先处理
-        document.addEventListener('click', this.handleClick.bind(this), true);
-
-        // [新增] 2. 绑定双击 Alt 键切换功能的逻辑
-        let lastKeyTime = 0;
-        document.addEventListener('keyup', (e) => {
-            // 只检测 Alt 键 (event.key === 'Alt')
-            if (e.key === 'Alt') {
-                e.preventDefault();
-                const now = Date.now();
-                // 间隔小于 400ms 算作双击
-                if (now - lastKeyTime < 400) {
-                    this.toggleDraggerMode();
-                    lastKeyTime = 0; // 重置，防止快速三击触发两次
-                } else {
-                    lastKeyTime = now;
-                }
-            }
-        });
-    }
-
-    // ============================================================
-    // 1. 交互逻辑 (Ctrl / Meta 键控制)
-    // ============================================================
-    // [新增] 切换模式的方法
-    toggleDraggerMode() {
-        this.isEnabled = !this.isEnabled;
-        
-        if (!this.isEnabled) {
-            // 禁用时：清空当前选择、隐藏选框、移除悬停样式
-            this.clearSelection();
-            this.isBoxSelecting = false;
-            this.marquee.style.display = 'none';
-            
-            // 2. 移除视觉样式
-            document.querySelectorAll('.' + this.hoverClass).forEach(el => el.classList.remove(this.hoverClass));
-            
-            // 3. [修复核心] 移除所有元素的 draggable 属性
-            // 只要 draggable="true" 存在，浏览器就会认为这是在拖拽元素，从而阻止选中文本
-            const dragElements = document.querySelectorAll('[draggable="true"]');
-            dragElements.forEach(el => {
-                if (!el.closest('#bookmarkPanel')){
-                    el.removeAttribute('draggable');
-                }
-            });
-            
-            showTopToast('🚫 选中拖拽已禁用');
-        } else {
-            showTopToast('✅ 选中拖拽已开启');
-        }
-    }
-    handleMouseDown(e) {
-        if (!this.isEnabled) return;
-        if (e.button !== 0) return;
-        if (e.target.closest('button, .mermaid-fs-btn, .copy-code-btn, a, input, textarea')) return;
-
-        const targetBlock = this.getTarget(e);
-        
-        // [新增] 重置标记：假设这是一次正常的点击，除非后续发生了移动
-        this.ignoreNextClick = false; 
-
-        // 触发框选：按住 Ctrl 或 点击空白处
-        if ((e.ctrlKey || e.metaKey) || !targetBlock) {
-            
-            // 如果是空白处直接拖拽（没按Ctrl），先清空旧选择
-            if (!e.ctrlKey && !e.metaKey) {
-                this.clearSelection();
-            }
-
-            e.preventDefault();
-            this.isBoxSelecting = true;
-            this.startPos = { x: e.pageX, y: e.pageY };
-            this.updateMarquee(e.pageX, e.pageY, 0, 0);
-            this.marquee.style.display = 'block';
-            return;
-        }
-    }
-
-    handleMouseMove(e) {
-        if (!this.isBoxSelecting) return;
-        e.preventDefault();
-        
-        const currentX = e.pageX;
-        const currentY = e.pageY;
-        
-        // [新增] 计算移动距离。如果移动超过 3像素，则认为是在进行"框选操作"，而不是"点击"
-        // 这将阻止松开鼠标时触发 click 事件导致的清空
-        const dist = Math.hypot(currentX - this.startPos.x, currentY - this.startPos.y);
-        if (dist > 3) {
+        this.badge.className = 'document-drag-badge';
+        document.body.append(this.marquee, this.badge);
+        this.onMouseMove = event => this.handleMouseMove(event);
+        this.onMouseUp = () => this.cancelBoxSelection();
+        root.addEventListener('mousedown', event => this.handleMouseDown(event));
+        root.addEventListener('click', event => this.handleClick(event), true);
+        root.addEventListener('dragstart', event => this.handleDragStart(event));
+        root.addEventListener('dragend', () => {
+            this.isDragging = false;
+            this.drag = null;
             this.ignoreNextClick = true;
-        }
-
-        // 计算选框几何信息
-        const width = Math.abs(currentX - this.startPos.x);
-        const height = Math.abs(currentY - this.startPos.y);
-        const left = Math.min(currentX, this.startPos.x);
-        const top = Math.min(currentY, this.startPos.y);
-
-        this.updateMarquee(left, top, width, height);
-        this.detectIntersection({ left, top, width, height });
-    }
-
-    handleMouseUp(e) {
-        if (this.isBoxSelecting) {
-            this.isBoxSelecting = false;
-            this.marquee.style.display = 'none';
-        }
-    }
-
-    handleClick(e) {
-        if (!this.isEnabled) return;
-        if (this.isDragging) return;
-
-        // [新增] 核心修复：如果是框选结束后的 click 事件，直接忽略，防止清空刚才选中的内容
-        if (this.ignoreNextClick) {
-            this.ignoreNextClick = false; // 重置状态
-            this.isBoxSelecting = false;  // 确保关闭框选状态
-            this.marquee.style.display = 'none';
-            return;
-        }
-
-        if (this.isBoxSelecting) return;
-        if (e.target.closest('button, .mermaid-fs-btn, .copy-code-btn')) return;
-
-        const targetBlock = this.getTarget(e);
-
-        // 1. Ctrl 多选模式
-        if (e.ctrlKey || e.metaKey) {
-            if (targetBlock) {
-                if (this.selectedElements.has(targetBlock)) {
-                    this.removeFromSelection(targetBlock);
-                } else {
-                    this.addToSelection(targetBlock);
-                }
-            }
-            return;
-        }
-
-        // 2. 普通单选模式
-        if (targetBlock) {
-            const isOnlySelf = this.selectedElements.size === 1 && this.selectedElements.has(targetBlock);
-            if (!isOnlySelf) {
-                this.clearSelection();
-                this.addToSelection(targetBlock);
-            }
-        } 
-        // 3. 点击空白处 -> 清空
-        else {
-            this.clearSelection();
-        }
-    }
-
-    updateMarquee(x, y, w, h) {
-        this.marquee.style.left = x + 'px';
-        this.marquee.style.top = y + 'px';
-        this.marquee.style.width = w + 'px';
-        this.marquee.style.height = h + 'px';
-    }
-
-    // ============================================================
-    // 2. 核心逻辑：DOM 清洗与 Markdown 生成
-    // ============================================================
-
-    handleDragStart(e) {
-        if (!this.isEnabled) return;
-        const targetEl = this.getTarget(e);
-        if (!targetEl) return;
-
-        this.isDragging = true;
-        let itemsToDrag = [];
-
-        if (this.selectedElements.has(targetEl)) {
-            itemsToDrag = this.getUniqueTopLevelElements(this.selectedElements);
-            itemsToDrag.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1);
-        } else {
-            this.clearSelection();
-            itemsToDrag = [targetEl];
-        }
-
-        const container = document.createElement('div');
-        itemsToDrag.forEach(el => {
-            const clone = el.cloneNode(true);
-            container.appendChild(clone);
-            container.appendChild(document.createTextNode('\n\n'));
-        });
-
-        this.sanitizeDomForMarkdown(container);
-
-        let finalMarkdown = '';
-        if (this.turndownService) {
-            finalMarkdown = this.turndownService.turndown(container.innerHTML);
-            
-            // [新增] 修复标题编号后的转义问题
-            // Turndown 会把 "1." 转义为 "1\."，这里用正则把反斜杠去掉
-            finalMarkdown = finalMarkdown.replace(/(\d+)\\\./g, '$1.'); 
-            
-        } else {
-            finalMarkdown = container.innerText;
-        }
-
-        if (finalMarkdown) {
-            e.dataTransfer.setData('text/plain', finalMarkdown);
-            e.dataTransfer.effectAllowed = 'copy';
-            
-            if (itemsToDrag.length >= 1) {
-                this.badge.innerText = `📝 ${itemsToDrag.length} 个模块`;
-                e.dataTransfer.setDragImage(this.badge, 0, 10);
-            }
-        }
-    }
-
-    /**
-     * DOM 清洗器：将复杂的渲染组件替换为 turndown-raw 标记的 Markdown 源码
-     */
-    sanitizeDomForMarkdown(root) {
-        // 1. 移除无关 UI 元素
-        root.querySelectorAll('.code-line-numbers, .copy-code-btn, .mermaid-fs-btn, .mermaid-btn, .selection-marquee').forEach(el => el.remove());
-
-        // 2. 修复 KaTeX 公式 (转换为 $...$)
-        root.querySelectorAll('.katex').forEach(node => {
-            const annotation = node.querySelector('annotation[encoding="application/x-tex"]');
-            if (annotation) {
-                const tex = annotation.textContent;
-                const isDisplay = node.classList.contains('katex-display') || node.closest('.katex-display');
-                
-                // 行内公式用 span 即可，但块级公式建议用 pre 确保隔离
-                const rawNode = document.createElement(isDisplay ? 'pre' : 'span');
-                rawNode.className = 'turndown-raw';
-                rawNode.textContent = isDisplay ? `$$${tex}$$` : `$${tex}$`;
-                
-                const wrapper = node.closest('.katex-display') || node;
-                if (wrapper.parentNode) wrapper.replaceWith(rawNode);
-            }
-        });
-
-        // 3. 修复代码块 (还原为 ```...```)
-        root.querySelectorAll('.code-block-container').forEach(container => {
-            if (container.dataset.mdSource) {
-                // [修复] 使用 pre 标签
-                const rawNode = document.createElement('pre');
-                rawNode.className = 'turndown-raw';
-                // 添加前后换行，确保不与周围文本粘连
-                rawNode.textContent = '\n' + container.dataset.mdSource + '\n';
-                container.replaceWith(rawNode);
-            }
-        });
-
-        // 4. 修复 Mermaid (还原为 ```mermaid...```)
-        root.querySelectorAll('.mermaid-wrapper').forEach(wrapper => {
-            if (wrapper.dataset.mdSource) {
-                // [修复] 使用 pre 标签
-                const rawNode = document.createElement('pre');
-                rawNode.className = 'turndown-raw';
-                rawNode.textContent = '\n' + wrapper.dataset.mdSource + '\n';
-                wrapper.replaceWith(rawNode);
-            }
-        });
-
-        // 5. 修复表格 (重点修复：保留格式)
-        root.querySelectorAll('table').forEach(table => {
-            // 调用新的转换函数
-            const mdTable = this.convertTableToMarkdown(table);
-            
-            // [关键修复] 这里必须用 pre 标签，否则 innerHTML 解析时表格行的 \n 会变成空格
-            const rawNode = document.createElement('pre');
-            rawNode.className = 'turndown-raw';
-            // 强制样式，防止有些浏览器即使在 pre 中也怪异行为（可选）
-            rawNode.style.whiteSpace = 'pre-wrap'; 
-            
-            // 确保表格前后有空行，否则 Markdown 渲染可能异常
-            rawNode.textContent = '\n' + mdTable + '\n';
-            table.replaceWith(rawNode);
+            setTimeout(() => { this.ignoreNextClick = false; }, 50);
         });
     }
 
-    /**
-     * 【重点修复】将 HTML 表格转换为 Markdown 表格源码
-     * 使用 Turndown 递归处理单元格内容，保留加粗/斜体/代码/链接格式
-     */
-    convertTableToMarkdown(tableEl) {
-        try {
-            let md = '';
-            const rows = Array.from(tableEl.querySelectorAll('tr'));
-            if (rows.length === 0) return '';
-            
-            rows.forEach((row, index) => {
-                const cells = Array.from(row.querySelectorAll('th, td'));
-                
-                const cellTexts = cells.map(cell => {
-                    // 1. 获取单元格的 Markdown 内容 (保留富文本格式!)
-                    // 这里的关键是递归调用 turndown 处理单元格内部 HTML
-                    let cellMd = '';
-                    if (this.turndownService) {
-                        cellMd = this.turndownService.turndown(cell.innerHTML);
-                    } else {
-                        cellMd = cell.innerText;
-                    }
-
-                    // 2. 清洗 Markdown 内容以适配表格语法
-                    // - 将真实换行符替换为 HTML <br> (Markdown 表格单元格不支持换行符)
-                    cellMd = cellMd.replace(/\r?\n/g, '<br>');
-                    // - 转义竖线 | (防止破坏表格结构)
-                    cellMd = cellMd.replace(/\|/g, '\\|');
-                    
-                    return cellMd.trim();
-                });
-                
-                // 拼接当前行
-                md += `| ${cellTexts.join(' | ')} |\n`;
-                
-                // 如果是第一行（通常作为表头），添加分隔线
-                if (index === 0) {
-                    const separators = cells.map(() => '---');
-                    md += `| ${separators.join(' | ')} |\n`;
-                }
-            });
-            return md;
-        } catch (err) { 
-            console.log('Table conversion failed', err);
-            return tableEl.innerText; 
-        }
+    getTarget(event) {
+        if (event.target.closest('button, a, input, textarea, .mermaid-btn, .document-markdown-block.is-removing')) return null;
+        const block = event.target.closest('.document-markdown-block');
+        return block && this.root.contains(block) ? block : null;
     }
 
-    // ... (其他辅助函数) ...
-    detectIntersection(rect) {
-        const candidates = document.querySelectorAll(this.targetSelectors.join(','));
-        const scrollX = window.scrollX;
-        const scrollY = window.scrollY;
-        
-        const rectLeft = rect.left;
-        const rectTop = rect.top;
-        const rectRight = rectLeft + rect.width;
-        const rectBottom = rectTop + rect.height;
-
-        candidates.forEach(el => {
-            if (!this.isValidContent(el)) return;
-            const box = el.getBoundingClientRect();
-            const elLeft = box.left + scrollX;
-            const elTop = box.top + scrollY;
-            const elRight = elLeft + box.width;
-            const elBottom = elTop + box.height;
-
-            const isOverlapping = !(elRight < rectLeft || elLeft > rectRight || elBottom < rectTop || elTop > rectBottom);
-
-            if (isOverlapping) {
-                this.addToSelection(el);
-            } else {
-                // 如果不再重叠且已选中，则移除
-                if (this.selectedElements.has(el)) {
-                    this.removeFromSelection(el);
-                }
-            }
-        });
-    }
-
-    addToSelection(el) {
-        if (!this.selectedElements.has(el)) {
-            this.selectedElements.add(el);
-            el.classList.add(this.selectedClass);
-            el.setAttribute('draggable', 'true');
-        }
-    }
-
-    removeFromSelection(el) {
-        if (this.selectedElements.has(el)) {
-            this.selectedElements.delete(el);
-            el.classList.remove(this.selectedClass);
-        }
+    setSelection(elements) {
+        this.selectedElements.forEach(element => element.classList.remove('md-selected'));
+        this.selectedElements = new Set(elements);
+        this.selectedElements.forEach(element => element.classList.add('md-selected'));
+        this.onSelectionChange(this.selectedElements.size);
     }
 
     clearSelection() {
-        this.selectedElements.forEach(el => el.classList.remove(this.selectedClass));
-        this.selectedElements.clear();
+        this.cancelBoxSelection();
+        this.setSelection([]);
     }
 
-    getTarget(e) {
-        // 1. 忽略功能按钮
-        if (e.target.closest('.mermaid-btn, .copy-code-btn, .mermaid-fs-btn')) return null;
+    selectAll() {
+        this.setSelection(this.root.querySelectorAll('.document-markdown-block:not(.is-removing)'));
+    }
 
-        // [删除] 原有的这段强制选中列表容器的代码：
-        // const listContainer = e.target.closest('ul, ol');
-        // if (listContainer && this.isValidContent(listContainer)) return listContainer;
-
-        // 2. 查找匹配的块级元素
-        let el = e.target.closest(this.targetSelectors.join(','));
-        
-        if (el && this.isValidContent(el)) {
-            // [新增] 优化体验：如果选中了 p 标签，但它直接位于 li 内部，则优先选中 li
-            // 这样可以避免用户只想拖拽列表项，却不小心只拖拽了里面的文字段落
-            if (el.tagName === 'P' && el.parentElement && el.parentElement.tagName === 'LI') {
-                 // 检查 li 是否也在我们的允许范围内（防止意外逃逸）
-                 const parentLi = el.parentElement;
-                 if (this.isValidContent(parentLi)) {
-                     el = parentLi;
-                 }
-            }
-
-            // 3. 特殊处理：表格
-            // 选中表格内部任意元素 (td, tr, th...) 时，强制选中整个表格
-            // 因为在 Markdown 中单独拖拽一个单元格是没有意义的
-            if (['TD','TR','TH','THEAD','TBODY'].includes(el.tagName)) {
-                return el.closest('table');
-            }
-            
-            return el;
+    handleClick(event) {
+        const block = this.getTarget(event);
+        if (!block) return;
+        event.stopPropagation();
+        if (this.ignoreNextClick || this.isDragging) {
+            this.ignoreNextClick = false;
+            return;
         }
-        return null;
+        if (event.ctrlKey || event.metaKey) {
+            const selected = new Set(this.selectedElements);
+            if (selected.has(block)) selected.delete(block);
+            else selected.add(block);
+            this.setSelection(selected);
+        } else this.setSelection([block]);
     }
 
-    isValidContent(el) {
-        return (el.closest('.md-content') || el.closest('.node-card'));
+    handleMouseDown(event) {
+        if (event.button !== 0 || event.target.closest('button, a, input, textarea, .mermaid-btn')) return;
+        this.root.focus({ preventScroll: true });
+        const block = this.getTarget(event);
+        const additive = event.ctrlKey || event.metaKey;
+        this.ignoreNextClick = false;
+        if (block && !additive) {
+            if (!this.selectedElements.has(block)) this.setSelection([block]);
+            return;
+        }
+        event.preventDefault();
+        this.cancelBoxSelection();
+        if (!additive) this.setSelection([]);
+        const bounds = this.root.getBoundingClientRect();
+        this.startPos = { x: event.clientX - bounds.left, y: event.clientY - bounds.top + this.root.scrollTop };
+        this.pointer = { x: event.clientX, y: event.clientY };
+        this.initialPointer = { ...this.pointer };
+        this.baseSelection = additive ? new Set(this.selectedElements) : new Set();
+        this.candidates = Array.from(this.root.querySelectorAll('.document-markdown-block:not(.is-removing)'));
+        this.isBoxSelecting = true;
+        document.addEventListener('mousemove', this.onMouseMove);
+        document.addEventListener('mouseup', this.onMouseUp);
     }
 
-    handleMouseOver(e) {
-        if (!this.isEnabled) return;
-        if (this.isBoxSelecting) return;
-        const el = this.getTarget(e);
-        if (!el) return;
-        e.stopPropagation();
-        if (!this.selectedElements.has(el)) el.classList.add(this.hoverClass);
-        el.setAttribute('draggable', 'true');
+    handleMouseMove(event) {
+        if (!this.isBoxSelecting) return;
+        this.pointer = { x: event.clientX, y: event.clientY };
+        if (Math.hypot(event.clientX - this.initialPointer.x, event.clientY - this.initialPointer.y) < 4
+            && !this.ignoreNextClick) return;
+        event.preventDefault();
+        this.ignoreNextClick = true;
+        this.root.classList.add('is-box-selecting');
+        this.updateMarquee();
+        if (this.scrollFrame === null) this.scrollFrame = requestAnimationFrame(() => this.autoScroll());
     }
 
-    handleMouseOut(e) {
-        const el = this.getTarget(e);
-        if (!el) return;
-        el.classList.remove(this.hoverClass);
-    }
-
-    getUniqueTopLevelElements(elementsSet) {
-        const elements = Array.from(elementsSet);
-        return elements.filter(el => {
-            let parent = el.parentElement;
-            while (parent) {
-                if (elementsSet.has(parent)) return false;
-                parent = parent.parentElement;
-                if (parent && parent.classList.contains('md-content')) break;
-            }
-            return true;
+    updateMarquee() {
+        const bounds = this.root.getBoundingClientRect();
+        const x = Math.max(0, Math.min(bounds.width, this.pointer.x - bounds.left));
+        const y = Math.max(0, Math.min(bounds.height, this.pointer.y - bounds.top)) + this.root.scrollTop;
+        const left = Math.min(this.startPos.x, x) + bounds.left;
+        const right = Math.max(this.startPos.x, x) + bounds.left;
+        const top = Math.min(this.startPos.y, y) + bounds.top - this.root.scrollTop;
+        const bottom = Math.max(this.startPos.y, y) + bounds.top - this.root.scrollTop;
+        Object.assign(this.marquee.style, {
+            left: `${left}px`, top: `${Math.max(bounds.top, top)}px`, width: `${right - left}px`,
+            height: `${Math.max(0, Math.min(bounds.bottom, bottom) - Math.max(bounds.top, top))}px`,
         });
+        this.marquee.hidden = false;
+        const selected = new Set(this.baseSelection);
+        this.candidates.forEach(element => {
+            const box = element.getBoundingClientRect();
+            if (box.right > left && box.left < right && box.bottom > top && box.top < bottom) selected.add(element);
+        });
+        this.setSelection(selected);
+    }
+
+    autoScroll() {
+        this.scrollFrame = null;
+        if (!this.isBoxSelecting) return;
+        const bounds = this.root.getBoundingClientRect();
+        const delta = this.pointer.y < bounds.top + 32 ? -12 : this.pointer.y > bounds.bottom - 32 ? 12 : 0;
+        const previousTop = this.root.scrollTop;
+        this.root.scrollTop += delta;
+        if (this.root.scrollTop !== previousTop) this.updateMarquee();
+        this.scrollFrame = requestAnimationFrame(() => this.autoScroll());
+    }
+
+    cancelBoxSelection() {
+        this.isBoxSelecting = false;
+        this.marquee.hidden = true;
+        this.root.classList.remove('is-box-selecting');
+        if (this.scrollFrame !== null) cancelAnimationFrame(this.scrollFrame);
+        this.scrollFrame = null;
+        document.removeEventListener('mousemove', this.onMouseMove);
+        document.removeEventListener('mouseup', this.onMouseUp);
+    }
+
+    handleDragStart(event) {
+        const block = this.getTarget(event);
+        if (!block) {
+            event.preventDefault();
+            return;
+        }
+        if (!this.selectedElements.has(block)) this.setSelection([block]);
+        const elements = Array.from(this.selectedElements).sort((a, b) =>
+            a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+        const markdown = this.getMarkdown(elements);
+        if (!markdown) {
+            event.preventDefault();
+            return;
+        }
+        this.isDragging = true;
+        this.drag = { token: Math.random().toString(36).slice(2), elements };
+        event.stopPropagation();
+        event.dataTransfer.setData('text/plain', markdown);
+        event.dataTransfer.setData('text/markdown', markdown);
+        event.dataTransfer.setData(MINDMAP_DOCUMENT_DRAG_MIME, this.drag.token);
+        event.dataTransfer.effectAllowed = 'copy';
+        this.badge.textContent = `${elements.length} 个内容块`;
+        event.dataTransfer.setDragImage(this.badge, 0, 10);
     }
 }
-// 启动
-// if (ENABLE_MARKDOWN_DRAG) {
-//     if (document.readyState === 'loading') {
-//         document.addEventListener('DOMContentLoaded', () => new RenderedMarkdownDragger());
-//     } else {
-//         new RenderedMarkdownDragger();
-//     }
-// }
-
-// !SECTION [V5.3 终极修复版] Markdown 拖拽功能 (修复表格富文本 & Ctrl多选)
+// !SECTION 文档预览内容块框选与拖拽

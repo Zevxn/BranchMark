@@ -30,6 +30,7 @@
     <script src="../JS/MindMap-SummariesSearch.js" defer></script>
     <script src="../JS/MindMap-Render.js" defer></script>
     <script src="../JS/MindMap-IO.js" defer></script>
+    <script src="../JS/MindMap-Document.js" defer></script>
     <script src="../JS/BookMarks.js" defer></script>
     <!-- !SECTION 运行时依赖与脚本加载 -->
     <link rel="stylesheet" href="../CSS/BookMarks.css">
@@ -1828,6 +1829,90 @@
         }
         /* !SECTION 导图内链接预览 */
 
+        /* SECTION 文档素材预览与内容块选择 */
+        .mindmap-link-preview:not([data-preview-mode="document"]) .document-material-action,
+        .mindmap-link-preview[data-preview-mode="document"] #btn-mindmap-link-jump { display: none; }
+        .mindmap-link-preview[data-preview-mode="document"] .mindmap-link-preview-body {
+            display: flex;
+            flex: 1;
+            padding: 0;
+            overflow: hidden;
+        }
+        .document-material-pane {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+            min-width: 0;
+            flex-direction: column;
+        }
+        .document-material-pane [hidden], .document-selection-marquee[hidden] { display: none; }
+        .document-material-empty {
+            display: flex;
+            flex: 1;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 14px;
+            padding: 28px 16px;
+            text-align: center;
+        }
+        .document-material-empty > i { font-size: 32px; color: var(--primary); }
+        .document-material-empty strong { font-size: 16px; }
+        .document-material-empty p { margin: 0; color: var(--text-color-secondary); font-size: 13px; line-height: 1.8; }
+        .document-material-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+        .document-material-button {
+            padding: 8px 12px;
+            border: 1px solid var(--toolbar-border);
+            border-radius: 6px;
+            background: var(--card-bg);
+            color: var(--text-color);
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .document-material-button:hover { border-color: var(--primary); background: var(--btn-hover); }
+        .document-material-button.primary { background: var(--primary); color: white; border-color: var(--primary); }
+        .document-source-editor { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 12px; padding: 16px; }
+        .document-source-editor label { font-size: 13px; font-weight: 600; }
+        .document-source-editor textarea {
+            flex: 1;
+            min-height: 120px;
+            resize: none;
+            padding: 12px;
+            border: 1px solid var(--toolbar-border);
+            border-radius: 6px;
+            background: var(--card-bg);
+            color: var(--text-color);
+            font-family: Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+        .document-source-editor textarea:focus { outline: 1px solid var(--primary); }
+        .document-material-preview { flex: 1; min-height: 0; overflow: auto; padding: 10px 24px 18px; outline: none; }
+        .document-markdown-block {
+            padding: 6px 8px;
+            margin: 2px 0;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            cursor: grab;
+            overflow-wrap: anywhere;
+        }
+        .document-markdown-block > :first-child { margin-top: 0; }
+        .document-markdown-block > :last-child { margin-bottom: 0; }
+        .document-markdown-block :is(.katex, .katex-html, img) { cursor: grab; }
+        .document-markdown-block:hover { border-color: var(--primary); border-style: dashed; }
+        .document-markdown-block.md-selected {
+            border-color: var(--primary);
+            background: color-mix(in srgb, var(--primary) 10%, transparent);
+        }
+        .document-markdown-block.is-removing { box-sizing: border-box; overflow: hidden; pointer-events: none; }
+        .document-material-preview.is-removing-content { overflow-anchor: none; }
+        .document-material-preview.is-box-selecting { user-select: none; cursor: crosshair; }
+        .document-material-status { flex: 0 0 auto; padding: 10px 16px; border-top: 1px solid var(--header-border-bottom); font-size: 12px; color: var(--text-color-secondary); }
+        .document-selection-marquee { position: fixed; z-index: 1210; pointer-events: none; border: 1px solid var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }
+        .document-drag-badge { position: fixed; top: -100px; left: -1000px; padding: 8px 12px; border-radius: 6px; background: var(--primary); color: white; }
+        /* !SECTION 文档素材预览与内容块选择 */
+
         /* Resize Handles */
         .resize-handle { position: absolute; opacity: 0; z-index: 50; transition: 0.1s; }
         .node-card:hover .resize-handle { opacity: 1; }
@@ -2638,6 +2723,7 @@
 <body class="mindmap">
     <!-- SECTION 文件输入与工具栏 -->
     <input type="file" id="fileInput" class="mindmap-file-input" accept=".json,application/json" tabindex="-1" aria-hidden="true">
+    <input type="file" id="documentMarkdownFileInput" class="mindmap-file-input" accept=".md" tabindex="-1" aria-hidden="true">
     <div class="toolbar">
         <button class="btn" id="btn-undo" title="Ctrl+Z" disabled><i class="ri-arrow-go-back-line"></i></button>
         <button class="btn" id="btn-redo" title="Ctrl+Y" disabled><i class="ri-arrow-go-forward-line"></i></button>
@@ -2656,6 +2742,9 @@
         </button>
         <button class="btn" id="btn-search" type="button" title="搜索定位 (Ctrl+F)" aria-label="搜索定位">
             <i class="ri-search-line"></i>
+        </button>
+        <button class="btn" id="btn-document-material" type="button" title="文档素材" aria-label="文档素材" aria-controls="mindMapLinkPreview" aria-expanded="false">
+            <i class="ri-file-text-line" aria-hidden="true"></i>
         </button>
         <button class="btn" id="btn-center"><i class="ri-focus-3-line" title="中心归位"></i></button>
         <button class="btn" id="btn-compact-view" type="button" title="开启精简视图，仅本次运行有效" aria-label="切换精简视图" aria-pressed="false">
@@ -2840,6 +2929,8 @@
                 <strong class="mindmap-link-preview-title" id="mindMapLinkPreviewTitle">未命名卡片</strong>
             </div>
             <div class="mindmap-link-preview-actions">
+                <button class="mindmap-link-preview-action document-material-action" id="btn-document-paste" type="button" title="粘贴 Markdown" aria-label="粘贴 Markdown"><i class="ri-clipboard-line" aria-hidden="true"></i></button>
+                <button class="mindmap-link-preview-action document-material-action" id="btn-document-load" type="button" title="加载 Markdown 文件" aria-label="加载 Markdown 文件"><i class="ri-folder-open-line" aria-hidden="true"></i></button>
                 <button class="mindmap-link-preview-action primary" id="btn-mindmap-link-jump" type="button" title="跳转到卡片" aria-label="跳转到卡片">
                     <i class="ri-arrow-right-up-line" aria-hidden="true"></i>
                 </button>
@@ -2849,7 +2940,7 @@
             </div>
         </div>
         <div class="mindmap-link-preview-body" id="mindMapLinkPreviewBody"></div>
-        <div class="mindmap-link-preview-resizer" id="mindMapLinkPreviewResizer" role="separator" tabindex="0" aria-label="调整导图内链接预览宽度" aria-orientation="vertical" aria-controls="mindMapLinkPreview" aria-valuenow="420" aria-valuemin="280" aria-valuemax="1200"></div>
+        <div class="mindmap-link-preview-resizer" id="mindMapLinkPreviewResizer" role="separator" tabindex="0" aria-label="调整预览面板宽度" aria-orientation="vertical" aria-controls="mindMapLinkPreview" aria-valuenow="420" aria-valuemin="280" aria-valuemax="1200"></div>
     </aside>
     <!-- !SECTION 设置、搜索与关联面板 -->
 

@@ -396,6 +396,34 @@ fn schedule_default_storage_directory(app: AppHandle) -> Result<(), String> {
 
 // !SECTION Tauri 存储位置与文件命令
 
+// SECTION Markdown 文档素材文件导入
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn read_markdown_document() -> Result<Option<Value>, String> {
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("加载 Markdown 文档")
+        .add_filter("MarkDown文档", &["md"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("读取 Markdown 文件失败：{error}"))?;
+    Ok(Some(serde_json::json!({
+        "content": content,
+        "filename": path.file_name().unwrap_or_default().to_string_lossy(),
+    })))
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn read_markdown_document() -> Result<Option<Value>, String> {
+    Ok(None)
+}
+
+// !SECTION Markdown 文档素材文件导入
+
 // SECTION JSON 脑图文件导出
 
 #[cfg(target_os = "windows")]
@@ -563,6 +591,7 @@ pub fn run() {
             schedule_storage_directory,
             schedule_default_storage_directory,
             choose_json_export_directory,
+            read_markdown_document,
             write_mindmap_json,
             set_window_theme,
             toggle_window_fullscreen,

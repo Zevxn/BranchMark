@@ -1883,6 +1883,7 @@ const mindMapInternalLinkPreviewState = {
 function closeMindMapInternalLinkPreview() {
     const panel = $('#mindMapLinkPreview');
     if (!panel) return;
+    suspendMindMapDocumentPreview();
     panel.classList.remove('is-open');
     panel.setAttribute('aria-hidden', 'true');
     mindMapInternalLinkPreviewState.target = null;
@@ -2022,6 +2023,9 @@ function openMindMapInternalLinkPreview(targetOrHref) {
         return true;
     }
     const resolution = resolveMindMapInternalLink(target);
+    suspendMindMapDocumentPreview();
+    panel.dataset.previewMode = 'link';
+    panel.setAttribute('aria-label', '导图内链接预览');
     const title = $('#mindMapLinkPreviewTitle');
     const body = $('#mindMapLinkPreviewBody');
     const jumpButton = $('#btn-mindmap-link-jump');
@@ -2092,7 +2096,7 @@ function initializeMindMapInternalLinkPreview() {
     $('#btn-mindmap-link-close')?.addEventListener('click', closeMindMapInternalLinkPreview);
     $('#btn-mindmap-link-jump')?.addEventListener('click', jumpToMindMapInternalLinkTarget);
     document.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && $('#mindMapLinkPreview')?.classList.contains('is-open')) {
+        if (!event.defaultPrevented && event.key === 'Escape' && $('#mindMapLinkPreview')?.classList.contains('is-open')) {
             event.preventDefault();
             closeMindMapInternalLinkPreview();
         }

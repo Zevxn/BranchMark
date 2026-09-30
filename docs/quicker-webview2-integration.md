@@ -72,6 +72,29 @@ C#，只使用 Quicker 自带模块：
 变量名和子程序名称需要完全一致。点击网页“导入”按钮后，网页会异步等待子程序返回，再解析
 `content` 并载入脑图。这条路径使用 Quicker 原生文件对话框，不依赖 WebView2 的网页上传能力。
 
+### 4.1 文档素材加载 Markdown
+
+工具栏“文档素材”面板的“加载文件”在 Quicker 模式中调用独立子程序：
+
+```javascript
+await $quickerSp('DeepConvoImportMarkDown', {})
+```
+
+请在动作中手工添加 `DeepConvoImportMarkDown`，大小写必须一致。可以复制现有 JSON 导入子程序，
+将文件筛选器改为 `Markdown 文档|*.md|所有文件|*.*`，选择成功后按文本读取文件。
+该子程序不需要输入变量，也不需要新增持久化动作变量，输出如下：
+
+| 输出变量 | 类型 | 含义 |
+| --- | --- | --- |
+| `content` | 文本 | 完整 Markdown 原文 |
+| `cancelled` | 布尔 | 默认设为 `true`；文件选择并读取成功后设为 `false` |
+| `error` | 文本 | 可选；读取失败原因，没有错误时留空 |
+| `filename` | 文本 | 可选；文件名，包含 `.md` 扩展名 |
+| `path` | 文本 | 可选；所选文件的完整路径 |
+
+确保上述变量勾选为输出。网页会渲染 `content`，并使用可选的 `filename` 或 `path` 显示文件名和
+校验扩展名。取消后原素材保留，按钮可再次点击。JSON 导入继续使用 `DeepConvoImportMindMap`。
+
 ## 5. 配置 Markdown 链接打开子程序
 
 Quicker 模式会拦截思维导图 Markdown 中的外部链接，通过以下子程序交给 Windows 默认程序打开：
@@ -193,6 +216,8 @@ JSON 脑图导出每次先调用同一个 `DeepConvoSelectExportFolder`，再调
 7. 导出 Canvas，确认 `DeepConvoSaveExportFile` 将文件写入刚选择的目录。
 8. 在 Markdown 中点击本地文件或网址，确认 `DeepConvoOpenPathOrUrl` 使用系统默认程序打开。
 9. 连续导出两次 JSON 脑图，确认每次均选择目录；在同一目录遇到同名文件时拒绝覆盖，确认原文件内容保留。
+10. 打开“文档素材”，加载 `.md` 文件，确认原生选择窗口返回的文本显示在左侧预览；取消后再次加载，
+    确认按钮仍可点击且原素材保留；再确认 JSON 导入仍可用。
 
 如果数据不能恢复，优先检查：变量名是否完全一致、SaveState 是否开启、WebView2 是否提供
 `$quickerSync`，以及动作是否在窗口关闭前就提前结束。

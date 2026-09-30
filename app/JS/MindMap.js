@@ -1623,6 +1623,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeMapMouseEvents(); // 初始化鼠标事件
     initializeMindMapContentPreview(); // 折叠/便利贴的全文预览与标准卡片的长文档目录
     initializeMindMapInternalLinkPreview(); // 导图内链接点击后的固定预览
+    initializeMindMapDocumentPreview(); // 长文档素材预览与内容块拖入
     initializeMapContextMenu(); // 初始化右键菜单
     initializeNativeDragDrop(); // 初始化原生拖拽
     initializeEditorToolbar();  // 初始化md编辑器

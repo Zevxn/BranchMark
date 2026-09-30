@@ -7,6 +7,7 @@ const MINDMAP_SOURCE_FILES = [
     'app/JS/MindMap-SummariesSearch.js',
     'app/JS/MindMap-Render.js',
     'app/JS/MindMap-IO.js',
+    'app/JS/MindMap-Document.js',
 ];
 
 export async function readMindMapSource() {

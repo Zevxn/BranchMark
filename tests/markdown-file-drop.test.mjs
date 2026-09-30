@@ -156,4 +156,31 @@ assert.equal(targetNode.children[0].content, '拖放正文');
 assert.equal(historyCount, 1, '一次纯文本拖放应只记录一次历史');
 assert.equal(updatedParentId, 'target');
 
+// 文档素材只能在目标插入成功后移除，不能仅凭 dragend 的 dropEffect 判断。
+let removals = 0;
+const draggedBlocks = [{ id: 'source-block' }];
+integrationContext.getMindMapDocumentDraggedBlocks = () => [...draggedBlocks];
+integrationContext.removeMindMapDocumentBlocks = blocks => {
+    assert.deepEqual(Array.from(blocks), draggedBlocks);
+    assert.equal(historyCount, 1, '应先创建节点并记录历史，再移除预览内容');
+    removals++;
+};
+const dropDocument = async (card, y) => listeners.drop({
+    preventDefault() {}, clientX: 280, clientY: y,
+    target: { closest: () => card },
+    dataTransfer: { files: [], getData: type => type === 'text/plain' ? '摘取正文' : '' },
+});
+historyCount = 0;
+await dropDocument(null, 200);
+await dropDocument({ ...targetCard, dataset: { nodeId: '不存在的节点' } }, 200);
+assert.equal(removals, 0, '落在空白或无效节点上时不得移除素材');
+await dropDocument(targetCard, 200);
+assert.equal(removals, 1, '成功生成子节点后应移除对应素材');
+historyCount = 0;
+await dropDocument(targetCard, 110);
+assert.equal(removals, 2, '成功生成兄弟节点后同样应移除对应素材');
+integrationContext.findParent = () => null;
+await dropDocument(targetCard, 110);
+assert.equal(removals, 2, '兄弟节点插入失败时应保留素材');
+
 console.log('Markdown 文件拖放校验通过：文件名映射标题，完整文件内容映射卡片正文。');
