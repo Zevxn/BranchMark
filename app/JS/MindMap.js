@@ -1402,10 +1402,59 @@ function reorderMindMapTab(sourceId, targetId, insertAfter = false) {
     saveStorage();
 }
 
+function updateMindMapTabIndicator(animate = true) {
+    const list = $('#mindMapTabList');
+    const activeTab = list?.querySelector('.mindmap-tab.active');
+    if (!list) return;
+    let indicator = list.querySelector('.mindmap-tab-indicator');
+    if (!indicator) {
+        indicator = document.createElement('span');
+        indicator.className = 'mindmap-tab-indicator';
+        indicator.setAttribute('aria-hidden', 'true');
+        indicator.hidden = true;
+        list.appendChild(indicator);
+    }
+    if (!activeTab) {
+        indicator.getAnimations().forEach(animation => animation.cancel());
+        indicator.hidden = true;
+        return;
+    }
+
+    const width = indicator.offsetWidth || 24;
+    const targetX = activeTab.offsetLeft + (activeTab.offsetWidth - width) / 2;
+    const targetTransform = `translateX(${targetX}px) scaleX(1)`;
+    if (!indicator.hidden && indicator.style.transform === targetTransform) return;
+
+    // 在取消旧动画前读取当前画面，连续切换时接续当前位置和长度。
+    const currentRect = indicator.getBoundingClientRect();
+    const listRect = list.getBoundingClientRect();
+    const currentX = currentRect.left - listRect.left + list.scrollLeft;
+    const currentWidth = currentRect.width;
+    const shouldAnimate = animate && !indicator.hidden
+        && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    indicator.getAnimations().forEach(animation => animation.cancel());
+    indicator.hidden = false;
+    indicator.style.transform = targetTransform;
+    if (!shouldAnimate || typeof indicator.animate !== 'function') return;
+
+    const stretchWidth = Math.max(currentWidth, width * 1.25);
+    const midpointX = (currentX + currentWidth / 2 + targetX + width / 2) / 2 - stretchWidth / 2;
+    indicator.animate([
+        { transform: `translateX(${currentX}px) scaleX(${currentWidth / width})` },
+        { transform: `translateX(${midpointX}px) scaleX(${stretchWidth / width})`, offset: 0.45 },
+        { transform: targetTransform }
+    ], {
+        duration: 520,
+        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)'
+    });
+}
+
 function renderMindMapTabs() {
     const list = $('#mindMapTabList');
     if (!list) return;
-    list.replaceChildren();
+    const scrollLeft = list.scrollLeft;
+    // 指示器保留在原节点上，重绘 Tab 按钮不会中断正在进行的动画。
+    list.querySelectorAll('.mindmap-tab').forEach(tab => tab.remove());
     mindMapWorkbook.tabs.forEach(tab => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -1422,6 +1471,8 @@ function renderMindMapTabs() {
         button.appendChild(label);
         list.appendChild(button);
     });
+    list.scrollLeft = scrollLeft;
+    updateMindMapTabIndicator();
 }
 
 function clearMindMapTabDropIndicators() {
@@ -1446,6 +1497,7 @@ function initializeMindMapTabs() {
     const deleteModal = $('#mindMapTabDeleteModal');
     if (!list || !addButton || !menu || !renameModal || !deleteModal) return;
     renderMindMapTabs();
+    window.addEventListener('resize', () => updateMindMapTabIndicator(false));
     addButton.addEventListener('click', addMindMapTab);
     list.addEventListener('wheel', event => {
         if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;

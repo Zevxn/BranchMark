@@ -8,6 +8,11 @@ async function chromeGet(key) {
     }
 }
 
+function shouldShowBookmarkOpenAction(item) {
+    return item.type !== 'mindmap'
+        || !(window.__DEEPCONVO_NATIVE_TAURI_HOST__ || window.__DEEPCONVO_NATIVE_QUICKER_HOST__);
+}
+
 // --- 保持你的原始 installLongPress 函数不变 ---
 function installLongPress(el, { delay = 600, onLongPress } = {}) {
     let timer = null;
@@ -1220,7 +1225,7 @@ class myBookmarkManager {
             }
         }else {
             newFolderItem.style.display = 'none';
-            openItem.style.display = 'flex';
+            openItem.style.display = shouldShowBookmarkOpenAction(targetItem) ? 'flex' : 'none';
             openItem.querySelector('.menu-text').textContent = targetItem.type==='mindmap'? getI18nText('bookmarks.ctx_tabview') : getI18nText('bookmarks.ctx_open_link');
             moveItem.style.display = 'flex';
             renameItem.style.display = 'flex';
@@ -1538,6 +1543,7 @@ class myBookmarkManager {
             iconHtml='📜';
         }else if(item.type==='mindmap'){
             iconHtml='🧠';
+            // iconHtml='<img src="../assets/mindmap.svg" alt="" width="20" height="20" draggable="false">';
         }else{
             if(item.data.length>0){
                 iconHtml='⭐';
@@ -1556,13 +1562,13 @@ class myBookmarkManager {
                         <button data-action="rename" data-id="${itemId}" data-i18n-title="bookmarks.ctx_rename" title="重命名">
                             <i class="fa-regular fa-pen-to-square"></i>
                         </button>
-                        ${item.type!='mindmap' ? `
+                        ${shouldShowBookmarkOpenAction(item) ? (item.type!='mindmap' ? `
                             <button data-action="open" data-id="${itemId}" data-i18n-title="bookmarks.ctx_open_link" title="打开链接">
                                 <i class="fa-solid fa-arrow-up-right-from-square"></i>
                             </button>
                         ` :`<button data-action="open" data-id="${itemId}" data-i18n-title="bookmarks.ctx_tabview" title="新窗口打开">
                                 <i class="fa-solid fa-arrow-up-right-from-square"></i>
-                            </button>`}
+                            </button>`) : ''}
                         <button class="danger" data-action="delete" data-id="${itemId}" data-i18n-title="bookmarks.ctx_delete" title="删除">
                             <i class="fa-regular fa-trash-can"></i>
                         </button>
