@@ -196,14 +196,6 @@ async function getObsidianHandle() {
     return selectAndPersistObsidianHandle('选择保存目录');
 }
 
-async function resetObsidianPath() {
-    if (isNativeQuickerExport()) {
-        await chrome.storage.local.remove(QUICKER_EXPORT_DIRECTORY_KEY);
-        return;
-    }
-    await writeFileHandle(OBSIDIAN_HANDLE_KEY, null);
-}
-
 async function changeObsidianPath() {
     if (isNativeQuickerExport()) return await selectQuickerExportDirectory();
     if (typeof window.showDirectoryPicker !== 'function') {

@@ -630,17 +630,6 @@ function getMindMapSummaryCollisionFreeHorizontalCandidate(
     };
 }
 
-function getMindMapSummaryLayoutDeficit(requiredSpace, anchors) {
-    if (!anchors || anchors.length === 0) {
-        return { availableSpace: Number.POSITIVE_INFINITY, deficit: 0 };
-    }
-    const availableSpace = Math.min(...anchors.map(anchor => anchor.distance));
-    return {
-        availableSpace,
-        deficit: Math.max(0, requiredSpace - availableSpace)
-    };
-}
-
 function getMindMapSummaryGeometry(summary, layoutPlan = null) {
     const selection = getMindMapSummarySelection(summary?.nodeIds || []);
     if (!selection) return null;
@@ -917,20 +906,6 @@ function clearMindMapSummaryBranchShifts() {
         unit.classList.remove('summary-shifted');
         unit.style.removeProperty('--summary-shift-y');
     });
-}
-
-function getMindMapSummarySelectedBranchAnchor(selectedCards) {
-    const ancestorChains = selectedCards.map(card => {
-        const chain = [];
-        let unit = card.closest('.child-unit');
-        while (unit) {
-            chain.push(unit);
-            unit = unit.parentElement?.closest('.child-unit') || null;
-        }
-        return chain;
-    }).filter(chain => chain.length > 0);
-    if (ancestorChains.length !== selectedCards.length || ancestorChains.length === 0) return null;
-    return ancestorChains[0].find(unit => ancestorChains.every(chain => chain.includes(unit))) || null;
 }
 
 function getMindMapSummaryDescendantSeparationAnchor(obstacleCard, selectedCards, placement) {

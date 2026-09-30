@@ -147,8 +147,6 @@ assert.match(mindMap, /function prepareMindMapSummaryLayout\(summaries\)[\s\S]*?
     '总结布局应从原始树迭代求解分支位移约束');
 assert.doesNotMatch(mindMap, /summary-space-before|summary-space-after|--summary-space|spacingRequests/,
     '总结避障执行层不得残留 Flex margin 占位逻辑');
-assert.match(mindMap, /function getMindMapSummarySelectedBranchAnchor[\s\S]*?ancestorChains[\s\S]*?ancestorChains\.every\(chain => chain\.includes\(unit\)\)/,
-    '总结布局应找到共同包含全部成员卡片的分支边界');
 assert.match(mindMap, /function initializeMapContextMenu\(\)[\s\S]*?const summaryEditor = e\.target\.closest\('\.summary-editor'\)[\s\S]*?selectMindMapSummary\(summary\.id\)/,
     '右击总结卡片时应复用脑图右键菜单并选中对应总结');
 assert.match(mindMap, /contextTargetKind = 'node'[\s\S]*?clearSelectedMindMapRelation\(\);[\s\S]*?clearSelectedMindMapSummary\(\);/,
@@ -221,7 +219,7 @@ const canvasRectSource = mindMap.slice(
     mindMap.indexOf('function expandMindMapRelationObstacle'),
 );
 const layoutAnchorSource = mindMap.slice(
-    mindMap.indexOf('function getMindMapSummarySelectedBranchAnchor'),
+    mindMap.indexOf('function getMindMapSummaryDescendantSeparationAnchor'),
     mindMap.indexOf('function getMindMapSummaryEditorCanvasSize'),
 );
 const cleanupSource = mindMap.slice(
@@ -232,7 +230,7 @@ assert.ok(selectionSource.startsWith('function getMindMapNodeBranchSide'), '应�
 assert.ok(pathSource.startsWith('function getMindMapSummaryBracePath'), '应能提取大括号路径函数');
 assert.ok(collisionSource.startsWith('function getMindMapSummaryExpandedCollisionRegion'), '应能提取总结共享碰撞函数');
 assert.ok(canvasRectSource.startsWith('function getMindMapCanvasRect'), '应能提取画布坐标换算函数');
-assert.ok(layoutAnchorSource.startsWith('function getMindMapSummarySelectedBranchAnchor'), '应能提取总结布局占位锚点函数');
+assert.ok(layoutAnchorSource.startsWith('function getMindMapSummaryDescendantSeparationAnchor'), '应能提取总结布局占位锚点函数');
 assert.ok(cleanupSource.startsWith('function removeMindMapSummariesForNodes'), '应能提取总结成员清理函数');
 
 const selectionNodes = {
@@ -667,26 +665,6 @@ assert.equal(
     (pathContext.maximumTopCandidate.editorRect.left + pathContext.maximumTopCandidate.editorRect.right) / 2,
     (pathContext.bounds.left + pathContext.bounds.right) / 2,
     '最大尺寸总结卡片的水平中心仍必须与大括号中心一致',
-);
-pathContext.wideGapAnchors = [{ distance: localBottomCandidate.requiredSpace + 40 }];
-pathContext.narrowGapAnchors = [{ distance: localBottomCandidate.requiredSpace - 35 }];
-pathContext.crossingGapAnchors = [{ distance: -10 }];
-assert.equal(
-    vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, wideGapAnchors).deficit', pathContext),
-    0,
-    '局部空白足够时不应改动导图布局',
-);
-assert.ok(Math.abs(
-    vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, narrowGapAnchors).deficit', pathContext) - 35
-) < 1e-9, '局部空白不足时只能补足缺少的空间');
-assert.ok(Math.abs(
-    vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, crossingGapAnchors).deficit', pathContext)
-        - (localBottomCandidate.requiredSpace + 10)
-) < 1e-9, '普通卡片跨过成员边界时，应把侵入深度计入所需占位');
-assert.equal(
-    vm.runInContext('getMindMapSummaryLayoutDeficit(localBottomCandidate.requiredSpace, []).deficit', pathContext),
-    0,
-    '指定方向没有相邻卡片时应直接使用自由空间',
 );
 const canvasElement = {
     offsetWidth: 400,

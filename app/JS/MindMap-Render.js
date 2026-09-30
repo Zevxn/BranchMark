@@ -1101,41 +1101,6 @@ function getStableHue(str) {
     // 取余数，映射到数组下标
     return distinctHues[hash % distinctHues.length];
 }
-function centerTarget(el) {
-    // 1. 获取目标元素
-    console.log("尝试居中元素：", el);
-    if (!el) { console.log("未找到目标元素"); return; }
-
-    // 1. 获取尺寸
-    const rect = el.getBoundingClientRect();
-    const elCX = rect.left + rect.width / 2;
-    const elCY = rect.top + rect.height / 2;
-
-    // 2. 计算目标位置（屏幕中心，Y轴稍微偏上 15% 以避开Dock）
-    const winCX = window.innerWidth / 2;
-    const winCY = window.innerHeight * 0.40; 
-
-    // 3. 计算位移差
-    const diffX = winCX - elCX;
-    const diffY = winCY - elCY;
-
-    // 4. 更新坐标（强制取整，防止小数导致渲染模糊）
-    state.view.tx = Math.round(state.view.tx + diffX);
-    state.view.ty = Math.round(state.view.ty + diffY);
-
-    // 5. 应用平滑过渡
-    const canvas = document.getElementById('canvas-layer');
-    canvas.style.transition = 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
-    updateTransform();
-    
-    // 6. 动画结束后移除 transition，避免拖拽延迟
-    setTimeout(() => {
-        canvas.style.transition = '';
-        if (typeof saveStorage === 'function') saveStorage();
-    }, 320);
-}
-
-
 // 无损样式更新（防止抖动）
 function updateTreeStyle(node = state.data, parentIsRoot = true, inheritedColor = null) {
     const isRoot = node.id === state.data.id;

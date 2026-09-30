@@ -1,4 +1,4 @@
-// SECTION 公共工具与安全策略
+// SECTION 公共工具
 async function chromeGet(key) {
     try {
         const result = await chrome.storage.local.get([key]);       // 读取收藏数据
@@ -51,19 +51,7 @@ function installLongPress(el, { delay = 600, onLongPress } = {}) {
     }, true);
 }
 
-// --- 安全策略工具 ---
-const myPolicy = window.trustedTypes && window.trustedTypes.createPolicy ? 
-    window.trustedTypes.createPolicy('bookmark-policy', { createHTML: s => s }) : null;
-
-// 安全赋值函数
-function setSafeHTML(element, html) {
-    if (myPolicy) {
-        element.innerHTML = myPolicy.createHTML(html);
-    } else {
-        element.innerHTML = html;
-    }
-}
-// !SECTION 公共工具与安全策略
+// !SECTION 公共工具
 
 // SECTION 创建UI容器
 const uiContainer = document.createElement('div');
@@ -1584,12 +1572,6 @@ class myBookmarkManager {
         `;
     }
     
-    renderNode(id) { // ① 返回单个节点 HTML
-        const f = this.data.folders[id], i = this.data.items[id];
-        if (f) return this.viewMode==='list'?this.renderFolderNode(id):this.renderGridNode(id,'folder');
-        if (i) return this.viewMode==='list'?this.renderItemNode(id):this.renderGridNode(id,'item');
-        return '';
-    }
     renderInsertNode() {
         // 收藏夹数据量较小，完整重绘比维护多个历史嵌入视图更可靠。
         this.render();
@@ -1607,17 +1589,6 @@ class myBookmarkManager {
         });
         
     }
-    /* ⑤ 移动专用：只重绘两个文件夹的内容 */
-    refreshOneFolder(folderId) {
-        console.log('移动了节点');
-        const cnt = document.querySelector(`.children[data-id="${folderId}"]`);
-        if (!cnt) return;
-        // cnt.innerHTML = this.renderFolderContent(folderId); // 已有函数，复用
-        cnt.insertAdjacentHTML('beforeend', this.renderFolderContent(folderId));
-        console.log(this.renderFolderContent(folderId));
-        this.addOverflowTooltips(cnt);
-    }
-
     /**
      * [还原] 切换文件夹折叠状态 (仅限主面板/侧边栏)
      * @param {string} folderId 
@@ -1657,17 +1628,6 @@ class myBookmarkManager {
 
         // 3. 更新 UI (调用通用的 DOM 更新函数)
         this._toggleFolderState(folderId, isNowExpanded, scope);
-    }
-    // 折叠文件夹时渲染————删除所有子项
-    renderMultiDelete(folderId) {
-        const children = this.getChildren(folderId);
-        children.forEach(id => {
-            if (this.data.folders[id] && this.expandedFolders.has(folderId)) {
-                this.renderMultiDelete(id);
-            }else{
-                this.renderDeleteNode(id);
-            }
-        });
     }
     // === 新增辅助方法：只操作 DOM，不重绘整个树 ===
     /**
@@ -2208,25 +2168,6 @@ class myBookmarkManager {
         return itemId
     }
 
-    findFolderIdByPath(path) {
-        if (path === this.rootDir) return 'root';
-
-        const pathParts = path.split('/').filter(p => p.trim());
-        let currentParent = null;
-
-        for (let i = 0; i < pathParts.length; i++) {
-            const children = this.getChildren(currentParent);
-            const folder = children.find(id => this.data.folders[id]?.name === pathParts[i].trim());
-            if (folder) {
-                currentParent = folder;
-            } else {
-                return 'root';
-            }
-        }
-
-        return currentParent;
-    }
-
 // !SECTION 新建收藏
 
 // SECTION 删除
@@ -2256,9 +2197,6 @@ class myBookmarkManager {
 
     }
 
-    updateData(data) {
-        this.data = data;
-    }
     async deleteItem(id) {
         const folder = this.data.folders[id];
         console.log('deleteItem',this.data);
