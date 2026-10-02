@@ -460,7 +460,7 @@ function applyMindMapEntitySize(target, kind, width, height, sourceIsSimple) {
     element.style.height = 'auto';
 }
 
-function createNodeHTML(node, isLeft, inheritedColor = null) {
+function createNodeHTML(node, isLeft, inheritedColor = null, includeChildren = true) {
     const isSelected = state.selectedIds.has(node.id);
     const isRoot = node.id === state.data.id;
     const isSimple = !!node.isSimple && !isRoot;
@@ -546,7 +546,8 @@ function createNodeHTML(node, isLeft, inheritedColor = null) {
         || (hasContent && !isSimple && !isCompactCollapsed);
 
     let childrenHTML = '';
-    if(hasChildren && areChildrenVisible) {
+    // 单卡更新只生成当前卡片；折叠按钮仍按真实子节点与展开状态生成。
+    if(includeChildren && hasChildren && areChildrenVisible) {
         childrenHTML = `<div class="children-container ${isLeft?'left-side':''}" id="children-${node.id}">
             ${node.children.map(child => {
                 let nextColor = null;
@@ -605,17 +606,9 @@ function renderTree() {
     const rightKids = (root.children || []).filter(c => c.dir !== 'left');
     const isLeftVisible = !root.foldedLeft || isMapRootDirectionTemporarilyExpanded('left');
     const isRightVisible = !root.foldedRight || isMapRootDirectionTemporarilyExpanded('right');
-    // 注意：我们需要获取所有子节点的总数来计算色相分布，或者简单地让左边和右边各自计算
-    // 为了颜色统一，我们在 map 时重新计算正确的 index 或者传递颜色
-    
-    // 这里其实不需要改太多，因为 Root 调用 createNodeHTML 时，
-    // 上面的新逻辑会在内部处理 children 的 map。
-    // 但是！renderTree 这里是手动 map 了 leftKids 和 rightKids，
-    // 这意味着我们跳过了 Root 内部的 createNodeHTML 里的 children 生成逻辑。
-    // 所以我们需要在这里手动计算颜色！
-
+    // 左右分支在下方分别生成，根卡片无需重复生成整棵子树。
     const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = createNodeHTML(root, false); // Root 没颜色
+    tempDiv.innerHTML = createNodeHTML(root, false, null, false); // Root 没颜色
     const rootCardEl = tempDiv.querySelector('.node-card');
     
     // ... (中间 fold-btn 逻辑保持不变) ...
@@ -781,7 +774,7 @@ function updateNodeDOM(nodeId) {
     }
     const isLeft = isDescendantOfLeft(node.id);
     const temp = document.createElement('div');
-    temp.innerHTML = createNodeHTML(node, isLeft, selfColor); 
+    temp.innerHTML = createNodeHTML(node, isLeft, selfColor, false);
     const newCard = temp.querySelector('.node-card'); 
 
     // 2. 检查结构变化
