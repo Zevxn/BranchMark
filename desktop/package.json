@@ -1,7 +1,7 @@
 {
   "name": "deepconvo-mindmap-desktop",
   "productName": "BranchMark",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "BranchMark 桌面版：Electron 外壳加载 app/ 的构建产物 dist/，不修改任何业务代码",
   "main": "main.js",
