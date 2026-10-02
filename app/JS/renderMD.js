@@ -740,6 +740,41 @@ function getMarkdownQuickerSubprogram() {
         || (typeof $quickerSp !== 'undefined' ? $quickerSp : null);
 }
 
+function getMarkdownTauriCore() {
+    const core = window.__TAURI__?.core;
+    return !window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && typeof core?.invoke === 'function'
+        ? core : null;
+}
+
+async function openMarkdownFileWithTauri(href) {
+    try {
+        const normalized = normalizeMarkdownLinkTarget(href);
+        if (normalized?.kind !== 'file') throw new Error('文件链接无效');
+        await getMarkdownTauriCore().invoke('open_local_file', {
+            url: windowsPathToFileUrl(normalized.target),
+        });
+        return true;
+    } catch (error) {
+        console.warn('[Markdown] Tauri 打开文件失败:', error);
+        showTopToast(`❌ 打开失败：${error?.message || String(error)}`);
+        return false;
+    }
+}
+
+function stripMarkdownFileLocation(path) {
+    // 代码引用中的 :行号[:列号] 不属于 Windows 文件名。
+    return path.replace(/:\d+(?::\d+)?$/, '');
+}
+
+function windowsPathToFileUrl(path) {
+    const forwardPath = path.replace(/\\/g, '/');
+    const encodePath = value => value.split('/').map(encodeURIComponent).join('/');
+    if (/^[A-Za-z]:\//.test(forwardPath)) {
+        return `file:///${forwardPath.slice(0, 2)}${encodePath(forwardPath.slice(2))}`;
+    }
+    return `file:${encodePath(forwardPath)}`;
+}
+
 function fileUrlToWindowsPath(fileUrl) {
     const host = decodeURIComponent(fileUrl.hostname || '');
     let path = decodeURIComponent(fileUrl.pathname || '').replace(/\//g, '\\');
@@ -753,6 +788,15 @@ function normalizeMarkdownLinkTarget(href) {
     const rawHref = String(href || '').trim();
     if (!rawHref) return null;
     if (rawHref.startsWith('#')) return { kind: 'internal', target: rawHref };
+
+    // 在 URL 解析前识别盘符路径，避免 D:/... 被当成 d: 协议。
+    let windowsHref = rawHref;
+    // marked 会编码中文、空格和反斜杠；原始路径中的普通百分号仍需保留。
+    try { windowsHref = decodeURIComponent(rawHref); } catch { /* 保留未编码的原始路径 */ }
+    const windowsPath = windowsHref.match(/^([A-Za-z]:[\\/](?:[^<>:"/\\|?*\r\n]+[\\/])*[^<>:"/\\|?*\r\n]+?)(?::\d+(?::\d+)?)?$/);
+    if (windowsPath) {
+        return { kind: 'file', target: windowsPath[1].replace(/\//g, '\\') };
+    }
 
     const mindMapTarget = typeof parseMindMapInternalLink === 'function'
         ? parseMindMapInternalLink(rawHref)
@@ -771,7 +815,7 @@ function normalizeMarkdownLinkTarget(href) {
     }
     if (!QUICKER_EXTERNAL_PROTOCOLS.has(parsed.protocol)) return null;
     if (parsed.protocol === 'file:') {
-        return { kind: 'file', target: fileUrlToWindowsPath(parsed) };
+        return { kind: 'file', target: stripMarkdownFileLocation(fileUrlToWindowsPath(parsed)) };
     }
     return { kind: 'url', target: parsed.href };
 }
@@ -910,6 +954,7 @@ async function processRichContent(element) {
     const useQuickerSubprogram = Boolean(
         window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && getMarkdownQuickerSubprogram(),
     );
+    const useTauriFileOpen = Boolean(getMarkdownTauriCore());
     element.querySelectorAll('a[href]').forEach(link => {
         const normalizedTarget = normalizeMarkdownLinkTarget(link.getAttribute('href'));
         const isMindMapInternalLink = normalizedTarget?.kind === 'mindmap-card';
@@ -930,7 +975,7 @@ async function processRichContent(element) {
             link.dataset.fileLinkDecorated = 'true';
         }
 
-        if (isMindMapInternalLink || useQuickerSubprogram) {
+        if (isMindMapInternalLink || useQuickerSubprogram || (isLocalFile && useTauriFileOpen)) {
             link.removeAttribute('target');
             link.removeAttribute('rel');
         } else {
@@ -954,6 +999,8 @@ async function processRichContent(element) {
                     if (event.detail === 0) {
                         if (useQuickerSubprogram) {
                             await openMarkdownLinkWithQuicker(link.getAttribute('href'));
+                        } else if (useTauriFileOpen) {
+                            await openMarkdownFileWithTauri(link.getAttribute('href'));
                         } else {
                             window.open(link.href, '_blank', 'noopener,noreferrer');
                         }
@@ -971,6 +1018,10 @@ async function processRichContent(element) {
                 event.stopPropagation();
                 if (useQuickerSubprogram) {
                     await openMarkdownLinkWithQuicker(link.getAttribute('href'));
+                    return;
+                }
+                if (useTauriFileOpen) {
+                    await openMarkdownFileWithTauri(link.getAttribute('href'));
                     return;
                 }
                 window.open(link.href, '_blank', 'noopener,noreferrer');

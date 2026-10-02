@@ -546,6 +546,122 @@ mod json_export_tests {
 
 // !SECTION JSON 脑图文件导出
 
+// SECTION 系统默认程序打开文件与链接
+
+fn open_system_target(target: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        // 直接交给系统默认程序，文件路径不经过命令行解释。
+        #[link(name = "shell32")]
+        extern "system" {
+            fn ShellExecuteW(
+                hwnd: *mut std::ffi::c_void,
+                operation: *const u16,
+                file: *const u16,
+                parameters: *const u16,
+                directory: *const u16,
+                show_cmd: i32,
+            ) -> *mut std::ffi::c_void;
+        }
+        let operation: Vec<u16> = "open\0".encode_utf16().collect();
+        let file: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            )
+        } as isize;
+        if result <= 32 {
+            Err(format!("系统默认程序打开失败：{result}"))
+        } else {
+            Ok(())
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = target;
+        Err("当前桌面平台暂不支持打开系统默认程序".to_string())
+    }
+}
+
+fn local_file_url_to_path(url: &str) -> Result<PathBuf, String> {
+    let target = tauri::Url::parse(url).map_err(|_| "文件链接无效".to_string())?;
+    if target.scheme() != "file" {
+        return Err("仅支持本地文件链接".to_string());
+    }
+    let path = target
+        .to_file_path()
+        .map_err(|_| "文件路径无效".to_string())?;
+    if !path.is_absolute() || path.to_string_lossy().contains('\0') {
+        return Err("文件路径无效".to_string());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn open_local_file(url: String) -> Result<(), String> {
+    let path = local_file_url_to_path(&url)?;
+    if !path.exists() {
+        return Err(format!("文件或目录不存在：{}", path.display()));
+    }
+    let target = path
+        .to_str()
+        .ok_or_else(|| "文件路径编码无效".to_string())?;
+    open_system_target(target)
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod local_file_tests {
+    use super::*;
+
+    #[test]
+    fn file_links_preserve_windows_paths() {
+        for (url, expected) in [
+            (
+                "file:///D:/科研资料/Ning%20等%20-%202024.pdf",
+                "D:\\科研资料\\Ning 等 - 2024.pdf",
+            ),
+            (
+                "file://localhost/C:/资料/%E8%AE%BA%E6%96%87%23%25.pdf",
+                "C:\\资料\\论文#%.pdf",
+            ),
+            (
+                "file://server/share/论文.pdf",
+                "\\\\server\\share\\论文.pdf",
+            ),
+        ] {
+            assert_eq!(
+                local_file_url_to_path(url).unwrap(),
+                PathBuf::from(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_file_links_are_rejected() {
+        for url in [
+            "https://example.com",
+            "javascript:alert(1)",
+            "D:\\资料\\论文.pdf",
+            "file:///C:/bad%00.pdf",
+            "file:///relative.pdf",
+        ] {
+            assert!(local_file_url_to_path(url).is_err(), "{url}");
+        }
+        let missing =
+            std::env::temp_dir().join(format!("branchmark-missing-{}.pdf", process::id()));
+        assert!(!missing.exists());
+        let url = tauri::Url::from_file_path(missing).unwrap();
+        assert!(open_local_file(url.into()).unwrap_err().contains("不存在"));
+    }
+}
+
+// !SECTION 系统默认程序打开文件与链接
+
 // SECTION 应用启动与窗口控制
 
 #[tauri::command]
@@ -563,43 +679,7 @@ fn open_branchmark_url(url: String) -> Result<(), String> {
     {
         return Err("仅支持打开 BranchMark 项目主页和版本页面".to_string());
     }
-
-    #[cfg(target_os = "windows")]
-    {
-        // 交给系统默认浏览器打开，避免项目网页进入应用 WebView。
-        #[link(name = "shell32")]
-        extern "system" {
-            fn ShellExecuteW(
-                hwnd: *mut std::ffi::c_void,
-                operation: *const u16,
-                file: *const u16,
-                parameters: *const u16,
-                directory: *const u16,
-                show_cmd: i32,
-            ) -> *mut std::ffi::c_void;
-        }
-        let operation: Vec<u16> = "open\0".encode_utf16().collect();
-        let file: Vec<u16> = target.as_str().encode_utf16().chain(Some(0)).collect();
-        let result = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                operation.as_ptr(),
-                file.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                1,
-            )
-        } as isize;
-        if result <= 32 {
-            Err(format!("打开系统浏览器失败：{result}"))
-        } else {
-            Ok(())
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        Err("当前桌面平台暂不支持打开系统浏览器".to_string())
-    }
+    open_system_target(target.as_str())
 }
 
 #[tauri::command]
@@ -648,6 +728,7 @@ pub fn run() {
             read_markdown_document,
             write_mindmap_json,
             open_branchmark_url,
+            open_local_file,
             set_window_theme,
             toggle_window_fullscreen,
         ])
