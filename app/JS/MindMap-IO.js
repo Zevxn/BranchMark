@@ -190,6 +190,7 @@ function pasteMindMapNodesToSelection(nodesToPaste) {
         targetNode.children.push(newNode);
     });
 
+    invalidateMindMapNodeIndex();
     targetNode.folded = false;
     recordHistory();
     updateChildrenDOM(targetNode.id);
@@ -726,6 +727,7 @@ function initializeNativeDragDrop() {
 
                 if (!targetNode.children) targetNode.children = [];
                 targetNode.children.push(...newNodes);
+                invalidateMindMapNodeIndex();
                 targetNode.folded = false; 
                 
                 recordHistory();
@@ -745,6 +747,7 @@ function initializeNativeDragDrop() {
                     if (index !== -1) {
                         const insertIndex = (dropType === 'BEFORE') ? index : index + 1;
                         parent.children.splice(insertIndex, 0, ...newNodes);
+                        invalidateMindMapNodeIndex();
                         
                         recordHistory();
                         updateChildrenDOM(parent.id);

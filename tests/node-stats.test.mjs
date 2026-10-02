@@ -23,6 +23,10 @@ const statsSource = mindMap.slice(
     mindMap.indexOf('function getMindMapNodeStats'),
     mindMap.indexOf('function updateMindMapNodeStats'),
 );
+const querySource = mindMap.slice(
+    mindMap.indexOf('// SECTION 节点查询索引'),
+    mindMap.indexOf('// !SECTION 节点查询索引'),
+);
 assert.ok(statsSource.startsWith('function getMindMapNodeStats'), '应能提取节点统计函数');
 
 const tree = {
@@ -33,37 +37,10 @@ const tree = {
     ],
 };
 
-function findNode(root, id) {
-    if (root.id === id) return root;
-    for (const child of root.children || []) {
-        const found = findNode(child, id);
-        if (found) return found;
-    }
-    return null;
-}
-
-function findParent(root, id) {
-    for (const child of root.children || []) {
-        if (child.id === id) return root;
-        const found = findParent(child, id);
-        if (found) return found;
-    }
-    return null;
-}
-
-function collectMindMapNodeIds(node, ids = new Set()) {
-    ids.add(node.id);
-    (node.children || []).forEach(child => collectMindMapNodeIds(child, ids));
-    return ids;
-}
-
 const context = vm.createContext({
     state: { data: tree, selectedIds: new Set(['a']) },
-    findNode,
-    findParent,
-    collectMindMapNodeIds,
 });
-vm.runInContext(statsSource, context);
+vm.runInContext(`${querySource}\n${statsSource}`, context);
 
 assert.deepEqual(
     JSON.parse(JSON.stringify(vm.runInContext('getMindMapNodeStats()', context))),

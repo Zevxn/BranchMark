@@ -26,6 +26,7 @@ function initializeMapToolbar() {
             const newNode = {id:generateNodeId(), topic:'New', widthMode:'auto', heightMode:'auto'};
             if(n.id === state.data.id) newNode.dir = 'right';
             n.children.push(newNode); 
+            invalidateMindMapNodeIndex();
             state.selectedIds.clear(); state.selectedIds.add(newNode.id); 
             recordHistory(); updateChildrenDOM(n.id);
             focusMindMapNodeTopic(newNode.id);
@@ -42,6 +43,7 @@ function initializeMapToolbar() {
             const sibling = findNode(state.data, id);
             newNode.dir = sibling.dir;
             p.children.push(newNode); 
+            invalidateMindMapNodeIndex();
             state.selectedIds.clear(); state.selectedIds.add(newNode.id); 
             recordHistory(); updateChildrenDOM(p.id);
             focusMindMapNodeTopic(newNode.id);
@@ -68,7 +70,11 @@ function initializeMapToolbar() {
             if(id!==state.data.id){
                 collectMindMapNodeIds(findNode(state.data,id), deletedNodeIds);
                 const p=findParent(state.data,id);
-                if(p){ p.children=p.children.filter(c=>c.id!==id); parents.add(p.id); }
+                if(p){
+                    p.children=p.children.filter(c=>c.id!==id);
+                    invalidateMindMapNodeIndex();
+                    parents.add(p.id);
+                }
             }
         }); 
         removeMindMapRelationsForNodes(deletedNodeIds);

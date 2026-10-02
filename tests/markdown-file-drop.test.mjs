@@ -99,12 +99,6 @@ const integrationContext = vm.createContext({
         querySelectorAll: () => [],
     },
     state: { data: rootNode },
-    findNode: (node, id) => node.id === id
-        ? node
-        : (node.children || []).map(child => integrationContext.findNode(child, id)).find(Boolean),
-    findParent: (node, id) => (node.children || []).some(child => child.id === id)
-        ? node
-        : (node.children || []).map(child => integrationContext.findParent(child, id)).find(Boolean),
     generateNodeId: () => 'new-node',
     recordHistory: () => { historyCount += 1; },
     updateChildrenDOM: id => { updatedParentId = id; },
@@ -112,12 +106,14 @@ const integrationContext = vm.createContext({
 });
 
 vm.runInContext(`
+    ${source.slice(source.indexOf('// SECTION 节点查询索引'), source.indexOf('// !SECTION 节点查询索引'))}
     ${plainTextParserSource}
     ${helperSource}
     ${initializeSource}
     ${markdownHeaderSource}
     initializeNativeDragDrop();
 `, integrationContext);
+const beforeFileDropIndex = integrationContext.getMindMapNodeIndex();
 await listeners.drop({
     preventDefault() {},
     clientX: 280,
@@ -134,8 +130,11 @@ assert.equal(targetNode.children[0].topic, '拖入节点');
 assert.equal(targetNode.children[0].content, '## Markdown 内容');
 assert.equal(historyCount, 1, '一次文件拖放应只记录一次历史');
 assert.equal(updatedParentId, 'target', '创建节点后应局部刷新目标节点的子树');
+assert.notEqual(integrationContext.getMindMapNodeIndex(), beforeFileDropIndex, '文件拖入后应使旧索引失效');
+assert.equal(integrationContext.findNode(rootNode, 'new-node'), targetNode.children[0]);
 
 targetNode.children = [];
+integrationContext.invalidateMindMapNodeIndex();
 historyCount = 0;
 updatedParentId = null;
 await listeners.drop({
@@ -177,8 +176,11 @@ assert.equal(removals, 0, '落在空白或无效节点上时不得移除素材')
 await dropDocument(targetCard, 200);
 assert.equal(removals, 1, '成功生成子节点后应移除对应素材');
 historyCount = 0;
+const beforeSiblingDropIndex = integrationContext.getMindMapNodeIndex();
 await dropDocument(targetCard, 110);
 assert.equal(removals, 2, '成功生成兄弟节点后同样应移除对应素材');
+assert.notEqual(integrationContext.getMindMapNodeIndex(), beforeSiblingDropIndex, '兄弟节点插入后应使旧索引失效');
+assert.equal(integrationContext.findParent(rootNode, 'new-node'), rootNode);
 integrationContext.findParent = () => null;
 await dropDocument(targetCard, 110);
 assert.equal(removals, 2, '兄弟节点插入失败时应保留素材');

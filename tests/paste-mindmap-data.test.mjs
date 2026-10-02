@@ -50,6 +50,7 @@ const context = vm.createContext({
     state: { data: root, selectedIds: new Set(['target']) },
     generateNodeId: () => `generated-${++nextId}`,
     findNode,
+    invalidateMindMapNodeIndex: () => {},
     recordHistory: () => { historyCount += 1; },
     updateChildrenDOM: id => { updatedParentId = id; },
     updateSelection: () => {},

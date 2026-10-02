@@ -74,11 +74,13 @@ function onMouseUp(e) {
                                     tp.children.splice(state.drag.dropType==='BEFORE'?ti:ti+1, 0, cloned); 
                                     parentsToUpdate.add(tp.id); 
                                 }
+                                invalidateMindMapNodeIndex();
                                 changed = true;
                             } else {
                                 const idx = p.children.findIndex(c=>c.id===id);
                                 if(idx>-1) {
                                     const [mv] = p.children.splice(idx,1);
+                                    invalidateMindMapNodeIndex();
                                     if(state.drag.targetId === state.data.id) mv.dir = newDir;
                                     else {
                                         if(state.drag.dropType !== 'CHILD') {
@@ -90,6 +92,7 @@ function onMouseUp(e) {
                                     parentsToUpdate.add(p.id);
                                     if(state.drag.dropType==='CHILD') { if(!t.children)t.children=[]; t.children.push(mv); t.folded=false; parentsToUpdate.add(t.id); }
                                     else { const ti=tp.children.findIndex(c=>c.id===state.drag.targetId); tp.children.splice(state.drag.dropType==='BEFORE'?ti:ti+1, 0, mv); parentsToUpdate.add(tp.id); }
+                                    invalidateMindMapNodeIndex();
                                     changed = true;
                                 }
                             }
@@ -108,6 +111,7 @@ function onMouseUp(e) {
                     
                     if(!target.children) target.children = [];
                     target.children.push(newNode);
+                    invalidateMindMapNodeIndex();
                     target.folded = false;
                     recordHistory(); updateChildrenDOM(target.id);
                 } else {
@@ -117,6 +121,7 @@ function onMouseUp(e) {
                     newNode.dir = sibling.dir;
                     
                     parent.children.splice(state.drag.dropType === 'BEFORE' ? idx : idx + 1, 0, newNode);
+                    invalidateMindMapNodeIndex();
                     recordHistory(); updateChildrenDOM(parent.id);
                 }
                 // 判断：没按 Ctrl 且有选中的 Dock 索引
@@ -683,6 +688,9 @@ function renderTree() {
 };
 
 function isDescendantOfLeft(id) {
+    const index = getMindMapNodeIndex();
+    if (!index.hasDuplicateIds && !Number.isNaN(id)) return index.branchById.get(id) === 'left';
+    // 旧数据可能包含重复 ID，此时保留原有查找与父链判断规则。
     let curr = findNode(state.data, id);
     while(curr) {
         const p = findParent(state.data, curr.id);
@@ -944,7 +952,7 @@ function updateToolbar() {
 };
 
 function getMindMapNodeStats() {
-    const total = collectMindMapNodeIds(state.data).size;
+    const total = getMindMapNodeIndex().nodeById.size;
     if (state.selectedIds.size !== 1) return { total, children: null, siblings: null };
 
     const nodeId = Array.from(state.selectedIds)[0];
@@ -969,12 +977,61 @@ function updateMindMapNodeStats() {
     siblingsElement.textContent = stats.siblings === null ? '—' : String(stats.siblings);
 }
 
+// SECTION 节点查询索引
+let cachedMindMapNodeIndex = null;
+
+function invalidateMindMapNodeIndex() {
+    cachedMindMapNodeIndex = null;
+}
+
+function getMindMapNodeIndex() {
+    const root = state.data;
+    // 根对象替换覆盖导入、撤销/重做及页面切换；原地增删和移动需显式失效。
+    if (cachedMindMapNodeIndex?.root === root) return cachedMindMapNodeIndex;
+
+    const nodeById = new Map();
+    const parentById = new Map();
+    const branchById = new Map();
+    let hasDuplicateIds = false;
+    const pending = [{ node: root, parent: null, branch: null }];
+    while (pending.length > 0) {
+        const { node, parent, branch } = pending.pop();
+        if (nodeById.has(node.id)) {
+            hasDuplicateIds = true;
+        } else {
+            nodeById.set(node.id, node);
+            branchById.set(node.id, branch);
+        }
+        if (parent && !parentById.has(node.id)) parentById.set(node.id, parent);
+        const children = node.children || [];
+        // 反向压栈保持原有深度优先顺序，不受折叠或搜索临时展开状态影响。
+        for (let i = children.length - 1; i >= 0; i--) {
+            const child = children[i];
+            pending.push({
+                node: child,
+                parent: node,
+                branch: parent ? branch : (child.dir === 'left' ? 'left' : 'right')
+            });
+        }
+    }
+    cachedMindMapNodeIndex = { root, nodeById, parentById, branchById, hasDuplicateIds };
+    return cachedMindMapNodeIndex;
+}
+
 function findNode(r,id) {
+    if (r === state.data && !Number.isNaN(id)) {
+        const index = getMindMapNodeIndex();
+        if (!index.hasDuplicateIds) return index.nodeById.get(id) || null;
+    }
     if(r.id===id)return r;
     if(r.children)for(let c of r.children){const res=findNode(c,id);if(res)return res}
     return null;
 };
 function findParent(r,id) {
+    if (r === state.data && !Number.isNaN(id)) {
+        const index = getMindMapNodeIndex();
+        if (!index.hasDuplicateIds) return index.parentById.get(id) || null;
+    }
     if(!r.children)return null;
     for(let c of r.children){
         if(c.id===id)return r;
@@ -983,6 +1040,7 @@ function findParent(r,id) {
     }
     return null;
 };
+// !SECTION 节点查询索引
 function isDescendant(r,nid,tid) {
     const n=findNode(r,nid);
     if(!n)return false;
