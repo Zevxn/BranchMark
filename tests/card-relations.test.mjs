@@ -116,6 +116,101 @@ assert.match(mindMap, /if \(!sourceCard \|\| !targetCard\) return;/,
 assert.equal((mindMap.match(/appendMindMapRelationsToCanvas\(nodes, edges\);/g) || []).length, 2,
     '横向和竖向 Canvas 导出都应追加卡片关联边');
 
+// SECTION 关联绘制与空数据清理
+const renderSource = mindMap.slice(
+    mindMap.indexOf('function renderMindMapRelations'),
+    mindMap.indexOf('function initializeMindMapRelations'),
+);
+function createSvgElement(tag) {
+    const classes = new Set();
+    return {
+        tag, children: [], attributes: {}, dataset: {},
+        classList: {
+            add: name => classes.add(name),
+            remove: name => classes.delete(name),
+            contains: name => classes.has(name),
+            toggle: (name, active) => active ? classes.add(name) : classes.delete(name),
+        },
+        style: { setProperty() {} },
+        appendChild(child) { this.children.push(child); },
+        replaceChildren() { this.children = []; },
+        setAttribute(name, value) { this.attributes[name] = value; },
+    };
+}
+const relationLayer = createSvgElement('svg');
+const relationPanel = createSvgElement('div');
+const renderCards = [{ dataset: { nodeId: 'a' } }, { dataset: { nodeId: 'b' } }];
+const renderFrames = [];
+let renderPreparationCalls = 0;
+const renderContext = vm.createContext({
+    state: { data: {}, selectedRelationId: null },
+    $: selector => selector === '#relation-layer' ? relationLayer : relationPanel,
+    document: {
+        createElementNS: (namespace, tag) => createSvgElement(tag),
+        querySelectorAll: selector => {
+            renderPreparationCalls++;
+            return selector === '.node-card' ? renderCards : [];
+        },
+        getElementById: id => renderCards.find(card => `card-${card.dataset.nodeId}` === id),
+    },
+    requestAnimationFrame: callback => { renderFrames.push(callback); return renderFrames.length; },
+    getMindMapCanvasRect: card => { renderPreparationCalls++; return { id: card.dataset.nodeId }; },
+    getMindMapRelationFoldCorridors: () => { renderPreparationCalls++; return []; },
+    buildMindMapRelationRoutes: (relations, cardRects) => {
+        renderPreparationCalls++;
+        assert.equal(cardRects.size, 2);
+        return new Map(relations.map(relation => [relation.id, { path: 'M 0 0 L 100 100' }]));
+    },
+    getMindMapRelationDirection: () => 'none',
+    getMindMapRelationColor: () => '',
+    getMindMapRelationLineStyle: () => 'dashed',
+    getMindMapRelationLabel: () => '',
+});
+vm.runInContext(`
+    let relationRenderFrame = null;
+    const MINDMAP_RELATION_SVG_NS = 'http://www.w3.org/2000/svg';
+    ${mindMap.slice(mindMap.indexOf('function getMindMapRelations()'), mindMap.indexOf('function ensureMindMapRelations()'))}
+    ${mindMap.slice(mindMap.indexOf('function closeMindMapRelationEditor()'), mindMap.indexOf('function commitMindMapRelationEditor()'))}
+    ${renderSource}
+`, renderContext);
+for (const relations of [[], undefined, null, 'legacy-invalid']) {
+    renderContext.state.data = { relations };
+    renderContext.state.selectedRelationId = 'removed';
+    relationLayer.appendChild(createSvgElement('old-path'));
+    relationPanel.classList.add('active');
+    renderContext.renderMindMapRelations();
+    assert.equal(relationLayer.children.length, 0, '无关联时必须清除旧连线');
+    assert.equal(renderContext.state.selectedRelationId, null, '无关联时必须清理失效的选中状态');
+    assert.equal(relationPanel.classList.contains('active'), false, '失效关联的编辑面板必须关闭');
+    assert.equal(relationPanel.attributes['aria-hidden'], 'true');
+    assert.equal(renderPreparationCalls, 0, '无关联时不得扫描卡片、测量几何或准备路由');
+}
+const renderedRelation = { id: 'visible', sourceId: 'a', targetId: 'b' };
+renderContext.state.data.relations = [renderedRelation];
+renderContext.state.selectedRelationId = renderedRelation.id;
+relationPanel.classList.add('active');
+renderContext.scheduleRenderMindMapRelations();
+renderContext.scheduleRenderMindMapRelations();
+assert.equal(renderFrames.length, 1, '同一帧的重绘请求应继续合并');
+renderFrames.shift()();
+assert.ok(renderPreparationCalls > 0, '有关联时应继续测量和准备路由');
+assert.equal(relationLayer.children[1].children[0].attributes.d, 'M 0 0 L 100 100');
+assert.equal(relationPanel.classList.contains('active'), true, '有效关联的编辑面板应保持打开');
+renderContext.state.data.relations = [];
+renderPreparationCalls = 0;
+renderContext.scheduleRenderMindMapRelations();
+renderFrames.shift()();
+assert.equal(relationLayer.children.length, 0, '最后一条关联移除后应清除刚绘制的路径');
+assert.equal(renderContext.state.selectedRelationId, null);
+assert.equal(relationPanel.classList.contains('active'), false);
+assert.equal(renderPreparationCalls, 0);
+renderContext.state.data.relations = [renderedRelation];
+renderContext.scheduleRenderMindMapRelations();
+assert.equal(renderFrames.length, 1, '空关联提前结束后仍应能安排后续重绘');
+renderFrames.shift()();
+assert.equal(relationLayer.children.length, 2, '重新添加关联后应恢复绘制');
+// !SECTION 关联绘制与空数据清理
+
 const pathSource = mindMap.slice(
     mindMap.indexOf('function getMindMapRelationPath'),
     mindMap.indexOf('function renderMindMapRelations'),

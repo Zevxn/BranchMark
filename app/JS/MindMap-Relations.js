@@ -1883,6 +1883,8 @@ function renderMindMapRelations() {
         closeMindMapRelationEditor();
     }
 
+    if (relations.length === 0) return;
+
     const defs = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'defs');
     layer.appendChild(defs);
     const cardRects = new Map();
