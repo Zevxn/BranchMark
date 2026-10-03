@@ -667,7 +667,7 @@
         }
         .map-search-bar {
             display: grid;
-            grid-template-columns: auto minmax(0, 1fr) auto auto auto auto auto;
+            grid-template-columns: auto minmax(0, 1fr) repeat(6, auto);
             align-items: center;
             gap: 4px;
             min-height: 46px;
@@ -718,10 +718,20 @@
             background: color-mix(in srgb, var(--primary) 12%, transparent);
         }
         .map-search-action:disabled { opacity: 0.35; cursor: default; }
+        .map-search-scope {
+            width: auto;
+            padding: 0 6px;
+            font-size: 12px;
+            white-space: nowrap;
+        }
         .map-search-results {
             max-height: min(45vh, 420px);
             overflow-y: auto;
             padding: 6px;
+        }
+        ::highlight(mindmap-search) {
+            background-color: #ffe08a;
+            color: #332500;
         }
         .map-search-result {
             width: 100%;
@@ -2927,6 +2937,7 @@
             <i class="ri-search-line" aria-hidden="true"></i>
             <input class="map-search-input" id="mapSearchInput" type="search" placeholder="搜索标题或正文" autocomplete="off" spellcheck="false">
             <span class="map-search-count" id="mapSearchCount" aria-live="polite">0/0</span>
+            <button class="map-search-action map-search-scope" id="btn-search-scope" type="button" title="当前搜索当前 Tab，点击搜索全部 Tab" aria-label="搜索全部 Tab" aria-pressed="false">当前 Tab</button>
             <button class="map-search-action" id="btn-search-visible" type="button" title="仅搜索未折叠卡片" aria-label="仅搜索未折叠卡片" aria-pressed="false"><i class="ri-eye-line"></i></button>
             <button class="map-search-action" id="btn-search-prev" type="button" title="上一个 (Shift+Enter)" aria-label="上一个结果" disabled><i class="ri-arrow-up-s-line"></i></button>
             <button class="map-search-action" id="btn-search-next" type="button" title="下一个 (Enter)" aria-label="下一个结果" disabled><i class="ri-arrow-down-s-line"></i></button>

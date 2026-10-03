@@ -14,6 +14,7 @@ for (const id of [
     'mapSearchInput',
     'mapSearchResults',
     'mapSearchCount',
+    'btn-search-scope',
     'btn-search-visible',
     'btn-search-prev',
     'btn-search-next',
@@ -103,9 +104,9 @@ assert.match(mindMap, /function locateMapSearchResult\(index\)[\s\S]*?clearMapSe
     '定位另一条结果时仍应先清除旧的临时展开路径');
 assert.match(mindMap, /document\.querySelectorAll\('#tree-root \.node-card\[data-node-id\]'\)/,
     '可见范围应由当前树中已渲染的卡片决定，不应按屏幕视口过滤');
-assert.match(mindMap, /mapSearchState\.visibleOnly \? getRenderedMapSearchNodeIds\(\) : null/,
+assert.match(mindMap, /isMapSearchVisibleOnly\(\) \? getRenderedMapSearchNodeIds\(\) : null/,
     '开启可见范围时应将已渲染节点集合传入搜索');
-assert.match(mindMap, /if \(!mapSearchState\.visibleOnly\) \{[\s\S]*?clearMapSearchReveal\(\)[\s\S]*?renderTree\(\)/,
+assert.match(mindMap, /if \(!isMapSearchVisibleOnly\(\)\) \{[\s\S]*?clearMapSearchReveal\(\)[\s\S]*?renderTree\(\)/,
     '可见范围内的结果定位不应触发折叠路径临时展开');
 assert.match(mindMap, /mapSearchState\.visibleOnly = !mapSearchState\.visibleOnly;[\s\S]*?executeMapSearch\(input\.value\)/,
     '切换搜索范围后应立即按现有关键词刷新结果');
@@ -129,6 +130,23 @@ assert.ok(pureSearchSource.startsWith('function normalizeMapSearchText'), '应�
 
 const context = vm.createContext({});
 vm.runInContext(pureSearchSource, context);
+// SECTION 搜索文字高亮偏移
+context.highlightText = 'ＡＬＰＨＡ 财务 e\u0301 ﬃ 😀 关键关键词 ΟΣ';
+context.highlightTerms = ['alpha', '财务', 'é', 'ffi', '😀', '关键', 'ος'];
+const textMatches = vm.runInContext('getMapSearchTextMatches(highlightText, highlightTerms)', context);
+assert.deepEqual([...textMatches.map(match => context.highlightText.slice(match.start, match.end))],
+    ['ＡＬＰＨＡ', '财务', 'e\u0301', 'ﬃ', '😀', '关键', '关键', 'ΟΣ'],
+    '高亮应保留全角、组合字、兼容字形和 Unicode 原文偏移，并覆盖重复关键词');
+context.highlightText = 'aaa';
+context.highlightTerms = ['aa', 'aa', ''];
+assert.deepEqual([...vm.runInContext('getMapSearchTextMatches(highlightText, highlightTerms)', context)]
+    .map(match => ({ ...match })), [{ start: 0, end: 2 }, { start: 1, end: 3 }],
+    '应支持重叠匹配，去除重复搜索词并忽略空词');
+context.highlightTerms = ['未命中'];
+assert.equal(vm.runInContext('getMapSearchTextMatches(highlightText, highlightTerms).length', context), 0,
+    '无匹配文本不应创建高亮范围');
+assert.match(html, /::highlight\(mindmap-search\)/, '页面应声明搜索文字的高亮样式');
+// !SECTION 搜索文字高亮偏移
 const tree = {
     id: 'root',
     topic: '项目总览',
@@ -233,4 +251,117 @@ await clipboardFallbackContext.applyMapSearchClipboardQuery(delayedInput, '', 3)
 assert.equal(delayedInput.value, '陈映荣', 'readText 失败时应通过 ClipboardItem 回退填入短文本');
 assert.deepEqual(appliedQueries, ['陈映荣'], '短剪贴板文本填入后应立即执行搜索');
 
-console.log('搜索定位校验通过：聚焦、短剪贴板预填、检索排序、路径展开与居中选择逻辑完整。');
+// SECTION 跨页面搜索行为
+const workbook = {
+    activeTabId: 'tab-a',
+    tabs: [
+        { id: 'tab-a', name: '页面 A', data: { id: 'root-a', topic: '旧快照', children: [] }, view: { tx: 10, ty: 20, scale: 1 } },
+        { id: 'tab-b', name: '页面 B', data: { id: 'root-b', topic: 'B', children: [
+            { id: 'parent-b', topic: '折叠父节点', folded: true, children: [
+                { id: 'shared-id', topic: '命中 B', content: '正文 B', children: [] },
+            ] },
+        ] }, view: { tx: 30, ty: 40, scale: 2 } },
+    ],
+};
+const searchRuntime = {
+    query: '', results: [], activeIndex: -1, hasLocated: false, allTabs: false, visibleOnly: false,
+    revealedNodeIds: new Set(), revealedRootDirections: new Set(),
+    pulseTimer: null, clipboardRequestId: 0, focusRequestId: 0, focusTimer: null,
+};
+const liveState = {
+    data: { id: 'root-a', topic: 'A', children: [
+        { id: 'shared-id', topic: '命中 A', content: '正文 A', children: [] },
+    ] },
+    view: workbook.tabs[0].view, scrollMap: new Map(),
+    history: ['历史 A'], historyIndex: 0, selectedIds: new Set(),
+};
+const buttons = new Map(['#btn-search-scope', '#btn-search-visible'].map(id => [id, {
+    attributes: {}, classList: { toggle() {} },
+    setAttribute(key, value) { this.attributes[key] = value; },
+}]));
+const frames = [];
+const pulses = [];
+let renderCount = 0;
+let commitCount = 0;
+const tabSearchContext = vm.createContext({
+    MINDMAP_TABS_VERSION: 'tabs-v1',
+    mindMapWorkbook: workbook, state: liveState, mapSearchState: searchRuntime,
+    mindMapTabRuntime: new Map(),
+    window: { innerWidth: 1200, innerHeight: 800 },
+    document: { getElementById: id => ({ id }) },
+    sessionStorage: { setItem() {} },
+    $: selector => buttons.get(selector),
+    isMapSearchOpen: () => true,
+    getRenderedMapSearchNodeIds: () => new Set(['root-a']),
+    renderMapSearchResults() {},
+    renderTree: () => { renderCount += 1; },
+    renderMindMapTabs() {},
+    saveGlobalScrolls() {},
+    sanitizeMindMapScrollMap: () => ({}),
+    syncCurrentInput: () => { commitCount += 1; liveState.data.children[0].content = '提交的编辑内容'; },
+    closeMindMapRelationEditor() {}, closeMindMapRelationNavigationMenu() {},
+    saveStorage() {}, scrollActiveMindMapTabIntoView() {}, updateSelection() {},
+    cancelMapSearchPendingFocus() {}, closeMapSearch() {}, clearTimeout() {},
+    requestAnimationFrame: callback => frames.push(callback),
+    centerMapNodeInVisibleArea() {},
+    pulseMapSearchTarget: card => pulses.push(card.id),
+});
+vm.runInContext(pureSearchSource, tabSearchContext);
+vm.runInContext(mindMap.slice(mindMap.indexOf('function syncMapSearchScopeButton'), mindMap.indexOf('function renderMapSearchResults')), tabSearchContext);
+vm.runInContext(executeSearchSource, tabSearchContext);
+vm.runInContext(mindMap.slice(mindMap.indexOf('function clearMapSearchReveal'), mindMap.indexOf('function syncMapSearchScopeButton')), tabSearchContext);
+vm.runInContext(mindMap.slice(mindMap.indexOf('function resetMapSearch'), mindMap.indexOf('function centerMapNodeInVisibleArea')), tabSearchContext);
+vm.runInContext(mindMap.slice(mindMap.indexOf('function getActiveMindMapTab'), mindMap.indexOf('function replaceMindMapWorkbook')), tabSearchContext);
+vm.runInContext(mindMap.slice(mindMap.indexOf('function commitCurrentMindMapTabEdits'), mindMap.indexOf('function scrollActiveMindMapTabIntoView')), tabSearchContext);
+vm.runInContext(mindMap.slice(mindMap.indexOf('function activateMindMapTab'), mindMap.indexOf('function addMindMapTab')), tabSearchContext);
+vm.runInContext(mindMap.slice(mindMap.indexOf('function locateMapSearchResult'), mindMap.indexOf('function initializeMapSearch')), tabSearchContext);
+// 纯函数片段包含 DOM 收集函数，此处只控制当前页哪些卡片已渲染。
+tabSearchContext.getRenderedMapSearchNodeIds = () => new Set(['root-a']);
+tabSearchContext.executeMapSearch('命中');
+assert.deepEqual([...searchRuntime.results.map(result => result.tabId)], ['tab-a'],
+    '默认只搜索当前 Tab，且应搜索实时数据而非旧快照');
+searchRuntime.visibleOnly = true;
+tabSearchContext.executeMapSearch('命中');
+assert.equal(searchRuntime.results.length, 0, '当前 Tab 的未折叠卡片过滤应继续有效');
+searchRuntime.allTabs = true;
+tabSearchContext.syncMapSearchScopeButton();
+tabSearchContext.executeMapSearch('命中');
+assert.deepEqual([...searchRuntime.results.map(result => `${result.tabId}:${result.id}`)],
+    ['tab-a:shared-id', 'tab-b:shared-id'], '全局搜索应按 Tab 顺序检索，并区分不同页的重复节点 ID');
+assert.equal(searchRuntime.results[1].tabName, '页面 B', '结果应携带所属 Tab 名称');
+assert.equal(buttons.get('#btn-search-visible').disabled, true, '全局模式应禁用未折叠卡片过滤');
+assert.equal(buttons.get('#btn-search-scope').textContent, '全部 Tab', '范围按钮应明确显示全局模式');
+const originalResults = searchRuntime.results;
+tabSearchContext.locateMapSearchResult(1);
+assert.equal(workbook.activeTabId, 'tab-b', '跨页结果应激活所属 Tab');
+assert.equal(commitCount, 1, '跨页定位必须提交当前编辑');
+assert.equal(workbook.tabs[0].data.children[0].content, '提交的编辑内容', '切页不得丢失编辑');
+assert.equal(searchRuntime.query, '命中', '跨页定位应保留关键词');
+assert.equal(searchRuntime.results, originalResults, '跨页定位应保留原结果列表');
+assert.equal(searchRuntime.activeIndex, 1, '跨页定位应保留所选结果位置');
+assert.equal(searchRuntime.allTabs, true, '跨页定位应保留全局模式');
+assert.deepEqual([...liveState.selectedIds], ['shared-id'], '应选中目标页中的目标卡片');
+assert.equal(searchRuntime.revealedNodeIds.has('parent-b'), true, '全局模式应临时展开目标路径');
+assert.equal(workbook.tabs[1].data.children[0].folded, true, '搜索展开不得改变保存的折叠状态');
+assert.ok(renderCount >= 2, '应加载目标页并重绘临时展开路径');
+const snapshot = tabSearchContext.getMindMapWorkbookSnapshot(false);
+assert.equal(JSON.stringify(snapshot).includes('allTabs'), false, '搜索范围不得写入导图数据');
+tabSearchContext.navigateMapSearch(1);
+assert.equal(workbook.activeTabId, 'tab-a', '下一个结果应跨页循环定位');
+assert.equal(searchRuntime.activeIndex, 0);
+assert.equal(liveState.history[0], '历史 A', '返回原页应恢复独立撤销历史');
+assert.equal(liveState.view.tx, 10, '切页应恢复各页的视图');
+while (frames.length) frames.shift()();
+assert.deepEqual(pulses, ['card-shared-id'], '快速跨页跳转时，旧页的异步高亮不得误命中新页同 ID 卡片');
+searchRuntime.allTabs = false;
+tabSearchContext.syncMapSearchScopeButton();
+tabSearchContext.executeMapSearch('命中');
+assert.equal(searchRuntime.visibleOnly, true, '切回当前 Tab 应保留原过滤偏好');
+assert.equal(searchRuntime.results.length, 0, '切回当前 Tab 后应重新应用未折叠卡片过滤');
+assert.equal(buttons.get('#btn-search-visible').disabled, false, '当前 Tab 应重新启用过滤按钮');
+tabSearchContext.resetMapSearch();
+assert.equal(searchRuntime.allTabs, false, '完整重置搜索应恢复默认的当前 Tab 范围');
+assert.equal(searchRuntime.query, '', '完整重置应清除关键词');
+// !SECTION 跨页面搜索行为
+
+console.log('搜索定位校验通过：默认当前页、全局检索、跨页连续定位、编辑保留、折叠过滤与原有搜索行为完整。');

@@ -988,6 +988,7 @@ const mapSearchState = {
     results: [],
     activeIndex: -1,
     hasLocated: false,
+    allTabs: false,
     visibleOnly: false,
     revealedNodeIds: new Set(),
     revealedRootDirections: new Set(),
@@ -1135,7 +1136,7 @@ function persistMindMapWorkbookSession(captureScroll = true) {
     return snapshot;
 }
 
-function resetMindMapTabTransientState() {
+function resetMindMapTabTransientState(options = {}) {
     state.selectedIds.clear();
     state.selectedRelationId = null;
     state.selectedSummaryId = null;
@@ -1146,7 +1147,7 @@ function resetMindMapTabTransientState() {
     closeMindMapRelationEditor();
     closeMindMapRelationNavigationMenu();
     $('#editorModal')?.classList.remove('active');
-    resetMapSearch();
+    resetMapSearch({ preserveSearch: options.preserveSearch });
 }
 
 function loadActiveMindMapTab(options = {}) {
@@ -1166,7 +1167,7 @@ function loadActiveMindMapTab(options = {}) {
         history: [...state.history],
         historyIndex: state.historyIndex
     });
-    resetMindMapTabTransientState();
+    resetMindMapTabTransientState(options);
     skipNextGlobalScrollCapture = true;
     renderTree();
     renderMindMapTabs();
@@ -1286,7 +1287,7 @@ function activateMindMapTab(tabId, options = {}) {
     if (mindMapWorkbook.activeTabId === tabId && !options.force) return true;
     if (!options.skipCurrentSync) commitCurrentMindMapTabEdits();
     mindMapWorkbook.activeTabId = tabId;
-    loadActiveMindMapTab();
+    loadActiveMindMapTab({ preserveSearch: options.preserveSearch });
     persistMindMapWorkbookSession(false);
     saveStorage();
     scrollActiveMindMapTabIntoView();

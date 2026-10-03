@@ -165,7 +165,7 @@ assert.match(tabDialogSource, /function renameMindMapTab[\s\S]*?#mindMapTabRenam
     '重命名操作应打开 Tab 专用模态框');
 assert.match(tabDialogSource, /function deleteMindMapTab[\s\S]*?#mindMapTabDeleteModal/,
     '删除操作应打开 Tab 专用确认框');
-assert.match(mindMap, /function activateMindMapTab\([\s\S]*?commitCurrentMindMapTabEdits\(\)[\s\S]*?loadActiveMindMapTab\(\)/,
+assert.match(mindMap, /function activateMindMapTab\([\s\S]*?commitCurrentMindMapTabEdits\(\)[\s\S]*?loadActiveMindMapTab\(/,
     '切页前应提交当前编辑并载入目标页面运行状态');
 assert.match(mindMap, /function applyImportedMindMap\([\s\S]*?importMindMapWorkbookIntoCurrent\(/,
     '导入应合并到当前工作簿，而不是替换整个工作簿');

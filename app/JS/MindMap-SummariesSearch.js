@@ -1494,6 +1494,73 @@ function getRenderedMapSearchNodeIds() {
     ));
 }
 
+function getMapSearchTextMatches(text, terms) {
+    // 保留原文偏移，让全角字符、组合字符和兼容字形也能按搜索规则高亮。
+    const normalized = normalizeMapSearchText(text);
+    const offsets = [];
+    const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text);
+    for (const { segment, index } of segments) {
+        const value = normalizeMapSearchText(segment);
+        for (let i = 0; i < value.length; i++) {
+            offsets.push({ start: index, end: index + segment.length });
+        }
+    }
+    const matches = [];
+    for (const term of new Set(terms)) {
+        if (!term) continue;
+        let index = normalized.indexOf(term);
+        while (index !== -1) {
+            matches.push({ start: offsets[index].start, end: offsets[index + term.length - 1].end });
+            index = normalized.indexOf(term, index + 1);
+        }
+    }
+    return matches;
+}
+
+function clearMapSearchHighlights() {
+    globalThis.CSS?.highlights?.delete('mindmap-search');
+}
+
+function updateMapSearchHighlights() {
+    if (!globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
+    clearMapSearchHighlights();
+    if (!isMapSearchOpen()) return;
+    const terms = normalizeMapSearchText(mapSearchState.query).trim().split(/[\s\u3000]+/u).filter(Boolean);
+    if (terms.length === 0) return;
+
+    const highlight = new Highlight();
+    const selector = '#tree-root .node-topic, #tree-root .card-body, '
+        + '#mapSearchResults .map-search-result-title, #mapSearchResults .map-search-result-snippet';
+    document.querySelectorAll(selector).forEach(element => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const nodes = [];
+        let text = '';
+        let previousBlock = null;
+        while (walker.nextNode()) {
+            const node = walker.currentNode;
+            if (node.parentElement.closest('script, style, #tree-root button, svg, .katex, .mermaid-wrapper, .code-line-numbers, [hidden]')) {
+                text += '\n';
+                continue;
+            }
+            const block = node.parentElement.closest('p, li, h1, h2, h3, h4, h5, h6, td, th, pre, blockquote');
+            if (nodes.length > 0 && block !== previousBlock) text += '\n';
+            previousBlock = block;
+            nodes.push({ node, start: text.length, end: text.length + node.length });
+            text += node.data;
+        }
+        getMapSearchTextMatches(text, terms).forEach(match => {
+            const start = nodes.find(item => item.start <= match.start && item.end > match.start);
+            const end = nodes.find(item => item.start < match.end && item.end >= match.end);
+            if (!start || !end) return;
+            const range = document.createRange();
+            range.setStart(start.node, match.start - start.start);
+            range.setEnd(end.node, match.end - end.start);
+            highlight.add(range);
+        });
+    });
+    CSS.highlights.set('mindmap-search', highlight);
+}
+
 function isMapSearchOpen() {
     return Boolean($('#mapSearchPanel')?.classList.contains('active'));
 }
@@ -1515,18 +1582,36 @@ function clearMapSearchReveal() {
 }
 
 function syncMapSearchScopeButton() {
+    const scopeButton = $('#btn-search-scope');
+    if (scopeButton) {
+        const allTabs = mapSearchState.allTabs;
+        scopeButton.textContent = allTabs ? '全部 Tab' : '当前 Tab';
+        scopeButton.classList.toggle('active', allTabs);
+        scopeButton.setAttribute('aria-pressed', String(allTabs));
+        scopeButton.title = allTabs
+            ? '当前搜索全部 Tab，点击仅搜索当前 Tab'
+            : '当前搜索当前 Tab，点击搜索全部 Tab';
+        scopeButton.setAttribute('aria-label', allTabs ? '仅搜索当前 Tab' : '搜索全部 Tab');
+    }
     const button = $('#btn-search-visible');
     if (!button) return;
-    const visibleOnly = mapSearchState.visibleOnly;
+    const visibleOnly = isMapSearchVisibleOnly();
+    button.disabled = mapSearchState.allTabs;
     button.classList.toggle('active', visibleOnly);
     button.setAttribute('aria-pressed', String(visibleOnly));
-    const label = visibleOnly ? '搜索全部卡片' : '仅搜索未折叠卡片';
+    const label = mapSearchState.allTabs
+        ? '仅搜索未折叠卡片仅当前 Tab 可用'
+        : visibleOnly ? '搜索全部卡片' : '仅搜索未折叠卡片';
     button.title = label;
     button.setAttribute('aria-label', label);
 }
 
+function isMapSearchVisibleOnly() {
+    return mapSearchState.visibleOnly && !mapSearchState.allTabs;
+}
+
 function refreshVisibleMapSearchResults() {
-    if (!mapSearchState.visibleOnly || !isMapSearchOpen()) return;
+    if (!isMapSearchVisibleOnly() || !isMapSearchOpen()) return;
     executeMapSearch(mapSearchState.query);
 }
 
@@ -1554,7 +1639,7 @@ function renderMapSearchResults() {
     if (total === 0) {
         const empty = document.createElement('div');
         empty.className = 'map-search-empty';
-        empty.textContent = mapSearchState.visibleOnly
+        empty.textContent = isMapSearchVisibleOnly()
             ? '当前未折叠卡片中没有匹配结果'
             : '没有找到匹配的卡片';
         container.appendChild(empty);
@@ -1574,10 +1659,11 @@ function renderMapSearchResults() {
         title.textContent = result.topic;
         button.appendChild(title);
 
-        if (result.path.length > 0) {
+        const resultPath = mapSearchState.allTabs ? [result.tabName, ...result.path] : result.path;
+        if (resultPath.length > 0) {
             const path = document.createElement('span');
             path.className = 'map-search-result-path';
-            path.textContent = result.path.join(' › ');
+            path.textContent = resultPath.join(' › ');
             button.appendChild(path);
         }
         if (result.snippet) {
@@ -1592,13 +1678,20 @@ function renderMapSearchResults() {
 
 function executeMapSearch(query) {
     mapSearchState.query = String(query ?? '');
-    const allowedNodeIds = mapSearchState.visibleOnly ? getRenderedMapSearchNodeIds() : null;
-    mapSearchState.results = collectMapSearchResults(state.data, mapSearchState.query, allowedNodeIds);
+    const allowedNodeIds = isMapSearchVisibleOnly() ? getRenderedMapSearchNodeIds() : null;
+    const tabs = mapSearchState.allTabs ? mindMapWorkbook.tabs : [getActiveMindMapTab()];
+    mapSearchState.results = tabs.filter(Boolean).flatMap(tab => {
+        // 当前页必须使用实时数据，避免撤销或编辑替换根对象后搜索旧快照。
+        const root = tab.id === mindMapWorkbook.activeTabId ? state.data : tab.data;
+        return collectMapSearchResults(root, mapSearchState.query, allowedNodeIds)
+            .map(result => ({ ...result, tabId: tab.id, tabName: tab.name }));
+    });
     mapSearchState.activeIndex = mapSearchState.results.length > 0 ? 0 : -1;
     mapSearchState.hasLocated = false;
     // 输入中的新关键词（包括无结果）不应收起已定位结果临时展开的路径。
     // 真正定位另一条结果时会在 locateMapSearchResult 中切换临时展开状态。
     renderMapSearchResults();
+    updateMapSearchHighlights();
 }
 
 function getMapSearchClipboardQuery(value) {
@@ -1693,17 +1786,26 @@ function closeMapSearch() {
     if (panel.contains(document.activeElement)) document.activeElement.blur();
     panel.classList.remove('active');
     panel.setAttribute('aria-hidden', 'true');
+    clearMapSearchHighlights();
     document.querySelector('.node-card.search-active')?.classList.remove('search-active');
 }
 
-function resetMapSearch() {
+function resetMapSearch({ preserveSearch = false } = {}) {
+    clearMapSearchHighlights();
     clearMapSearchReveal();
     if (mapSearchState.pulseTimer) clearTimeout(mapSearchState.pulseTimer);
     mapSearchState.pulseTimer = null;
+    if (preserveSearch) {
+        // 搜索跳转只清除旧页的临时展开与异步请求，保留关键词和结果位置。
+        cancelMapSearchPendingFocus();
+        mapSearchState.clipboardRequestId += 1;
+        return;
+    }
     mapSearchState.query = '';
     mapSearchState.results = [];
     mapSearchState.activeIndex = -1;
     mapSearchState.hasLocated = false;
+    mapSearchState.allTabs = false;
     mapSearchState.visibleOnly = false;
     const input = $('#mapSearchInput');
     if (input) input.value = '';
@@ -1746,9 +1848,14 @@ function locateMapSearchResult(index) {
     const result = mapSearchState.results[index];
     if (!result) return;
 
+    if (result.tabId !== mindMapWorkbook.activeTabId
+        && !activateMindMapTab(result.tabId, { preserveSearch: true })) {
+        executeMapSearch(mapSearchState.query);
+        return;
+    }
     mapSearchState.activeIndex = index;
     mapSearchState.hasLocated = true;
-    if (!mapSearchState.visibleOnly) {
+    if (!isMapSearchVisibleOnly()) {
         clearMapSearchReveal();
         result.pathIds.forEach(id => {
             if (id !== state.data.id) mapSearchState.revealedNodeIds.add(id);
@@ -1767,6 +1874,8 @@ function locateMapSearchResult(index) {
     $('#mapSearchResults')?.querySelector(`[data-search-index="${index}"]`)?.scrollIntoView({ block: 'nearest' });
 
     requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (mindMapWorkbook.activeTabId !== result.tabId
+            || mapSearchState.results[mapSearchState.activeIndex] !== result) return;
         const card = document.getElementById(`card-${result.id}`);
         if (!card) return;
         centerMapNodeInVisibleArea(card);
@@ -1793,16 +1902,27 @@ function initializeMapSearch() {
     $('#btn-search-close').onclick = closeMapSearch;
     $('#btn-search-prev').onclick = () => navigateMapSearch(-1);
     $('#btn-search-next').onclick = () => navigateMapSearch(1);
+    $('#btn-search-scope').onclick = () => {
+        mapSearchState.allTabs = !mapSearchState.allTabs;
+        syncMapSearchScopeButton();
+        executeMapSearch(input.value);
+    };
     document.addEventListener('mousedown', event => {
         if (!isMapSearchOpen() || event.target === input || event.target.closest('#btn-search')) return;
         cancelMapSearchPendingFocus();
     }, true);
     $('#btn-search-visible').onclick = () => {
+        if (mapSearchState.allTabs) return;
         mapSearchState.visibleOnly = !mapSearchState.visibleOnly;
         syncMapSearchScopeButton();
         executeMapSearch(input.value);
     };
     syncMapSearchScopeButton();
+
+    // 原生高亮只设置 Range；监听重绘和正文异步渲染，不改动可编辑标题的 DOM。
+    const highlightObserver = new MutationObserver(updateMapSearchHighlights);
+    highlightObserver.observe($('#tree-root'), { childList: true, characterData: true, subtree: true });
+    highlightObserver.observe(results, { childList: true, subtree: true });
 
     input.addEventListener('input', () => executeMapSearch(input.value));
     input.addEventListener('paste', event => {
