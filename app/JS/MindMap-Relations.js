@@ -22,6 +22,7 @@ const MINDMAP_RELATION_PARALLEL_CLEARANCE = 10;
 const MINDMAP_RELATION_PORT_PAIR_CANDIDATES = 4;
 const MINDMAP_RELATION_PORT_DEVIATION_PENALTY = 0.2;
 let relationRenderFrame = null;
+let relationRenderVersion = 0;
 let relationRouteCache = { key: '', routes: new Map() };
 
 function getMindMapRelations() {
@@ -398,7 +399,7 @@ function clearSelectedMindMapRelation() {
     commitMindMapRelationEditor();
     state.selectedRelationId = null;
     closeMindMapRelationEditor();
-    scheduleRenderMindMapRelations();
+    syncMindMapRelationSelection();
     updateToolbar();
 }
 
@@ -409,8 +410,15 @@ function selectMindMapRelation(relationId, clientPoint) {
     state.selectedSummaryId = null;
     state.selectedIds.clear();
     updateSelection();
-    scheduleRenderMindMapRelations();
+    syncMindMapRelationSelection();
     openMindMapRelationEditor(relationId, clientPoint);
+}
+
+function syncMindMapRelationSelection() {
+    // 选中状态只影响样式，不必清空 SVG 或重新寻路。
+    $('#relation-layer')?.querySelectorAll('.relation-group').forEach(group => {
+        group.classList.toggle('selected', group.dataset.relationId === state.selectedRelationId);
+    });
 }
 
 function getMindMapRelationPath(
@@ -1044,14 +1052,63 @@ function popMindMapRelationQueue(queue) {
     return first;
 }
 
-function findMindMapOrthogonalRoute(
+function createMindMapRelationSegmentIndex(occupiedSegments) {
+    const horizontalSegments = new Map();
+    const verticalSegments = new Map();
+    return (horizontal, coordinate) => {
+        const cache = horizontal ? horizontalSegments : verticalSegments;
+        if (cache.has(coordinate)) return cache.get(coordinate);
+        // 保留原顺序与完整线段；只排除不可能交叉或进入平行安全走廊的线段。
+        const segments = occupiedSegments.filter(segment => {
+            const occupiedHorizontal = Math.abs(segment.from.y - segment.to.y) < 0.1;
+            if (horizontal === occupiedHorizontal) {
+                const occupiedCoordinate = horizontal ? segment.from.y : segment.from.x;
+                return Math.abs(coordinate - occupiedCoordinate) < MINDMAP_RELATION_PARALLEL_CLEARANCE;
+            }
+            const start = horizontal ? segment.from.y : segment.from.x;
+            const end = horizontal ? segment.to.y : segment.to.x;
+            return coordinate >= Math.min(start, end) - 0.1
+                && coordinate <= Math.max(start, end) + 0.1;
+        });
+        cache.set(coordinate, segments);
+        return segments;
+    };
+}
+
+function finishMindMapRelationRouting(iterator) {
+    let step = iterator.next();
+    while (!step.done) step = iterator.next();
+    return step.value;
+}
+
+async function runMindMapRelationRoutingInSlices(iterator, isCurrent) {
+    let sliceStarted = performance.now();
+    while (isCurrent()) {
+        const step = iterator.next();
+        if (step.done) return step.value;
+        // Promise 微任务不会让浏览器处理输入；通过新任务真正让出主线程。
+        if (performance.now() - sliceStarted >= 6) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+            sliceStarted = performance.now();
+        }
+    }
+    iterator.return();
+    return null;
+}
+
+function findMindMapOrthogonalRoute(...args) {
+    return finishMindMapRelationRouting(findMindMapOrthogonalRouteSteps(...args));
+}
+
+function* findMindMapOrthogonalRouteSteps(
     start,
     end,
     obstacles,
     occupiedSegments = [],
     preferredChannels = [],
     terminalDirection = 0,
-    bounds = null
+    bounds = null,
+    getOccupiedSegments = createMindMapRelationSegmentIndex(occupiedSegments)
 ) {
     const round = value => Math.round(value * 10) / 10;
     const xs = [start.x, end.x];
@@ -1112,7 +1169,12 @@ function findMindMapOrthogonalRoute(
     const queue = [];
     const distances = new Map();
     const parents = new Map();
-    const startKey = `${startX},${startY},0`;
+    // 同一有向几何边会由不同的入场方向反复访问，其固定代价只计算一次。
+    // 交叉计费与行进方向有关，因此正反向边分别缓存；转弯和进场代价仍实时计算。
+    const edgeCache = new Map();
+    const blockedPoints = new Map();
+    const routeTerminals = [start, end];
+    const startKey = (startY * xValues.length + startX) * 3;
     distances.set(startKey, 0);
     pushMindMapRelationQueue(queue, {
         xIndex: startX,
@@ -1124,7 +1186,10 @@ function findMindMapOrthogonalRoute(
     });
 
     let completed = null;
+    let visitedCount = 0;
     while (queue.length > 0) {
+        // 单个端口候选也可能很复杂，在寻路内部提供可恢复的暂停点。
+        if ((++visitedCount & 127) === 0) yield;
         const current = popMindMapRelationQueue(queue);
         if (current.cost !== distances.get(current.key)) continue;
         if (current.xIndex === endX && current.yIndex === endY) {
@@ -1138,19 +1203,44 @@ function findMindMapOrthogonalRoute(
             { xIndex: current.xIndex, yIndex: current.yIndex - 1, direction: 2 },
             { xIndex: current.xIndex, yIndex: current.yIndex + 1, direction: 2 }
         ];
-        moves.forEach(move => {
+        moves.forEach((move, moveIndex) => {
             if (move.xIndex < 0 || move.xIndex >= xValues.length || move.yIndex < 0 || move.yIndex >= yValues.length) return;
-            const from = { x: xValues[current.xIndex], y: yValues[current.yIndex] };
-            const to = { x: xValues[move.xIndex], y: yValues[move.yIndex] };
-            if (obstacles.some(obstacle => isMindMapRelationPointInsideObstacle(to, obstacle))) return;
-            if (!isMindMapRelationSegmentClear(from, to, obstacles)) return;
-            const length = Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
+            const edgeKey = (current.yIndex * xValues.length + current.xIndex) * 4 + moveIndex;
+            let edge = edgeCache.get(edgeKey);
+            if (edge === null) return;
+            if (!edge) {
+                const from = { x: xValues[current.xIndex], y: yValues[current.yIndex] };
+                const to = { x: xValues[move.xIndex], y: yValues[move.yIndex] };
+                const pointKey = move.yIndex * xValues.length + move.xIndex;
+                let blocked = blockedPoints.get(pointKey);
+                if (blocked === undefined) {
+                    blocked = obstacles.some(obstacle => isMindMapRelationPointInsideObstacle(to, obstacle));
+                    blockedPoints.set(pointKey, blocked);
+                }
+                if (blocked || !isMindMapRelationSegmentClear(from, to, obstacles)) {
+                    edgeCache.set(edgeKey, null);
+                    return;
+                }
+                const horizontal = Math.abs(from.y - to.y) < 0.1;
+                edge = {
+                    from,
+                    to,
+                    length: Math.abs(to.x - from.x) + Math.abs(to.y - from.y),
+                    interactionPenalty: getMindMapRelationSegmentInteractionPenalty(
+                        from,
+                        to,
+                        getOccupiedSegments(horizontal, horizontal ? from.y : from.x),
+                        routeTerminals
+                    ),
+                    obstacleEdgePenalty: getMindMapRelationObstacleEdgePenalty(from, to, obstacles),
+                    channelDeviationPenalty: getMindMapRelationChannelDeviationPenalty(from, to, preferredChannels)
+                };
+                edgeCache.set(edgeKey, edge);
+            }
+            const { from, to, length, interactionPenalty, obstacleEdgePenalty, channelDeviationPenalty } = edge;
             const turnPenalty = current.direction !== 0 && current.direction !== move.direction
                 ? MINDMAP_RELATION_TURN_PENALTY
                 : 0;
-            const interactionPenalty = getMindMapRelationSegmentInteractionPenalty(from, to, occupiedSegments, [start, end]);
-            const obstacleEdgePenalty = getMindMapRelationObstacleEdgePenalty(from, to, obstacles);
-            const channelDeviationPenalty = getMindMapRelationChannelDeviationPenalty(from, to, preferredChannels);
             const terminalAlignmentPenalty = getMindMapRelationTerminalAlignmentPenalty(
                 from,
                 to,
@@ -1166,7 +1256,7 @@ function findMindMapOrthogonalRoute(
                 + obstacleEdgePenalty
                 + channelDeviationPenalty
                 + terminalAlignmentPenalty;
-            const nextKey = `${move.xIndex},${move.yIndex},${move.direction}`;
+            const nextKey = (move.yIndex * xValues.length + move.xIndex) * 3 + move.direction;
             if (nextCost >= (distances.get(nextKey) ?? Infinity)) return;
             distances.set(nextKey, nextCost);
             parents.set(nextKey, current.key);
@@ -1183,8 +1273,10 @@ function findMindMapOrthogonalRoute(
     if (!completed) return null;
     const points = [];
     let key = completed.key;
-    while (key) {
-        const [xIndex, yIndex] = key.split(',').map(Number);
+    while (key !== undefined) {
+        const pointIndex = Math.floor(key / 3);
+        const xIndex = pointIndex % xValues.length;
+        const yIndex = Math.floor(pointIndex / xValues.length);
         points.push({ x: xValues[xIndex], y: yValues[yIndex] });
         key = parents.get(key);
     }
@@ -1334,7 +1426,11 @@ function getMindMapRoundedOrthogonalPath(points, radius = 16) {
     return path;
 }
 
-function routeMindMapRelation(
+function routeMindMapRelation(...args) {
+    return finishMindMapRelationRouting(routeMindMapRelationSteps(...args));
+}
+
+function* routeMindMapRelationSteps(
     sourceRect,
     targetRect,
     obstacles,
@@ -1457,7 +1553,9 @@ function routeMindMapRelation(
             && bottom >= routingBounds.top
             && top <= routingBounds.bottom;
     });
-    const findBestRoute = searchBounds => {
+    // 同一条路线的端口候选使用相同占用线段，按行/列的筛选结果可共同复用。
+    const getOccupiedSegments = createMindMapRelationSegmentIndex(routingOccupiedSegments);
+    const findBestRoute = function* (searchBounds) {
         let bestRoute = null;
         for (const candidate of candidates) {
             if (bestRoute && (
@@ -1467,15 +1565,17 @@ function routeMindMapRelation(
                     && candidate.occupiedPortCount > bestRoute.occupiedPortCount
                 )
             )) break;
-            const route = findMindMapOrthogonalRoute(
+            const route = yield* findMindMapOrthogonalRouteSteps(
                 candidate.sourcePort.routePoint,
                 candidate.targetPort.routePoint,
                 routingObstacles,
                 routingOccupiedSegments,
                 routingChannels,
                 candidate.targetSide === 'left' || candidate.targetSide === 'right' ? 1 : 2,
-                searchBounds
+                searchBounds,
+                getOccupiedSegments
             );
+            yield;
             if (!route) continue;
             const points = simplifyMindMapRelationPoints([
                 candidate.sourcePort.port,
@@ -1513,7 +1613,7 @@ function routeMindMapRelation(
 
     // 只按源、目标之间真正挡路的卡片扩展局部窗口：既允许路线绕过中间兄弟，
     // 又避免位于端点范围之外的超宽兄弟把自己的远端边界变成绕行车道。
-    return findBestRoute(routingBounds) || findBestRoute(null);
+    return (yield* findBestRoute(routingBounds)) || (yield* findBestRoute(null));
 }
 
 function getMindMapRelationFoldCorridors(cardRects) {
@@ -1768,7 +1868,18 @@ function getMindMapRelationPortPlan(relations, cardRects, routes) {
     return { assignments, relationOrder };
 }
 
-function buildMindMapRelationRoutes(relations, cardRects, controlObstacles = [], preferredChannels = []) {
+function buildMindMapRelationRoutes(...args) {
+    return finishMindMapRelationRouting(buildMindMapRelationRoutesSteps(...args));
+}
+
+function buildMindMapRelationRoutesAsync(relations, cardRects, controlObstacles, preferredChannels, isCurrent) {
+    return runMindMapRelationRoutingInSlices(
+        buildMindMapRelationRoutesSteps(relations, cardRects, controlObstacles, preferredChannels),
+        isCurrent
+    );
+}
+
+function* buildMindMapRelationRoutesSteps(relations, cardRects, controlObstacles = [], preferredChannels = []) {
     const cacheKey = getMindMapRelationRoutingKey(relations, cardRects, controlObstacles, preferredChannels);
     if (cacheKey === relationRouteCache.key) return relationRouteCache.routes;
 
@@ -1799,18 +1910,18 @@ function buildMindMapRelationRoutes(relations, cardRects, controlObstacles = [],
         ...controlObstacles
     ];
     const treeSegments = getMindMapRelationTreeSegments(cardRects);
-    const buildRoute = (
+    const buildRoute = function* (
         relation,
         occupiedSegments,
         portAssignment = null
-    ) => {
+    ) {
         const direction = getMindMapRelationDirection(relation);
         const sourceId = direction === 'reverse' ? relation.targetId : relation.sourceId;
         const targetId = direction === 'reverse' ? relation.sourceId : relation.targetId;
         const sourceRect = cardRects.get(sourceId);
         const targetRect = cardRects.get(targetId);
         if (!sourceRect || !targetRect) return null;
-        const naturalRoute = routeMindMapRelation(
+        const naturalRoute = yield* routeMindMapRelationSteps(
             sourceRect,
             targetRect,
             obstacles,
@@ -1821,61 +1932,62 @@ function buildMindMapRelationRoutes(relations, cardRects, controlObstacles = [],
         if (!naturalRoute) return null;
         const relationChannels = getMindMapRelationRouteFoldCorridors(naturalRoute, preferredChannels);
         return relationChannels.length > 0
-            ? routeMindMapRelation(
+            ? (yield* routeMindMapRelationSteps(
                 sourceRect,
                 targetRect,
                 obstacles,
                 occupiedSegments,
                 relationChannels,
                 portAssignment
-            ) || naturalRoute
+            )) || naturalRoute
             : naturalRoute;
     };
-    const buildPass = (
+    const buildPass = function* (
         portAssignments = null,
         relationOrder = null,
         includeRelationOccupancy = true
-    ) => {
+    ) {
         const occupiedSegments = [...treeSegments];
         const routes = new Map();
         const relationsById = new Map(relations.map(relation => [relation.id, relation]));
         const orderedRelations = relationOrder
             ? relationOrder.map(relationId => relationsById.get(relationId)).filter(Boolean)
             : relations;
-        orderedRelations.forEach(relation => {
+        for (const relation of orderedRelations) {
             const portAssignment = portAssignments?.get(relation.id) || null;
-            const route = buildRoute(
+            const route = (yield* buildRoute(
                 relation,
                 occupiedSegments,
                 portAssignment
-            ) || (portAssignment
-                ? buildRoute(relation, occupiedSegments, null)
+            )) || (portAssignment
+                ? (yield* buildRoute(relation, occupiedSegments, null))
                 : null);
-            if (!route) return;
+            if (!route) continue;
             routes.set(relation.id, route);
             if (includeRelationOccupancy) {
                 occupiedSegments.push(...getMindMapRelationSegments(route.points));
             }
-        });
+            yield;
+        }
         return routes;
     };
 
     // 预规划只负责确定每条关系天然应连接哪一侧。此阶段若让先处理的关系占道，
     // 后续关系会在端口尚未均分前被挤到其他边，最终规划也无法再纠正选边结果。
-    const naturalRoutes = buildPass(null, null, false);
+    const naturalRoutes = yield* buildPass(null, null, false);
     const portPlan = getMindMapRelationPortPlan(relations, cardRects, naturalRoutes);
     const routes = relations.length > 1
-        ? buildPass(portPlan.assignments, portPlan.relationOrder, true)
+        ? yield* buildPass(portPlan.assignments, portPlan.relationOrder, true)
         : naturalRoutes;
     relationRouteCache = { key: cacheKey, routes };
     return routes;
 }
 
-function renderMindMapRelations() {
+async function renderMindMapRelations() {
     relationRenderFrame = null;
+    const renderVersion = ++relationRenderVersion;
     const layer = $('#relation-layer');
     if (!layer) return;
-    layer.replaceChildren();
 
     const relations = getMindMapRelations();
     if (state.selectedRelationId && !relations.some(relation => relation.id === state.selectedRelationId)) {
@@ -1883,10 +1995,11 @@ function renderMindMapRelations() {
         closeMindMapRelationEditor();
     }
 
-    if (relations.length === 0) return;
+    if (relations.length === 0) {
+        layer.replaceChildren();
+        return;
+    }
 
-    const defs = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'defs');
-    layer.appendChild(defs);
     const cardRects = new Map();
     document.querySelectorAll('.node-card').forEach(card => {
         const rect = getMindMapCanvasRect(card);
@@ -1903,13 +2016,20 @@ function renderMindMapRelations() {
                 MINDMAP_RELATION_FOLD_BUTTON_PADDING
             );
         });
-    const routes = buildMindMapRelationRoutes(
+    const routes = await buildMindMapRelationRoutesAsync(
         relations,
         cardRects,
         foldButtonObstacles,
-        foldButtonCorridors
+        foldButtonCorridors,
+        () => renderVersion === relationRenderVersion
     );
+    if (!routes || renderVersion !== relationRenderVersion) return;
 
+    // 样式/方向编辑时保留当前线路，待新结果完成后在同一任务中替换。
+    // 卡片布局变化时仍由调度入口立即清除旧线，避免显示旧位置。
+    layer.replaceChildren();
+    const defs = document.createElementNS(MINDMAP_RELATION_SVG_NS, 'defs');
+    layer.appendChild(defs);
     relations.forEach((relation, index) => {
         const sourceCard = document.getElementById(`card-${relation.sourceId}`);
         const targetCard = document.getElementById(`card-${relation.targetId}`);
@@ -1982,9 +2102,17 @@ function renderMindMapRelations() {
     });
 }
 
-function scheduleRenderMindMapRelations() {
+function scheduleRenderMindMapRelations(cardsChanged = false) {
+    // 任意新请求都使正在分批执行的旧任务失效，不能回写旧布局的线路。
+    relationRenderVersion++;
+    // 卡片布局更新后先移除旧线，避免首帧出现指向旧位置或已折叠节点的线。
+    if (cardsChanged) $('#relation-layer')?.replaceChildren();
     if (relationRenderFrame !== null) return;
-    relationRenderFrame = requestAnimationFrame(renderMindMapRelations);
+    // rAF 在绘制前执行：第一帧只安排下一帧，让浏览器先绘制卡片，
+    // 再测量最新布局并寻路。两帧之间的更新仍合并到这次绘制中。
+    relationRenderFrame = requestAnimationFrame(() => {
+        relationRenderFrame = requestAnimationFrame(renderMindMapRelations);
+    });
 }
 
 function initializeMindMapRelations() {

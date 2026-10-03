@@ -662,7 +662,7 @@ function renderTree() {
     stabilizeRoot();
     restoreGlobalScrolls();
     updateTransform(); 
-    scheduleRenderMindMapRelations();
+    scheduleRenderMindMapRelations(true);
     scheduleRenderMindMapSummaries();
     if (window.rootObserver) {
         window.rootObserver.disconnect();
@@ -673,7 +673,7 @@ function renderTree() {
     window.rootObserver = new ResizeObserver(() => {
         // 仅调整 transform，不改变被观察元素的尺寸，可在本次绘制前直接归位。
         stabilizeRoot();
-        scheduleRenderMindMapRelations();
+        scheduleRenderMindMapRelations(true);
         scheduleRenderMindMapSummaries();
     });
 
@@ -760,7 +760,7 @@ function updateChildrenDOM(nodeId) {
     
     stabilizeRoot();
     restoreGlobalScrolls();
-    scheduleRenderMindMapRelations();
+    scheduleRenderMindMapRelations(true);
     scheduleRenderMindMapSummaries();
     updateMindMapNodeStats();
     refreshVisibleMapSearchResults();
@@ -873,7 +873,7 @@ function updateNodeDOM(nodeId) {
     }
     stabilizeRoot();
     restoreGlobalScrolls();
-    scheduleRenderMindMapRelations();
+    scheduleRenderMindMapRelations(true);
     scheduleRenderMindMapSummaries();
 }
 // 修复：暴力清除高亮后重新添加，防止高亮卡死

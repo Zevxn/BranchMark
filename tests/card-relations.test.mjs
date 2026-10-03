@@ -97,7 +97,7 @@ assert.match(mindMap, /function getMindMapRelationPreferredAlong\(/,
     '关联线应根据父子连线占用情况调整卡片边缘端点');
 assert.match(mindMap, /function getMindMapRelationPortPlan\([\s\S]*?nestingDistance[\s\S]*?positions/,
     '多条关联线应先按对端位置排序并批量分配卡片边缘端口');
-assert.match(mindMap, /const naturalRoutes = buildPass\(null, null, false\)[\s\S]*?buildPass\(portPlan\.assignments, portPlan\.relationOrder, true\)/,
+assert.match(mindMap, /const naturalRoutes = yield\* buildPass\(null, null, false\)[\s\S]*?buildPass\(portPlan\.assignments, portPlan\.relationOrder, true\)/,
     '关联线应先在不受其他关系占道影响时确定自然连接边，再统一分配端口并按冲突代价寻路');
 assert.match(mindMap, /document\.querySelectorAll\('\.fold-btn'\)[\s\S]*?MINDMAP_RELATION_FOLD_BUTTON_PADDING/,
     '可见折叠按钮应作为带安全间距的路由障碍');
@@ -105,7 +105,7 @@ assert.match(mindMap, /function getMindMapRelationFoldCorridors\(cardRects\)/,
     '路由应计算折叠按钮与相邻子卡片之间的几何中线');
 assert.match(mindMap, /function getMindMapRelationRouteFoldCorridors\(/,
     '折叠按钮走廊应按自然路线筛选，避免影响可从其他方向通过的线路');
-assert.match(mindMap, /const naturalRoute = routeMindMapRelation\([\s\S]*?\[\][\s\S]*?getMindMapRelationRouteFoldCorridors\(naturalRoute, preferredChannels\)/,
+assert.match(mindMap, /const naturalRoute = yield\* routeMindMapRelationSteps\([\s\S]*?\[\][\s\S]*?getMindMapRelationRouteFoldCorridors\(naturalRoute, preferredChannels\)/,
     '单条关联线应先计算无通道偏好的自然路线，再决定是否启用折叠走廊');
 assert.match(mindMap, /getMindMapRelationRoutingKey\(relations, cardRects, controlObstacles, preferredChannels\)/,
     '折叠按钮位置变化后应使关系路由缓存失效');
@@ -118,7 +118,7 @@ assert.equal((mindMap.match(/appendMindMapRelationsToCanvas\(nodes, edges\);/g) 
 
 // SECTION 关联绘制与空数据清理
 const renderSource = mindMap.slice(
-    mindMap.indexOf('function renderMindMapRelations'),
+    mindMap.indexOf('async function renderMindMapRelations'),
     mindMap.indexOf('function initializeMindMapRelations'),
 );
 function createSvgElement(tag) {
@@ -134,6 +134,7 @@ function createSvgElement(tag) {
         style: { setProperty() {} },
         appendChild(child) { this.children.push(child); },
         replaceChildren() { this.children = []; },
+        querySelectorAll(selector) { return this.children.filter(child => child.classList.contains(selector.slice(1))); },
         setAttribute(name, value) { this.attributes[name] = value; },
     };
 }
@@ -156,7 +157,7 @@ const renderContext = vm.createContext({
     requestAnimationFrame: callback => { renderFrames.push(callback); return renderFrames.length; },
     getMindMapCanvasRect: card => { renderPreparationCalls++; return { id: card.dataset.nodeId }; },
     getMindMapRelationFoldCorridors: () => { renderPreparationCalls++; return []; },
-    buildMindMapRelationRoutes: (relations, cardRects) => {
+    buildMindMapRelationRoutesAsync: async (relations, cardRects) => {
         renderPreparationCalls++;
         assert.equal(cardRects.size, 2);
         return new Map(relations.map(relation => [relation.id, { path: 'M 0 0 L 100 100' }]));
@@ -168,6 +169,7 @@ const renderContext = vm.createContext({
 });
 vm.runInContext(`
     let relationRenderFrame = null;
+    let relationRenderVersion = 0;
     const MINDMAP_RELATION_SVG_NS = 'http://www.w3.org/2000/svg';
     ${mindMap.slice(mindMap.indexOf('function getMindMapRelations()'), mindMap.indexOf('function ensureMindMapRelations()'))}
     ${mindMap.slice(mindMap.indexOf('function closeMindMapRelationEditor()'), mindMap.indexOf('function commitMindMapRelationEditor()'))}
@@ -189,17 +191,23 @@ const renderedRelation = { id: 'visible', sourceId: 'a', targetId: 'b' };
 renderContext.state.data.relations = [renderedRelation];
 renderContext.state.selectedRelationId = renderedRelation.id;
 relationPanel.classList.add('active');
-renderContext.scheduleRenderMindMapRelations();
+renderContext.scheduleRenderMindMapRelations(true);
 renderContext.scheduleRenderMindMapRelations();
 assert.equal(renderFrames.length, 1, '同一帧的重绘请求应继续合并');
-renderFrames.shift()();
+await renderFrames.shift()();
+assert.equal(renderPreparationCalls, 0, '卡片首帧不得测量或计算关联线，应留出绘制卡片的机会');
+assert.equal(relationLayer.children.length, 0, '卡片布局改变后应立即移除旧关联线');
+renderContext.scheduleRenderMindMapRelations(true);
+assert.equal(renderFrames.length, 1, '等待第二帧期间的布局更新也应合并');
+await renderFrames.shift()();
 assert.ok(renderPreparationCalls > 0, '有关联时应继续测量和准备路由');
 assert.equal(relationLayer.children[1].children[0].attributes.d, 'M 0 0 L 100 100');
 assert.equal(relationPanel.classList.contains('active'), true, '有效关联的编辑面板应保持打开');
 renderContext.state.data.relations = [];
 renderPreparationCalls = 0;
 renderContext.scheduleRenderMindMapRelations();
-renderFrames.shift()();
+await renderFrames.shift()();
+await renderFrames.shift()();
 assert.equal(relationLayer.children.length, 0, '最后一条关联移除后应清除刚绘制的路径');
 assert.equal(renderContext.state.selectedRelationId, null);
 assert.equal(relationPanel.classList.contains('active'), false);
@@ -207,13 +215,69 @@ assert.equal(renderPreparationCalls, 0);
 renderContext.state.data.relations = [renderedRelation];
 renderContext.scheduleRenderMindMapRelations();
 assert.equal(renderFrames.length, 1, '空关联提前结束后仍应能安排后续重绘');
-renderFrames.shift()();
+await renderFrames.shift()();
+await renderFrames.shift()();
 assert.equal(relationLayer.children.length, 2, '重新添加关联后应恢复绘制');
+
+// 连续切换/折叠时不保存旧快照：第二帧只使用最新的关联和可见卡片。
+renderContext.scheduleRenderMindMapRelations(true);
+await renderFrames.shift()();
+renderContext.state.data.relations = [];
+renderPreparationCalls = 0;
+renderContext.scheduleRenderMindMapRelations(true);
+await renderFrames.shift()();
+assert.equal(relationLayer.children.length, 0, '第二帧前移除的关联不得被旧任务重新绘制');
+assert.equal(renderPreparationCalls, 0, '第二帧前折叠/切换为空数据时应跳过路由准备');
+
+const originalAsyncBuilder = renderContext.buildMindMapRelationRoutesAsync;
+let resolveOldRoutes;
+renderContext.buildMindMapRelationRoutesAsync = () => new Promise(resolve => { resolveOldRoutes = resolve; });
+renderContext.state.data.relations = [renderedRelation];
+const oldRender = renderContext.renderMindMapRelations();
+renderContext.state.data.relations = [];
+renderContext.scheduleRenderMindMapRelations(true);
+resolveOldRoutes(new Map([[renderedRelation.id, { path: 'M 0 0 L 100 100' }]]));
+await oldRender;
+assert.equal(relationLayer.children.length, 0, '分批计算期间切换/折叠后，旧结果不得回写图层');
+await renderFrames.shift()();
+await renderFrames.shift()();
+renderContext.buildMindMapRelationRoutesAsync = originalAsyncBuilder;
+
+renderContext.state.data.relations = [renderedRelation];
+await renderContext.renderMindMapRelations();
+const retainedGroup = relationLayer.children[1];
+renderContext.buildMindMapRelationRoutesAsync = () => new Promise(resolve => { resolveOldRoutes = resolve; });
+const pendingRedraw = renderContext.renderMindMapRelations();
+assert.equal(relationLayer.children[1], retainedGroup, '样式重绘计算期间必须保留原关联线及其点击区域');
+resolveOldRoutes(new Map([[renderedRelation.id, { path: 'M 0 0 L 200 200' }]]));
+await pendingRedraw;
+assert.equal(relationLayer.children[1].children[0].attributes.d, 'M 0 0 L 200 200', '计算完成后应替换为最新线路');
+renderContext.buildMindMapRelationRoutesAsync = originalAsyncBuilder;
+
+renderContext.commitMindMapRelationEditor = () => {};
+renderContext.updateSelection = () => {};
+renderContext.updateToolbar = () => {};
+renderContext.openMindMapRelationEditor = () => {};
+renderContext.state.selectedIds = new Set();
+vm.runInContext(mindMap.slice(
+    mindMap.indexOf('function clearSelectedMindMapRelation()'),
+    mindMap.indexOf('function getMindMapRelationPath('),
+), renderContext);
+const selectableGroup = relationLayer.children[1];
+const preparationBeforeSelection = renderPreparationCalls;
+renderContext.selectMindMapRelation(renderedRelation.id, { x: 10, y: 10 });
+assert.equal(selectableGroup.classList.contains('selected'), true, '点击关联线应立即更新选中高亮');
+assert.equal(relationLayer.children[1], selectableGroup, '点击关联线不得移除或替换原路径和点击区域');
+renderContext.clearSelectedMindMapRelation();
+assert.equal(selectableGroup.classList.contains('selected'), false, '取消选中应立即移除高亮');
+assert.equal(relationLayer.children[1], selectableGroup, '取消选中不得移除或替换原路径');
+assert.equal(renderFrames.length, 0, '选中和取消选中不得触发重绘任务');
+assert.equal(renderPreparationCalls, preparationBeforeSelection, '选中和取消选中不得重新测量或寻路');
 // !SECTION 关联绘制与空数据清理
 
 const pathSource = mindMap.slice(
     mindMap.indexOf('function getMindMapRelationPath'),
-    mindMap.indexOf('function renderMindMapRelations'),
+    mindMap.indexOf('async function renderMindMapRelations'),
 );
 const sideSource = mindMap.slice(
     mindMap.indexOf('function getCanvasRelationSides'),
@@ -221,7 +285,7 @@ const sideSource = mindMap.slice(
 );
 const routingSource = mindMap.slice(
     mindMap.indexOf('function expandMindMapRelationObstacle'),
-    mindMap.indexOf('function renderMindMapRelations'),
+    mindMap.indexOf('async function renderMindMapRelations'),
 );
 const appendSource = mindMap.slice(
     mindMap.indexOf('function appendMindMapRelationsToCanvas'),
@@ -1518,4 +1582,122 @@ assert.ok(
     '关联线只应绕过源目标之间的阻挡卡片，不得采用上方超宽兄弟的远端边界',
 );
 
-console.log('卡片关联校验通过：编辑、正交避障、分流防重叠、缓存与 Canvas 导出逻辑完整。');
+// SECTION 寻路几何复用
+const routingCacheChecks = vm.runInContext(`
+    (() => {
+        const segments = [
+            { from: { x: -30, y: 0 }, to: { x: 90, y: 0 }, kind: 'tree' },
+            { from: { x: 90, y: 0 }, to: { x: -30, y: 0 }, kind: 'tree' },
+            { from: { x: 20, y: -40 }, to: { x: 20, y: 80 }, kind: 'tree' },
+            { from: { x: 20, y: -40 }, to: { x: 20, y: 80 }, kind: 'relation' },
+            { from: { x: -30, y: 9.9 }, to: { x: 90, y: 9.9 } },
+            { from: { x: -30, y: 10 }, to: { x: 90, y: 10 } },
+            { from: { x: 30, y: 80 }, to: { x: 30, y: -40 } },
+        ];
+        const selectSegments = createMindMapRelationSegmentIndex(segments);
+        const scores = [];
+        for (const coordinate of [-40.1, -40, -9.9, -0.1, 0, 0.1, 9.9, 10, 20, 30, 80, 80.1, 200]) {
+            for (const horizontal of [true, false]) {
+                for (const reverse of [false, true]) {
+                    const ends = horizontal
+                        ? [{ x: -30, y: coordinate }, { x: 90, y: coordinate }]
+                        : [{ x: coordinate, y: -40 }, { x: coordinate, y: 80 }];
+                    if (reverse) ends.reverse();
+                    const selected = selectSegments(horizontal, coordinate);
+                    scores.push([
+                        getMindMapRelationSegmentInteractionPenalty(...ends, segments, ends),
+                        getMindMapRelationSegmentInteractionPenalty(...ends, selected, ends),
+                    ]);
+                }
+            }
+        }
+        const originalPenalty = getMindMapRelationSegmentInteractionPenalty;
+        const visitedEdges = new Set();
+        let repeatedScores = 0;
+        getMindMapRelationSegmentInteractionPenalty = (from, to, ...args) => {
+            const key = [from.x, from.y, to.x, to.y].join(',');
+            if (visitedEdges.has(key)) repeatedScores++;
+            visitedEdges.add(key);
+            return originalPenalty(from, to, ...args);
+        };
+        let route;
+        try {
+            route = findMindMapOrthogonalRoute(
+                { x: 0, y: 0 }, { x: 400, y: 0 },
+                [{ left: 150, right: 250, top: -50, bottom: 50 }],
+                segments
+            );
+        } finally {
+            getMindMapRelationSegmentInteractionPenalty = originalPenalty;
+        }
+        const zeroKeyRoute = findMindMapOrthogonalRoute({ x: 0, y: 0 }, { x: 100, y: 0 }, []);
+        const samePointRoute = findMindMapOrthogonalRoute({ x: 0, y: 0 }, { x: 0, y: 0 }, []);
+        const changedGeometryRoute = findMindMapOrthogonalRoute(
+            { x: 0, y: 0 }, { x: 400, y: 0 }, [], []
+        );
+        return { scores, route, repeatedScores, visitedCount: visitedEdges.size, zeroKeyRoute, samePointRoute, changedGeometryRoute };
+    })()
+`, routingContext);
+for (const [fullScore, indexedScore] of routingCacheChecks.scores) {
+    assert.equal(indexedScore, fullScore, '按行列筛选不得改变安全间距、端点或重复树线的评分');
+}
+assert.ok(routingCacheChecks.route, '缓存几何评分后仍应成功绕开障碍');
+assert.ok(routingCacheChecks.visitedCount > 0, '应实际执行几何边评分');
+assert.equal(routingCacheChecks.repeatedScores, 0, '同次寻路中每条有向几何边只能评分一次');
+assert.deepEqual(JSON.parse(JSON.stringify(routingCacheChecks.zeroKeyRoute)), {
+    points: [{ x: 0, y: 0 }, { x: 100, y: 0 }], cost: 100,
+}, '编号为零的起点不得在路径还原时丢失');
+assert.deepEqual(JSON.parse(JSON.stringify(routingCacheChecks.samePointRoute)), {
+    points: [{ x: 0, y: 0 }], cost: 0,
+}, '起终点重合时应正确还原单点路径');
+assert.deepEqual(JSON.parse(JSON.stringify(routingCacheChecks.changedGeometryRoute)), {
+    points: [{ x: 0, y: 0 }, { x: 400, y: 0 }], cost: 400,
+}, '新一轮寻路不得复用旧障碍或旧占用线段的边评分');
+// !SECTION 寻路几何复用
+
+// SECTION 分批寻路与失效任务
+let sliceClock = 0;
+let sliceYields = 0;
+let anotherTaskRan = false;
+routingContext.performance = { now: () => ++sliceClock };
+routingContext.setTimeout = callback => {
+    sliceYields++;
+    return setTimeout(callback, 0);
+};
+vm.runInContext(`
+    getMindMapRelationReservedSides = nodeId => new Set([nodeId === 'fanout-source' ? 'left' : 'right']);
+    getMindMapRelationPortContext = nodeId => ({
+        branchSide: nodeId === 'fanout-source' ? 'right' : 'left', hasChildren: false, childSides: []
+    });
+    getMindMapRelationRoutingKey = () => 'sliced-integration';
+    relationRouteCache = { key: '', routes: new Map() };
+`, routingContext);
+const synchronousRoutes = vm.runInContext(`buildMindMapRelationRoutes(fanoutRelations, fanoutCardRects)`, routingContext);
+vm.runInContext(`relationRouteCache = { key: '', routes: new Map() };`, routingContext);
+setTimeout(() => { anotherTaskRan = true; }, 0);
+const slicedRoutes = await vm.runInContext(`
+    buildMindMapRelationRoutesAsync(fanoutRelations, fanoutCardRects, [], [], () => true)
+`, routingContext);
+assert.deepEqual(JSON.parse(JSON.stringify([...slicedRoutes])), JSON.parse(JSON.stringify([...synchronousRoutes])),
+    '分批暂停和恢复不得改变端口规划、路线、评分及路线顺序');
+assert.ok(sliceYields > 0, '复杂路线必须真实让出执行权');
+assert.equal(anotherTaskRan, true, '寻路完成之前应允许事件循环执行其他任务');
+
+let routingJobCurrent = true;
+let stoppedIterator = false;
+routingContext.isRoutingJobCurrent = () => routingJobCurrent;
+routingContext.markIteratorStopped = () => { stoppedIterator = true; };
+vm.runInContext(`relationRouteCache = { key: '', routes: new Map() };`, routingContext);
+setTimeout(() => { routingJobCurrent = false; }, 0);
+const cancelledRoutes = await vm.runInContext(`
+    runMindMapRelationRoutingInSlices((function* () {
+        try { return yield* buildMindMapRelationRoutesSteps(fanoutRelations, fanoutCardRects); }
+        finally { markIteratorStopped(); }
+    })(), isRoutingJobCurrent)
+`, routingContext);
+assert.equal(cancelledRoutes, null, '新布局出现时应停止尚未完成的旧任务');
+assert.equal(stoppedIterator, true, '停止旧任务时应关闭迭代器并释放寻路状态');
+assert.equal(vm.runInContext('relationRouteCache.key', routingContext), '', '未完成的任务不得写入全局路由缓存');
+// !SECTION 分批寻路与失效任务
+
+console.log('卡片关联校验通过：编辑、正交避障、分流防重叠、几何复用、缓存与 Canvas 导出逻辑完整。');
