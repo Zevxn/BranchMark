@@ -57,6 +57,31 @@ context.Node = { DOCUMENT_POSITION_FOLLOWING: 4 };
 vm.runInContext(renderMD.slice(renderMD.indexOf('// SECTION 文档预览内容块框选与拖拽')), context);
 context.earlier = block(1, '# 第一块');
 context.later = block(3, '后面的正文');
+// SECTION 文档滚动条事件隔离
+let focusCount = 0;
+let preventedCount = 0;
+context.scrollRoot = {
+    addEventListener() {}, classList: classes(),
+    getBoundingClientRect: () => ({ left: 20, top: 30, width: 200, height: 100 }),
+    clientLeft: 1, clientTop: 1, clientWidth: 180, clientHeight: 80,
+    focus: () => { focusCount += 1; },
+};
+vm.runInContext(`globalThis.scrollDragger = new RenderedMarkdownDragger(scrollRoot, {
+    getMarkdown: getMindMapDocumentSelectionMarkdown, onSelectionChange() {},
+}); scrollDragger.getTarget = () => earlier;`, context);
+const mouseDown = (x, y) => context.scrollDragger.handleMouseDown({
+    button: 0, clientX: x, clientY: y, target: { closest: () => null },
+    preventDefault: () => { preventedCount += 1; },
+});
+for (const [x, y] of [[201, 60], [80, 111], [210, 120]]) mouseDown(x, y);
+assert.equal(focusCount, 0, '拖动垂直或水平滚动条时不得抢占焦点');
+assert.equal(preventedCount, 0, '滚动条区域不得阻止浏览器默认行为');
+assert.equal(context.scrollDragger.selectedElements.size, 0, '滚动条操作不得改变内容块选择');
+assert.equal(context.scrollDragger.isBoxSelecting, false, '滚动条操作不得启动框选');
+mouseDown(80, 60);
+assert.equal(focusCount, 1, '内容区仍应可以聚焦和选择内容块');
+assert.equal(context.scrollDragger.selectedElements.has(context.earlier), true);
+// !SECTION 文档滚动条事件隔离
 context.transfer = {
     values: {}, setData(type, value) { this.values[type] = value; },
     getData(type) { return this.values[type] || ''; }, setDragImage() {},

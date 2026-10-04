@@ -1728,6 +1728,11 @@ class RenderedMarkdownDragger {
 
     handleMouseDown(event) {
         if (event.button !== 0 || event.target.closest('button, a, input, textarea, .mermaid-btn')) return;
+        const bounds = this.root.getBoundingClientRect();
+        const x = event.clientX - bounds.left - this.root.clientLeft;
+        const y = event.clientY - bounds.top - this.root.clientTop;
+        // 滚动条不属于内容区，保留浏览器原生拖动，不启动框选。
+        if (x < 0 || y < 0 || x >= this.root.clientWidth || y >= this.root.clientHeight) return;
         this.root.focus({ preventScroll: true });
         const block = this.getTarget(event);
         const additive = event.ctrlKey || event.metaKey;
@@ -1739,7 +1744,6 @@ class RenderedMarkdownDragger {
         event.preventDefault();
         this.cancelBoxSelection();
         if (!additive) this.setSelection([]);
-        const bounds = this.root.getBoundingClientRect();
         this.startPos = { x: event.clientX - bounds.left, y: event.clientY - bounds.top + this.root.scrollTop };
         this.pointer = { x: event.clientX, y: event.clientY };
         this.initialPointer = { ...this.pointer };

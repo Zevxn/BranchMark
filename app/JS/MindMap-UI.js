@@ -1923,7 +1923,8 @@ function initializeMindMapInternalLinkPreviewResizer() {
     let dragStartWidth = 0;
 
     function getMaxWidth() {
-        return Math.max(0, window.innerWidth - 24);
+        // 左侧留 12px 边距，右侧预留 14px 手柄和 45px 书签按钮。
+        return Math.max(0, window.innerWidth - 71);
     }
 
     function getWidthLimits() {

@@ -1707,9 +1707,10 @@
             top: 74px;
             left: 12px;
             bottom: 56px;
-            width: min(420px, calc(100vw - 24px));
-            min-width: min(280px, calc(100vw - 24px));
-            max-width: calc(100vw - 24px);
+            /* 为外侧手柄和页面右侧的书签按钮留出空间。 */
+            width: min(420px, calc(100vw - 71px));
+            min-width: min(280px, calc(100vw - 71px));
+            max-width: calc(100vw - 71px);
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
@@ -1734,13 +1735,14 @@
         .mindmap-link-preview-resizer {
             position: absolute;
             z-index: 2;
-            top: 0;
-            right: 0;
-            bottom: 0;
+            top: 50%;
+            right: -14px;
             display: flex;
-            width: 16px;
+            width: 14px;
+            height: 44px;
             align-items: center;
-            justify-content: flex-end;
+            justify-content: center;
+            transform: translateY(-50%);
             cursor: col-resize;
             touch-action: none;
             outline: none;
@@ -1749,19 +1751,18 @@
         }
         .mindmap-link-preview-resizer::before {
             position: absolute;
-            right: -1px;
-            width: 9px;
-            height: 44px;
+            inset: 0;
+            box-sizing: border-box;
             border: 1px solid var(--toolbar-border);
-            border-right: 0;
-            border-radius: 6px 0 0 6px;
+            border-left: 0;
+            border-radius: 0 6px 6px 0;
             background: color-mix(in srgb, var(--card-bg) 92%, var(--toolbar-border));
             content: '';
             transition: background-color 0.15s ease, border-color 0.15s ease;
         }
         .mindmap-link-preview-resizer::after {
             position: absolute;
-            right: 3px;
+            right: 6px;
             width: 2px;
             height: 14px;
             border-radius: 2px;
