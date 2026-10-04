@@ -1893,6 +1893,8 @@
         /* SECTION 文档素材预览与内容块选择 */
         .mindmap-link-preview:not([data-preview-mode="document"]) .document-material-action,
         .mindmap-link-preview[data-preview-mode="document"] #btn-mindmap-link-jump { display: none; }
+        .document-material-drop-mode { width: auto; padding: 0 8px; font-size: 12px; white-space: nowrap; border-color: var(--toolbar-border); }
+        .document-material-drop-mode[aria-pressed="true"] { color: var(--primary); background: var(--btn-hover); }
         .mindmap-link-preview[data-preview-mode="document"] .mindmap-link-preview-body {
             display: flex;
             flex: 1;
@@ -1966,6 +1968,7 @@
             border-color: var(--primary);
             background: color-mix(in srgb, var(--primary) 10%, transparent);
         }
+        .document-markdown-block.is-used { opacity: 0.55; background: color-mix(in srgb, #ff4d4f 18%, transparent); }
         .document-markdown-block.is-removing { box-sizing: border-box; overflow: hidden; pointer-events: none; }
         .document-material-preview.is-removing-content { overflow-anchor: none; }
         .document-material-preview.is-box-selecting { user-select: none; cursor: crosshair; }
@@ -3004,6 +3007,7 @@
                 <strong class="mindmap-link-preview-title" id="mindMapLinkPreviewTitle">未命名卡片</strong>
             </div>
             <div class="mindmap-link-preview-actions">
+                <button class="mindmap-link-preview-action document-material-action document-material-drop-mode" id="btn-document-drop-mode" type="button" aria-pressed="false" title="拖入后移除素材；按住 Ctrl 拖放可临时保留">拖后移除</button>
                 <button class="mindmap-link-preview-action document-material-action" id="btn-document-paste" type="button" title="粘贴 Markdown" aria-label="粘贴 Markdown"><i class="ri-clipboard-line" aria-hidden="true"></i></button>
                 <button class="mindmap-link-preview-action document-material-action" id="btn-document-load" type="button" title="加载 Markdown 文件" aria-label="加载 Markdown 文件"><i class="ri-folder-open-line" aria-hidden="true"></i></button>
                 <button class="mindmap-link-preview-action primary" id="btn-mindmap-link-jump" type="button" title="跳转到卡片" aria-label="跳转到卡片">

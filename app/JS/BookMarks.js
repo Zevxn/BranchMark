@@ -1589,7 +1589,7 @@ class myBookmarkManager {
         
     }
     renderRenameNode(id, newName) {                      // ④ 重命名节点
-        document.querySelectorAll(`.tree-item[data-id="${id}"] .item-text`).forEach(el=>{
+        document.querySelectorAll(`.tree-item[data-id="${id}"] > .item-content > .item-text`).forEach(el=>{
             el.textContent = newName;
             this.addOverflowTooltips(el.closest('.tree-container'));
         });

@@ -667,6 +667,8 @@ function initializeNativeDragDrop() {
         const documentBlocks = typeof getMindMapDocumentDraggedBlocks === 'function'
             ? getMindMapDocumentDraggedBlocks(e.dataTransfer)
             : [];
+        // 在异步读取前记录模式及 Ctrl 状态，仅影响本次成功的拖放。
+        const retainDocumentBlocks = documentBlocks.length > 0 && (mindMapDocumentState.retainAfterDrop || e.ctrlKey);
         let nodePayloads = [];
         let isMarkdownDrop = false;
 
@@ -756,7 +758,7 @@ function initializeNativeDragDrop() {
                 }
             }
 
-            if (inserted && documentBlocks.length) removeMindMapDocumentBlocks(documentBlocks);
+            if (inserted && documentBlocks.length) completeMindMapDocumentDrop(documentBlocks, retainDocumentBlocks);
 
             if (isMarkdownDrop) {
                 showTopToast(`✅ 已从 ${newNodes.length} 个 Markdown 文件创建节点`);

@@ -75,7 +75,8 @@ assert.match(dropHandler, /parent\.children\.splice\(insertIndex, 0, \.\.\.newNo
 assert.match(dropHandler, /recordHistory\(\)/, '拖放创建节点后应写入历史和持久化流程');
 
 const initializeStart = source.indexOf('function initializeNativeDragDrop');
-const initializeEnd = source.indexOf('/**\n * 提取 Markdown 标题', initializeStart);
+const initializeEnd = source.indexOf('/**', initializeStart);
+assert.ok(initializeEnd > initializeStart, '应准确定位拖放初始化模块的结束位置');
 const initializeSource = source.slice(initializeStart, initializeEnd);
 const listeners = {};
 const targetNode = { id: 'target', topic: '目标节点', children: [] };
@@ -155,17 +156,20 @@ assert.equal(targetNode.children[0].content, '拖放正文');
 assert.equal(historyCount, 1, '一次纯文本拖放应只记录一次历史');
 assert.equal(updatedParentId, 'target');
 
-// 文档素材只能在目标插入成功后移除，不能仅凭 dragend 的 dropEffect 判断。
+// 文档素材只能在目标插入成功后处理，Ctrl 仅覆盖本次拖放的模式。
 let removals = 0;
+let retentions = 0;
 const draggedBlocks = [{ id: 'source-block' }];
+integrationContext.mindMapDocumentState = { retainAfterDrop: false };
 integrationContext.getMindMapDocumentDraggedBlocks = () => [...draggedBlocks];
-integrationContext.removeMindMapDocumentBlocks = blocks => {
+integrationContext.completeMindMapDocumentDrop = (blocks, retain) => {
     assert.deepEqual(Array.from(blocks), draggedBlocks);
-    assert.equal(historyCount, 1, '应先创建节点并记录历史，再移除预览内容');
-    removals++;
+    assert.equal(historyCount, 1, '应先创建节点并记录历史，再处理预览内容');
+    if (retain) retentions++;
+    else removals++;
 };
-const dropDocument = async (card, y) => listeners.drop({
-    preventDefault() {}, clientX: 280, clientY: y,
+const dropDocument = async (card, y, ctrlKey = false) => listeners.drop({
+    preventDefault() {}, clientX: 280, clientY: y, ctrlKey,
     target: { closest: () => card },
     dataTransfer: { files: [], getData: type => type === 'text/plain' ? '摘取正文' : '' },
 });
@@ -174,6 +178,15 @@ await dropDocument(null, 200);
 await dropDocument({ ...targetCard, dataset: { nodeId: '不存在的节点' } }, 200);
 assert.equal(removals, 0, '落在空白或无效节点上时不得移除素材');
 await dropDocument(targetCard, 200);
+historyCount = 0;
+await dropDocument(targetCard, 200, true);
+assert.equal(retentions, 1, '移除模式下按住 Ctrl 拖放应保留素材');
+assert.equal(integrationContext.mindMapDocumentState.retainAfterDrop, false, 'Ctrl 不得修改记住的模式');
+integrationContext.mindMapDocumentState.retainAfterDrop = true;
+historyCount = 0;
+await dropDocument(targetCard, 200);
+assert.equal(retentions, 2, '保留模式下无需 Ctrl 即可保留素材');
+integrationContext.mindMapDocumentState.retainAfterDrop = false;
 assert.equal(removals, 1, '成功生成子节点后应移除对应素材');
 historyCount = 0;
 const beforeSiblingDropIndex = integrationContext.getMindMapNodeIndex();

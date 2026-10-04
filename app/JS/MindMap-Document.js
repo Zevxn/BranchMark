@@ -1,4 +1,5 @@
 // SECTION Markdown 文档素材与源码分块
+const MINDMAP_DOCUMENT_RETAIN_AFTER_DROP_STORAGE_KEY = 'mindmap_document_retain_after_drop';
 const mindMapDocumentState = {
     source: '',
     name: '文档素材',
@@ -8,6 +9,7 @@ const mindMapDocumentState = {
     scrollTop: 0,
     references: '',
     loadRequest: 0,
+    retainAfterDrop: false,
 };
 
 function splitMindMapDocumentMarkdown(source) {
@@ -47,6 +49,15 @@ function getMindMapDocumentDraggedBlocks(dataTransfer) {
     return drag && dataTransfer?.getData(MINDMAP_DOCUMENT_DRAG_MIME) === drag.token ? [...drag.elements] : [];
 }
 
+function completeMindMapDocumentDrop(elements, retain) {
+    if (!retain) return removeMindMapDocumentBlocks(elements);
+    const state = mindMapDocumentState;
+    const blocks = elements.filter(element => element.parentElement === state.preview && !element.classList.contains('is-removing'));
+    if (!blocks.length) return;
+    blocks.forEach(block => block.classList.add('is-used'));
+    state.dragger.clearSelection();
+}
+
 async function removeMindMapDocumentBlocks(elements) {
     const state = mindMapDocumentState;
     const blocks = elements.filter(element => element.parentElement === state.preview && !element.classList.contains('is-removing'));
@@ -61,7 +72,7 @@ async function removeMindMapDocumentBlocks(elements) {
         const style = getComputedStyle(block);
         animations.push(block.animate([
             {
-                height: `${block.getBoundingClientRect().height}px`, opacity: 1,
+                height: `${block.getBoundingClientRect().height}px`, opacity: style.opacity,
                 paddingTop: style.paddingTop, paddingBottom: style.paddingBottom,
                 marginTop: style.marginTop, marginBottom: style.marginBottom,
                 borderTopWidth: style.borderTopWidth, borderBottomWidth: style.borderBottomWidth,
@@ -164,6 +175,47 @@ function renderMindMapDocumentSource(source, name = '粘贴的 Markdown') {
 // !SECTION Markdown 文档素材与源码分块
 
 // SECTION 文档素材面板初始化与交互
+function updateMindMapDocumentDropMode() {
+    const state = mindMapDocumentState;
+    const button = $('#btn-document-drop-mode');
+    if (button) {
+        button.textContent = state.retainAfterDrop ? '拖后保留' : '拖后移除';
+        button.setAttribute('aria-pressed', String(state.retainAfterDrop));
+        button.title = state.retainAfterDrop
+            ? '拖入后保留素材，可再次拖入；点击切换为移除'
+            : '拖入后移除素材；按住 Ctrl 拖放可临时保留；点击切换为保留';
+    }
+    const status = state.root?.querySelector('.document-material-status');
+    if (status) {
+        const count = state.dragger?.selectedElements.size || 0;
+        status.textContent = count
+            ? `已选 ${count} 个内容块 · 拖入脑图生成一个节点`
+            : '单击选择 · Ctrl 多选 · 空白处拖动框选';
+        if (!state.retainAfterDrop) status.textContent += ' · Ctrl 拖放保留';
+    }
+}
+
+function initializeMindMapDocumentDropMode() {
+    const button = $('#btn-document-drop-mode');
+    if (!button) return;
+    let hasUserChanged = false;
+    updateMindMapDocumentDropMode();
+    button.addEventListener('click', () => {
+        hasUserChanged = true;
+        mindMapDocumentState.retainAfterDrop = !mindMapDocumentState.retainAfterDrop;
+        updateMindMapDocumentDropMode();
+        void chrome.storage.local.set({
+            [MINDMAP_DOCUMENT_RETAIN_AFTER_DROP_STORAGE_KEY]: mindMapDocumentState.retainAfterDrop,
+        }).catch(error => console.warn('[MindMap] 保存文档素材拖放模式失败:', error));
+    });
+    return chrome.storage.local.get({ [MINDMAP_DOCUMENT_RETAIN_AFTER_DROP_STORAGE_KEY]: false })
+        .then(result => {
+            if (hasUserChanged) return;
+            mindMapDocumentState.retainAfterDrop = result[MINDMAP_DOCUMENT_RETAIN_AFTER_DROP_STORAGE_KEY] === true;
+            updateMindMapDocumentDropMode();
+        }).catch(error => console.warn('[MindMap] 读取文档素材拖放模式失败:', error));
+}
+
 async function loadMindMapDocumentFile() {
     const state = mindMapDocumentState;
     const request = ++state.loadRequest;
@@ -229,12 +281,9 @@ function initializeMindMapDocumentPreview() {
     state.preview = root.querySelector('.document-material-preview');
     state.dragger = new RenderedMarkdownDragger(state.preview, {
         getMarkdown: getMindMapDocumentSelectionMarkdown,
-        onSelectionChange(count) {
-            root.querySelector('.document-material-status').textContent = count
-                ? `已选 ${count} 个内容块 · 拖入脑图生成一个节点`
-                : '单击选择 · Ctrl 多选 · 空白处拖动框选';
-        },
+        onSelectionChange: updateMindMapDocumentDropMode,
     });
+    void initializeMindMapDocumentDropMode();
     state.preview.addEventListener('scroll', () => {
         if (!state.preview.hidden && state.root.isConnected) state.scrollTop = state.preview.scrollTop;
     });

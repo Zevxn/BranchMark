@@ -1737,8 +1737,9 @@ class RenderedMarkdownDragger {
         const block = this.getTarget(event);
         const additive = event.ctrlKey || event.metaKey;
         this.ignoreNextClick = false;
-        if (block && !additive) {
-            if (!this.selectedElements.has(block)) this.setSelection([block]);
+        if (block) {
+            // Ctrl 点击仍由 click 处理多选，同时允许按住 Ctrl 启动原生拖拽。
+            if (!additive && !this.selectedElements.has(block)) this.setSelection([block]);
             return;
         }
         event.preventDefault();

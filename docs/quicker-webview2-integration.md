@@ -95,6 +95,10 @@ await $quickerSp('DeepConvoImportMarkDown', {})
 确保上述变量勾选为输出。网页会渲染 `content`，并使用可选的 `filename` 或 `path` 显示文件名和
 校验扩展名。取消后原素材保留，按钮可再次点击。JSON 导入继续使用 `DeepConvoImportMindMap`。
 
+文档素材的“拖后移除 / 拖后保留”设置默认为移除，通过 `chrome.storage.local` 保存布尔键
+`mindmap_document_retain_after_drop`。Quicker 中该键自动写入 `app_data_json.chrome`，无需新增动作变量。
+保留模式下，成功拖入的素材淡化并显示淡红背景，仍可再次拖入；移除模式下按住 Ctrl 拖放仅临时保留本次素材。
+
 ## 5. 配置 Markdown 链接打开子程序
 
 Quicker 模式会拦截思维导图 Markdown 中的外部链接，通过以下子程序交给 Windows 默认程序打开：

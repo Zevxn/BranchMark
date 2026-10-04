@@ -81,6 +81,13 @@ assert.equal(context.scrollDragger.isBoxSelecting, false, '滚动条操作不得
 mouseDown(80, 60);
 assert.equal(focusCount, 1, '内容区仍应可以聚焦和选择内容块');
 assert.equal(context.scrollDragger.selectedElements.has(context.earlier), true);
+context.scrollDragger.handleMouseDown({
+    button: 0, clientX: 80, clientY: 60, ctrlKey: true, target: { closest: () => null },
+    preventDefault: () => { preventedCount += 1; },
+});
+assert.equal(preventedCount, 0, '按住 Ctrl 在内容块上按下鼠标不得阻止原生拖拽');
+assert.equal(context.scrollDragger.isBoxSelecting, false, 'Ctrl 拖拽内容块不得启动框选');
+assert.equal(context.scrollDragger.selectedElements.has(context.earlier), true, 'Ctrl 拖拽不得清空已有选择');
 // !SECTION 文档滚动条事件隔离
 context.transfer = {
     values: {}, setData(type, value) { this.values[type] = value; },
@@ -123,6 +130,20 @@ assert.equal(context.draggedBlocks.length, 2, '应识别本次拖拽实际携带
 assert.equal(context.preview.children.length, 3, '拖拽开始不能删除预览内容');
 assert.equal(vm.runInContext("getMindMapDocumentDraggedBlocks({getData: () => '其他拖拽'}).length", context), 0,
     '外部或过期拖拽不能移除当前素材');
+// 保留只标记已用块，原文和拖拽能力均应保持，重复使用也不得移除。
+context.earlier.draggable = true;
+vm.runInContext("mindMapDocumentState.source = '完整原文'; completeMindMapDocumentDrop(draggedBlocks, true)", context);
+assert.equal(context.preview.children.length, 3);
+assert.equal(context.earlier.classList.contains('is-used'), true);
+assert.equal(context.later.classList.contains('is-used'), true);
+assert.equal(context.retained.classList.contains('is-used'), false);
+assert.equal(context.earlier.draggable, true);
+assert.equal(vm.runInContext('mindMapDocumentState.source', context), '完整原文');
+assert.equal(vm.runInContext('dragger.selectedElements.size', context), 0);
+vm.runInContext('completeMindMapDocumentDrop(draggedBlocks, true)', context);
+assert.equal(context.preview.children.length, 3, '重复拖入保留块也不能删除原文');
+assert.match(vm.runInContext('getMindMapDocumentSelectionMarkdown(draggedBlocks)', context), /第一块/,
+    '保留块仍应能生成拖拽的 Markdown');
 await vm.runInContext('dragger.drag = null; removeMindMapDocumentBlocks(draggedBlocks)', context);
 assert.deepEqual(context.preview.children, [context.retained], '成功后仅删除本次拖出的块');
 assert.equal(vm.runInContext('mindMapDocumentState.source', context), `剩余正文 [资料][ref]。\n\n${parsed.references}`,
@@ -161,6 +182,42 @@ await secondRemoval;
 assert.equal(context.preview.children.length, 0);
 assert.equal(emptyState.hidden, false);
 assert.equal(context.preview.classList.contains('is-removing-content'), false);
+
+// SECTION 文档拖放模式记忆
+function createDropModeContext(savedValue, delayRead = false) {
+    const writes = [];
+    const attributes = {};
+    const button = { addEventListener(type, listener) { this[type] = listener; }, setAttribute(name, value) { attributes[name] = value; } };
+    let resolveRead;
+    const modeContext = vm.createContext({
+        console, $: () => button,
+        chrome: { storage: { local: {
+            get: defaults => delayRead ? new Promise(resolve => { resolveRead = resolve; }) : Promise.resolve({ ...defaults, mindmap_document_retain_after_drop: savedValue }),
+            set: async value => { writes.push({ ...value }); },
+        } } },
+    });
+    vm.runInContext(documentSource, modeContext);
+    const ready = vm.runInContext('initializeMindMapDocumentDropMode()', modeContext);
+    return { modeContext, button, writes, attributes, ready, resolveRead: value => resolveRead(value) };
+}
+const defaultMode = createDropModeContext(undefined);
+await defaultMode.ready;
+assert.equal(defaultMode.button.textContent, '拖后移除', '无设置时应默认移除');
+defaultMode.button.click();
+assert.equal(defaultMode.button.textContent, '拖后保留');
+assert.equal(defaultMode.attributes['aria-pressed'], 'true');
+assert.deepEqual(defaultMode.writes, [{ mindmap_document_retain_after_drop: true }]);
+const restoredMode = createDropModeContext(true);
+await restoredMode.ready;
+assert.equal(restoredMode.button.textContent, '拖后保留', '应恢复保存的保留模式');
+restoredMode.button.click();
+assert.deepEqual(restoredMode.writes, [{ mindmap_document_retain_after_drop: false }]);
+const delayedMode = createDropModeContext(false, true);
+delayedMode.button.click();
+delayedMode.resolveRead({ mindmap_document_retain_after_drop: false });
+await delayedMode.ready;
+assert.equal(delayedMode.button.textContent, '拖后保留', '迟到的设置读取不得覆盖用户已切换的模式');
+// !SECTION 文档拖放模式记忆
 
 // Quicker 使用 Markdown 文件导入子程序；普通浏览器仍同步打开网页文件选择器。
 const loaded = [];
@@ -212,4 +269,4 @@ resolveOld({ content: '# 旧文档' });
 await oldLoad;
 assert.equal(loaded.length, 3);
 assert.equal(loaded.at(-1).content, '# 新文档', '重试成功后，旧请求的迟到结果不能覆盖新文档');
-console.log('文档素材校验通过：源码保真、摘取动画、Quicker 文件加载及浏览器回退完整。');
+console.log('文档素材校验通过：源码保真、移除与保留、Ctrl 拖拽、模式记忆、摘取动画和文件加载完整。');
