@@ -294,8 +294,63 @@ async function pasteNodesToSelection() {
 function initializeImageUpload() {
     const textarea = document.getElementById('editorTextarea');
     const settingsBtn = document.getElementById('btn-img-settings');
+    const settingsModal = document.getElementById('imageUploadSettingsModal');
+    const apiKeyInput = document.getElementById('imageUploadApiKey');
+    const settingsError = document.getElementById('imageUploadSettingsError');
+    const saveSettingsBtn = document.getElementById('saveImageUploadSettings');
     // 定义存储的 Key
     const STORAGE_KEY = 'MindMap_ImgBB_Key';
+
+    const closeSettings = () => {
+        hideMindMapTabModal(settingsModal);
+        apiKeyInput.value = '';
+    };
+    document.getElementById('cancelImageUploadSettings').onclick = closeSettings;
+    saveSettingsBtn.onclick = async () => {
+        if (saveSettingsBtn.disabled || !settingsModal.classList.contains('show')) return;
+        saveSettingsBtn.disabled = true;
+        settingsError.textContent = '';
+        try {
+            await chrome.storage.local.set({ [STORAGE_KEY]: apiKeyInput.value.trim() });
+            closeSettings();
+            showTopToast('✅ API Key 已保存');
+        } catch (err) {
+            console.log('保存 API Key 失败', err);
+            settingsError.textContent = '保存失败，请重试。';
+        } finally {
+            saveSettingsBtn.disabled = false;
+        }
+    };
+    settingsModal.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if (event.isComposing || event.keyCode === 229) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeSettings();
+        } else if (event.key === 'Enter' && event.target === apiKeyInput) {
+            event.preventDefault();
+            saveSettingsBtn.click();
+        } else if (event.key === 'Tab') {
+            const controls = Array.from(settingsModal.querySelectorAll('input, a, button')).filter(control => !control.disabled);
+            const first = controls[0];
+            const last = controls[controls.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        }
+    });
+    settingsModal.addEventListener('mousedown', event => {
+        settingsModal.dataset.backdropPressed = event.target === settingsModal ? 'true' : 'false';
+    });
+    settingsModal.addEventListener('click', event => {
+        const shouldClose = event.target === settingsModal && settingsModal.dataset.backdropPressed === 'true';
+        delete settingsModal.dataset.backdropPressed;
+        if (shouldClose) closeSettings();
+    });
 
     // 1. 设置按钮点击事件
     if (settingsBtn) {
@@ -312,13 +367,13 @@ function initializeImageUpload() {
                 console.log('读取 API Key 失败', err);
             }
 
-            const newKey = prompt('请输入 ImgBB API Key:\n(申请地址: https://api.imgbb.com/)', currentKey);
-            
-            if (newKey !== null) {
-                // [修改] 写入 chrome.storage.local
-                await chrome.storage.local.set({ [STORAGE_KEY]: newKey.trim() });
-                showTopToast('✅ API Key 已保存');
-            }
+            apiKeyInput.value = currentKey;
+            settingsError.textContent = '';
+            showMindMapTabModal(settingsModal);
+            requestAnimationFrame(() => {
+                apiKeyInput.focus();
+                apiKeyInput.select();
+            });
         };
     }
 

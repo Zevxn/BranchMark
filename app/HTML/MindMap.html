@@ -958,6 +958,22 @@
             font-size: 13px;
             line-height: 20px;
         }
+        #imageUploadSettingsModal .modal-content {
+            width: min(380px, calc(100vw - 32px));
+            padding: 20px;
+        }
+        #imageUploadSettingsModal .modal-header,
+        #imageUploadSettingsModal .bookmark-modal-body {
+            margin-bottom: 16px;
+        }
+        #imageUploadSettingsModal .form-group { margin-bottom: 8px; }
+        #imageUploadSettingsError:empty { display: none; }
+        #imageUploadSettingsHelp {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 20px;
+        }
         .tree-connector-layer,
         .relation-layer {
             position: absolute;
@@ -3248,6 +3264,26 @@
             </div>
         </div>
     </div>
+    <div class="mymodal" id="imageUploadSettingsModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="imageUploadSettingsTitle" aria-describedby="imageUploadSettingsHelp">
+        <div class="modal-content mindmap-tab-modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="imageUploadSettingsTitle">配置图床（ImgBB）</h3>
+            </div>
+            <div class="bookmark-modal-body">
+                <div class="form-group">
+                    <label for="imageUploadApiKey">ImgBB API Key</label>
+                    <input type="text" id="imageUploadApiKey" autocomplete="off" spellcheck="false" placeholder="请输入 API Key">
+                    <div class="mindmap-tab-modal-error" id="imageUploadSettingsError" role="alert"></div>
+                </div>
+                <p id="imageUploadSettingsHelp">申请地址：<a href="https://api.imgbb.com/" target="_blank" rel="noopener noreferrer">ImgBB API</a></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelImageUploadSettings" type="button">取消</button>
+                <button class="btn btn-primary" id="saveImageUploadSettings" type="button">保存</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-mask" id="editorModal">
         <div class="modal-win" id="modalWin">
             <div class="modal-head">

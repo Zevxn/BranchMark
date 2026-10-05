@@ -561,7 +561,7 @@ function initializeMapContextMenu() {
                     if (node.contentCollapsed) { node.contentCollapsed = false; hasChange = true; updateNodeDOM(node.id); }
                     break;
                 case 'collapse': 
-                    if (!node.contentCollapsed && node.content) { node.contentCollapsed = true; hasChange = true; updateNodeDOM(node.id); }
+                    if (!node.contentCollapsed && node.content && node.topic?.trim()) { node.contentCollapsed = true; hasChange = true; updateNodeDOM(node.id); }
                     break;
                 case 'to-standard': 
                     if (node.isSimple) { node.isSimple = false; if (node.heightMode === 'manual' && node.bodyHeight < 60) node.heightMode = 'auto'; hasChange = true; updateNodeDOM(node.id); }

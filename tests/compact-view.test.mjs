@@ -49,4 +49,43 @@ assert.doesNotMatch(clickHandler, /recordHistory|saveStorage|saveMindMapData|sto
 assert.match(mindMapSource, /node\.contentCollapsed \|\| isCompactCollapsed/,
     '临时折叠应只参与渲染计算，不覆盖节点原始折叠状态');
 
-console.log('精简视图校验通过：仅临时折叠有标题的标准卡片，不修改持久状态。');
+// SECTION 多选正文折叠
+const batchStart = mindMapSource.indexOf('// 批量操作');
+const batchEnd = mindMapSource.indexOf("contextMenu.classList.remove('active');", batchStart);
+assert.ok(batchStart >= 0 && batchEnd > batchStart, '应能定位右键菜单的批量操作');
+const nodes = [
+    { id: 'titled', topic: '有标题', content: '正文' },
+    { id: 'untitled', topic: '', content: '无标题正文' },
+    { id: 'whitespace', topic: ' \t\n ', content: '空白标题正文' },
+    { id: 'missing', content: '缺少标题正文' },
+    { id: 'empty-body', topic: '只有标题', content: '' },
+];
+const updatedIds = [];
+const batchContext = vm.createContext({
+    state: { selectedIds: new Set(nodes.map(node => node.id)) },
+    findNode: (_, id) => nodes.find(node => node.id === id),
+    updateNodeDOM: id => updatedIds.push(id),
+    action: 'collapse',
+});
+const executeBatch = () => vm.runInContext(`{
+    let hasChange = false;
+    ${mindMapSource.slice(batchStart, batchEnd)}
+    globalThis.changed = hasChange;
+}`, batchContext);
+executeBatch();
+assert.deepEqual(updatedIds, ['titled'], '混合多选时只能折叠有标题和正文的卡片');
+assert.equal(nodes[0].contentCollapsed, true);
+for (const node of nodes.slice(1)) assert.equal(node.contentCollapsed, undefined, '不可折叠卡片的原始状态不得被修改');
+updatedIds.length = 0;
+batchContext.state.selectedIds = new Set(['untitled', 'whitespace', 'missing']);
+executeBatch();
+assert.equal(batchContext.changed, false, '仅选择无标题卡片时折叠应为无操作');
+assert.deepEqual(updatedIds, []);
+nodes[1].contentCollapsed = true;
+batchContext.action = 'expand';
+executeBatch();
+assert.equal(nodes[1].contentCollapsed, false, '展开操作仍应允许恢复已误折叠的无标题卡片');
+assert.deepEqual(updatedIds, ['untitled']);
+// !SECTION 多选正文折叠
+
+console.log('精简视图与多选折叠校验通过：无标题卡片保持展开，支持恢复误折叠状态。');
