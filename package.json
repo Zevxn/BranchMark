@@ -1,6 +1,6 @@
 {
   "name": "deepconvo-mindmap-standalone",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "description": "BranchMark：本地思维导图与 Markdown 知识整理工具",

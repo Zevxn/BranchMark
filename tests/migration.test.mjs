@@ -127,13 +127,13 @@ assert.match(bookmarks, /!newTab \|\| window\.__DEEPCONVO_NATIVE_QUICKER_HOST__/
 assert.match(shim, /if \(nativeQuickerBridge\) location\.href = target/);
 
 const bookmarkReset = bookmarksCss.match(
-    /\.custom-directory-container,\s*\.custom-directory-container \*,\s*\.bookmark-manager-container,\s*\.bookmark-manager-container \*\s*\{([^}]*)\}/,
+    /\.bookmark-manager-container,\s*\.bookmark-manager-container \*\s*\{([^}]*)\}/,
 );
 assert.ok(bookmarkReset, '应保留收藏夹元素的布局重置规则');
 assert.doesNotMatch(bookmarkReset[1], /font-family/, '通配重置不能覆盖 Font Awesome 图标字体');
 assert.match(
     bookmarksCss,
-    /\.custom-directory-container,\s*\.bookmark-manager-container\s*\{[^}]*font-family:/,
+    /\.bookmark-manager-container\s*\{[^}]*font-family:/,
     '界面字体应只在收藏夹容器上继承',
 );
 

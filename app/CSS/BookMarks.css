@@ -3,7 +3,6 @@
    ========================================================================== */
 :root {
     /* --- 核心色彩 --- */
-    --bg-body: #f2f2f7;
     --bg-panel: rgba(255, 255, 255, 0.92);
     --bg-popup: rgba(255, 255, 255, 0.95);
     --bg-input: rgba(255, 255, 255, 0.7);
@@ -11,30 +10,30 @@
     
     /* 列表项背景色 */
     --bg-item-hover: rgba(208, 208, 208, 0.221);
-    --bg-item-selected: rgba(250, 173, 20, 0.15);
+    --bg-item-selected: rgba(20, 139, 250, 0.15);
     
     --text-primary: #2d3748;
     --text-secondary: #64748b;
     --text-white: #ffffff;
     
     --border-color: rgba(226, 232, 240, 0.6);
-    --border-focus: rgb(235, 159, 7);
-    --accent-orange: rgb(255, 152, 0);
-    --accent-orange-hover: rgb(255, 132, 0);
+    --border-focus: rgb(0, 123, 255);
+    --accent-orange: rgb(0, 123, 255);
+    --accent-orange-hover: rgb(0, 105, 217);
     --accent-red: #ef4444;
     
     /* 魔法按钮色彩 */
     --btn-blue-base: rgba(41, 162, 255, 0.8);
     --btn-blue-hover: rgba(64, 163, 255, 1);
-    --btn-red-base: rgba(255, 104, 109, 0.80);
-    --btn-red-hover: rgba(255, 100, 95, 1);
-    --btn-star: #ffd32a;
+    --btn-star: #f5ad11;
     --slider-track: rgba(0, 0, 0, 0.15);
-    --slider-fill: #ffd32a;
+    --slider-fill: #eaf5ff;
 
     /* 视觉特效 */
     --shadow-float: 0 4px 12px rgba(0, 0, 0, 0.15);
     --shadow-md: 0 10px 30px rgba(31, 38, 135, 0.15);
+    --modal-shadow: 0 16px 48px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08);
+    --modal-primary-text: #ffffff;
     --backdrop: blur(12px);
     --bookmark-thumb: #e5e5e5;
     --bookmark-thumb-hover: #d4d4d4;
@@ -59,25 +58,24 @@
         --bg-input-focus: #333;
         
         --bg-item-hover: rgba(130, 129, 129, 0.25);
-        --bg-item-selected: rgba(250, 173, 20, 0.15);
+        --bg-item-selected: rgba(20, 139, 250, 0.15);
 
         --text-primary: #e4e4e4;
         --text-secondary: #e4e8ed;
         --border-color: #444;
         --shadow-md: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        --modal-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+        --modal-primary-text: #102536;
         --tree-line: #64748b;
         --bookmark-thumb: #3c3c3d;
         --bookmark-thumb-hover: #545557;
 }
 
 /* 容器 Reset */
-.custom-directory-container,
 .bookmark-manager-container {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-.custom-directory-container,
-.custom-directory-container *,
 .bookmark-manager-container,
 .bookmark-manager-container * {
     margin: 0; padding: 0; box-sizing: border-box !important; user-select: none;
@@ -91,7 +89,6 @@
 
 }
 .context-menuBM i,
-.custom-directory-container i,
 .bookmark-manager-container i{
     font-style: normal !important;
 }
@@ -114,13 +111,10 @@
 
 .magic-btn:hover { animation: slowBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
 
-#favBtn { background: var(--btn-red-base); top: 50%; margin-top: 0px; }
-#favBtn:hover { background: var(--btn-red-hover); }
+#favBtn { background: var(--btn-blue-base); top: 50%; margin-top: 0px; }
+#favBtn:hover { background: var(--btn-blue-hover); }
 
-#dirBtn { background: var(--btn-blue-base); bottom: 50%; margin-bottom: 0px; }
-#dirBtn:hover { background: var(--btn-blue-hover); }
-
-#favBtn.hide-btn, #dirBtn.hide-btn { right: -45px; opacity: 0.3; box-shadow: none;}
+#favBtn.hide-btn { right: -45px; opacity: 0.3; box-shadow: none;}
 
 /* 按钮内部图层 */
 .btn-content { position: relative; width: 100%; height: 100%; }
@@ -132,27 +126,14 @@
 }
 
 /* 确保内容居中 */
-.layer-total, .layer-icon { margin: auto; opacity: 1; transform: scale(1); }
-.layer-current, .layer-rate { opacity: 0; transform: translateY(8px) scale(0.9); gap: 3px; }
-
-body:not(.mindmap) .magic-btn:hover .layer-total, body:not(.mindmap) .magic-btn:hover .layer-icon { opacity: 0; transform: scale(0.5); }
-body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-btn:hover .layer-rate { opacity: 1; transform: translateY(0) scale(1); }
+.layer-icon { margin: auto; opacity: 1; transform: scale(1); }
+.layer-rate { opacity: 0; transform: translateY(8px) scale(0.9); gap: 3px; }
 
 .star-svg { width: 26px; height: 26px; fill: var(--btn-star); filter: drop-shadow(0 2px 1px rgba(0,0,0,0.15)); }
-.layer-total { 
-    width: 30px; height: 30px; 
-    background: rgba(255,255,255,0.3); border-radius: 50%; 
-    display: flex; align-items: center; justify-content: center; 
-}
-.layer-total.has-fav{
-    border: 2px solid #FFC866;
-    box-shadow: 0 0 6px rgba(212, 175, 55, 0.5); /* 可选微光效果 */
-}
-.dir-num, .rate-num { 
+.rate-num {
     font-size: 16px; font-weight: 700; color: var(--text-white); 
     line-height: 1; text-shadow: 0 1px 2px rgba(0,0,0,0.1); display: block;
 }
-#dirBtn .dir-num { margin-top: -1px; }
 
 .slider-track { width: 25px; height: 5px; background: var(--slider-track); border-radius: 3px; position: relative; overflow: hidden; }
 .slider-fill { position: absolute; top: 0; bottom: 0; background: var(--slider-fill); border-radius: 3px; }
@@ -179,10 +160,9 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
     transition: all 0.4s ease;
     z-index: var(--z-panel);
     overflow: hidden;
-    /*will-change: transform; /* 优化性能,但是好像会影响文字渲染清晰度 */
 }
 .bookmark-panel.open { right: 0;transform: translate(0, -50%);  box-shadow: 0 0 40px rgba(31, 38, 135, 0.12);}
-.bookmark-panel.fixed { box-shadow: 0 10px 30px rgba(250, 112, 154, 0.4), 0 5px 15px rgba(254, 225, 64, 0.3); }
+.bookmark-panel.fixed { box-shadow: 0 10px 30px rgba(0, 123, 255, 0.24), 0 5px 15px rgba(83, 180, 255, 0.16); }
 .bookmark-panel.wider { width: 560px; }
 .bookmark-panel.full { width: 100vw !important; height: 100vh !important; max-height: 100vh !important; }
 
@@ -190,7 +170,7 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 .panel-header {
     display: flex; justify-content: space-between; align-items: center;
     padding: 12px;
-    background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    background: linear-gradient(135deg, #53B4FF 0%, #0078D4 100%);
     border-bottom: 1px solid var(--border-color);
     position: relative; z-index: 100; flex-shrink: 0; overflow: visible;
 }
@@ -277,7 +257,6 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
     display: flex; align-items: center; padding: 7px 9px;
     border-radius: 8px; border: 2px dashed transparent;
     cursor: pointer; position: relative; width: 100%; overflow: hidden;
-    /* transition: background 0.2s; */
 }
 .item-content[data-type="folder"] { padding: 3px; }
 
@@ -285,8 +264,6 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 .tree-item:not(.selected) .item-content:hover { background: var(--bg-item-hover); }
 .tree-item.selected .item-content:hover { background: transparent; }
 .tree-item.selected { background: var(--bg-item-selected); border-radius: 8px; }
-
-/* .tree-item.selected > .item-content { background: transparent !important; } */
 
 .item-icon {
     width: 20px; height: 20px; margin-right: 5px;
@@ -323,28 +300,28 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 .tree-item.selected .item-content:hover .item-actions {
     opacity: 1;
     background: linear-gradient(
-        to right, transparent 0%, rgba(228,233,253, 0) 40px, rgba(254,243,220) 80px
+        to right, transparent 0%, rgba(20,139,250, 0) 40px, rgba(220,238,254, 1) 80px
     );
 }
 /* 两级同时选中 */
 .tree-item.selected > .children >.tree-item.selected .item-content:hover .item-actions {
     opacity: 1;
     background: linear-gradient(
-        to right, transparent 0%, rgba(228,233,253, 0) 40px, rgba(253,233,190) 80px
+        to right, transparent 0%, rgba(20,139,250, 0) 40px, rgba(190,223,254, 1) 80px
     );
 }
 /* 三级同时选中 */
 .tree-item.selected > .children >.tree-item.selected > .children >.tree-item.selected .item-content:hover .item-actions {
     opacity: 1;
     background: linear-gradient(
-        to right, transparent 0%, rgba(228,233,253, 0) 40px, rgba(252,224,165) 80px
+        to right, transparent 0%, rgba(20,139,250, 0) 40px, rgba(165,210,253, 1) 80px
     );
 }
 /* 四级同时选中 */
 .tree-item.selected > .children >.tree-item.selected > .children >.tree-item.selected > .children >.tree-item.selected .item-content:hover .item-actions {
     opacity: 1;
     background: linear-gradient(
-        to right, transparent 0%, rgba(228,233,253, 0) 40px, rgba(251,217,143) 80px
+        to right, transparent 0%, rgba(20,139,250, 0) 40px, rgba(143,200,253, 1) 80px
     );
 }
 
@@ -356,25 +333,25 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
         }
         .tree-item.selected .item-content:hover .item-actions {
             background: linear-gradient(
-                to right, transparent 0%, rgba(37, 42, 63, 0) 40px, rgba(63, 52, 29, 1) 80px
+                to right, transparent 0%, rgba(20, 139, 250, 0) 40px, rgba(29, 46, 63, 1) 80px
             );
         }
         .tree-item.selected > .children >.tree-item.selected .item-content:hover .item-actions {
             opacity: 1;
             background: linear-gradient(
-                to right, transparent 0%, rgba(228,233,253, 0) 40px, rgba(91, 70, 28) 80px
+                to right, transparent 0%, rgba(20, 139, 250, 0) 40px, rgba(27, 60, 91, 1) 80px
             );
         }
         .tree-item.selected > .children >.tree-item.selected > .children >.tree-item.selected .item-content:hover .item-actions {
             opacity: 1;
             background: linear-gradient(
-                to right, transparent 0%, rgba(228,233,253, 0) 40px, rgba(114, 86, 27) 80px
+                to right, transparent 0%, rgba(20, 139, 250, 0) 40px, rgba(26, 72, 115, 1) 80px
             );
         }
         .tree-item.selected > .children >.tree-item.selected > .children >.tree-item.selected > .children >.tree-item.selected .item-content:hover .item-actions {
             opacity: 1;
             background: linear-gradient(
-                to right, transparent 0%, rgba(228,233,253, 0) 40px, rgba(134, 99, 26) 80px
+                to right, transparent 0%, rgba(20, 139, 250, 0) 40px, rgba(25, 82, 135, 1) 80px
             );
         }
 }
@@ -390,18 +367,18 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 /* 拖拽样式 */
 .tree-item.drag-over-top > .item-content::before {
     content: ''; position: absolute; left: 0; right: 0; top: -2px; height: 6px;
-    background: rgba(250, 173, 20, 0.87); border-radius: 2px; z-index: 5;
+    background: rgba(0, 123, 255, 0.87); border-radius: 2px; z-index: 5;
 }
 .tree-item.drag-over-bottom > .item-content::after {
     content: ''; position: absolute; left: 0; right: 0; bottom: -2px; height: 6px;
-    background: rgba(250, 173, 20, 0.87); border-radius: 2px; z-index: 5;
+    background: rgba(0, 123, 255, 0.87); border-radius: 2px; z-index: 5;
 }
 .breadcrumb-item.drag-over-middle,
-.tree-item.drag-over-middle > .item-content { background: rgb(250, 173, 20,0.15) !important; border: 2px dashed var(--accent-orange); }
+.tree-item.drag-over-middle > .item-content { background: var(--bg-item-selected) !important; border: 2px dashed var(--accent-orange); }
 
 .drag-hint {
     position: fixed; pointer-events: none;
-    background: rgba(250, 173, 20, 0.9); color: white;
+    background: rgba(0, 123, 255, 0.9); color: white;
     padding: 8px 16px; border-radius: 8px; font-size: 14px;
     z-index: var(--z-drag-hint); opacity: 0; transition: opacity 0.2s ease;
     backdrop-filter: blur(4px); box-shadow: var(--shadow-float);
@@ -410,14 +387,14 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 
 .selection-box {
     position: absolute !important; border: 2px dashed var(--accent-orange);
-    background: rgba(250, 173, 20, 0.2); border-radius: 4px; pointer-events: none;
+    background: rgba(0, 123, 255, 0.2); border-radius: 4px; pointer-events: none;
     z-index: var(--z-selection); display: none;
 }
 
 /* ==========================================================================
    5. 通用弹窗 (Menu / Popup)
    ========================================================================== */
-.context-menuBM, .dropdown-menu, .filter-dropdown {
+.context-menuBM, .dropdown-menu {
     position: absolute;  box-sizing: border-box;
     background: var(--bg-popup); backdrop-filter: blur(10px);
     border: 1px solid var(--border-color); border-radius: 8px;
@@ -425,27 +402,23 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
     z-index: var(--z-popup); 
     padding: 5px; display: none; flex-direction: column;
 }
-.dropdown-menu.show, .filter-dropdown.show { display: flex; }
+.dropdown-menu.show { display: flex; }
 
 .context-menuBM { position: fixed; min-width: 110px; overflow: visible; }
 .context-menuBM .move-dropdown-menu { top: 100%; left: 0; width: 200px; max-height: 160px; margin-top: 0; z-index: 1000; }
-.filter-dropdown { top: 100%; left: 0; min-width: 110px; margin-top: 4px; }
 .dropdown-menu { top: 100%; left: 0; right: 0; max-height: 250px; overflow-y: auto; margin-top: 4px; }
 
-.context-menu-item, .dropdown-item, .filter-btn-item {
+.context-menu-item, .dropdown-item {
     display: flex; align-items: center; padding: 8px 10px; cursor: pointer;
     color: var(--text-primary); border-radius: 4px;max-height: 32px;box-sizing: border-box;
     transition: all 0.2s ease; text-decoration: none; border: none; background: transparent; text-align: left;
 }
-.dropdown-item.selected{background: rgba(235, 159, 7, 0.15);color:'#FAAD14';font-weight: 500;}
 .dropdown-item{font-size: 15px;}
-.context-menu-item, .filter-btn-item, .move-dropdown-menu .dropdown-item{font-size: 13px;}
+.context-menu-item, .move-dropdown-menu .dropdown-item{font-size: 13px;}
 .context-menu-item { gap: 12px; }
-.context-menu-item:hover, 
-.dropdown-item:hover, 
-.filter-btn-item:hover { background: var(--bg-item-hover); color: var(--accent-orange); }
-#contextMenuAC .context-menu-item:hover { color: rgb(33, 141, 225); }
-.filter-btn-item.active, .dropdown-item.selected { background: rgba(235, 159, 7, 0.15); color: var(--accent-orange); font-weight: 500; }
+.context-menu-item:hover,
+.dropdown-item:hover { background: var(--bg-item-hover); color: var(--accent-orange); }
+.dropdown-item.selected { background: var(--bg-item-selected); color: var(--accent-orange); font-weight: 500; }
 .context-menu-item.danger:hover { background: rgba(239, 68, 68, 0.05); color: var(--accent-red); }
 
 /* 树形连线 */
@@ -464,41 +437,41 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 /* ==========================================================================
    6. 模态框 (Modals)
    ========================================================================== */
+/* SECTION 模态框 */
 .mymodal {
-    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.3); backdrop-filter: blur(3px);
+    position: fixed; inset: 0; background: var(--modal-mask, rgba(0, 0, 0, 0.32)); backdrop-filter: blur(3px);
     display: none; align-items: center; justify-content: center;
     z-index: var(--z-modal);
 }
-.mymodal.show { display: flex; animation: modalFadeIn 0.3s ease; }
-@keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+.mymodal.show { display: flex; animation: modalFadeIn 0.18s ease; }
+@keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 .modal-content {
-    background: var(--bg-popup); border-radius: 10px; padding: 30px;
-    min-width: 420px; max-width: 90vw; border: 1px solid var(--border-color);
-    box-shadow: var(--shadow-md);
+    background: var(--modal-bg, var(--bg-popup)); border-radius: 10px; padding: 24px;
+    width: 420px; min-width: 0; max-width: calc(100vw - 32px); border: 1px solid var(--toolbar-border, var(--border-color));
+    box-shadow: var(--modal-shadow);
 }
-.modal-header { margin-bottom: 24px; }
-.modal-title { font-size: 20px; font-weight: 600; color: var(--text-primary); }
-.bookmark-modal-body { margin-bottom: 24px; }
+.modal-header { margin-bottom: 20px; }
+.modal-title { margin: 0; font-size: 18px; font-weight: 600; line-height: 26px; color: var(--text-color, var(--text-primary)); }
+.bookmark-modal-body { margin-bottom: 24px; font-size: 14px; line-height: 1.6; color: var(--text-color-secondary, var(--text-secondary)); }
+.bookmark-modal-body p { margin: 0; }
 
-.mymodal .form-group { margin-bottom: 20px; }
-.mymodal .form-group label { display: block; margin-bottom: 8px; font-size: 14px; color: var(--text-primary); font-weight: 500; }
-.mymodal .form-group input, .form-group select, .dropdown-display {
-    width: 100%; padding: 12px 16px; border: 1px solid var(--border-color);
-    border-radius: 10px; font-size: 15px; background: var(--bg-input); color: var(--text-primary);
-    transition: all 0.2s ease;
-}
-.mymodal .form-group input {
+.mymodal .form-group { margin-bottom: 16px; }
+.mymodal .form-group:last-child { margin-bottom: 0; }
+.mymodal .form-group label { display: block; margin-bottom: 8px; font-size: 14px; line-height: 20px; color: var(--text-color, var(--text-primary)); font-weight: 500; }
+.mymodal .form-group input, .mymodal .form-group select, .mymodal .dropdown-display {
+    width: 100%; min-height: 38px; padding: 8px 12px; border: 1px solid var(--toolbar-border, var(--border-color));
+    border-radius: 6px; font-family: inherit; font-size: 14px; line-height: 20px; background: var(--bg-input); color: var(--text-color, var(--text-primary));
     transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 .mymodal .form-group input:focus {
-    outline: none; border: 2px solid #d49a46; box-shadow: none;
+    outline: none; border: 2px solid var(--primary, var(--border-focus)); box-shadow: none;
     background: var(--bg-input-focus);
     /* 加粗边框时收回 1px 内边距，保持输入框尺寸和文字位置稳定。 */
-    padding: 11px 15px;
+    padding: 7px 11px;
 }
-.dropdown-display.open {
-    outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.15);
+.mymodal .dropdown-display.open {
+    outline: none; border-color: var(--primary, var(--border-focus)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, var(--border-focus)) 15%, transparent);
 }
 .custom-dropdown { position: relative; width: 100%; }
 .dropdown-display { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
@@ -506,18 +479,26 @@ body:not(.mindmap) .magic-btn:hover .layer-current, body:not(.mindmap) .magic-bt
 .dropdown-arrow { transition: transform 0.2s ease; fill: var(--text-secondary); }
 .dropdown-display.open .dropdown-arrow { transform: rotate(180deg); }
 
-.modal-footer { display: flex; justify-content: flex-end; gap: 12px; }
-.mymodal .btn,
+.modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
+.mymodal .btn { min-width: 64px; min-height: 36px; padding: 7px 14px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 500; line-height: 20px; transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
 button[data-action="create-first-folder"] { padding: 6px 16px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s ease; }
 
-button[data-action="create-first-folder"],
-.mymodal .btn-primary { background: var(--accent-orange); color: white;}
-button[data-action="create-first-folder"]:hover,
-.mymodal .btn-primary:hover { background: var(--accent-orange-hover); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(74, 108, 247, 0.25); }
-.mymodal .btn-secondary { background: rgba(226, 232, 240, 0.5); color: var(--text-secondary); }
-.mymodal .btn-secondary:hover { background: rgba(203, 213, 225, 0.5); transform: translateY(-2px); }
+button[data-action="create-first-folder"] { background: var(--accent-orange); color: white; }
+button[data-action="create-first-folder"]:hover { background: var(--accent-orange-hover); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(74, 108, 247, 0.25); }
+.mymodal .btn-primary { background: var(--primary, var(--accent-orange)); color: var(--modal-primary-text); }
+.mymodal .btn-primary:hover { background: color-mix(in srgb, var(--primary, var(--accent-orange)) 88%, black); }
+.mymodal .btn-secondary { background: transparent; border-color: var(--toolbar-border, var(--border-color)); color: var(--text-color-secondary, var(--text-secondary)); }
+.mymodal .btn-secondary:hover { background: var(--btn-hover, var(--bg-item-hover)); color: var(--text-color, var(--text-primary)); }
 .mymodal .btn-danger { background: rgb(239, 68, 68); color: white; }
-.mymodal .btn-danger:hover { background: rgb(220, 38, 38); transform: translateY(-2px); }
+.mymodal .btn-danger:hover { background: rgb(220, 38, 38); }
+.mymodal .btn:focus-visible,
+.modal-head .btn:focus-visible { outline: 2px solid var(--primary, var(--border-focus)); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+    .mymodal.show,
+    #editorModal.active { animation: none; }
+}
+/* !SECTION 模态框 */
 
 /* ==========================================================================
    7. 空状态与杂项
@@ -578,7 +559,7 @@ button[data-action="create-first-folder"]:hover,
 }
 .grid-item.selected {
     background-color: var(--bg-item-selected);
-    border-color: rgba(250, 173, 20, 0.3);
+    border-color: rgba(0, 123, 255, 0.3);
 }
 
 /* 网格项图标 - 变大 */
@@ -608,12 +589,6 @@ button[data-action="create-first-folder"]:hover,
     word-break: break-all;
 }
 
-/* 网格模式下的操作按钮 - 暂时隐藏 (鼠标悬停太小不好点，后续可优化) */
-.grid-item .item-actions {
-    display: none; 
-}
-
-
 /* 修改原有的 .grid-item .item-content 样式 */
 .grid-item .item-content {
     width: 100%;   /* 关键：撑满宽度 */
@@ -622,66 +597,6 @@ button[data-action="create-first-folder"]:hover,
     /* 将原本父级的 padding 移到这里 */
     padding: 10px 6px !important; 
 }
-
-/* === 嵌入模式适配 === */
-.bookmark-manager-container.embedded-view {
-    position: relative !important; /* 覆盖 fixed */
-    top: auto !important; right: auto !important; left: auto !important; bottom: auto !important;
-    transform: none !important;
-    max-height: 50vh;
-    box-shadow: none !important;
-    border: 1px solid var(--border-color);
-    background: transparent;
-    border-radius: 8px;
-    margin-top: 10px;
-    z-index: 10 !important;
-    display: flex;
-    flex-direction: column;
-    width:100%;
-}
-
-/* 1. 彻底隐藏右侧按钮区 */
-.embedded-view .item-actions {
-    display: none !important;
-}
-.embedded-view .item-icon {
-    margin-right: 5px;
-}
-.embedded-view .item-text {
-    font-size: 14px;
-}
-
-/* 2. 调整面包屑样式 */
-.embedded-view .breadcrumb {
-    position: relative; /* 确保不是 fixed */
-    top: auto; right: auto; left: auto;
-    border-radius: 8px 8px 0 0;
-    background: rgba(255,255,255,0.35);
-    flex-shrink: 0;
-}
-
-/* 3. 内容区滚动 */
-.embedded-view .embedded-tree-content {
-    flex: 1;
-    overflow-y: auto;
-    min-height: 50px; /* 给个最小高度 */
-}
-
-/* 嵌入面板的空状态微调 */
-.embedded-view .empty-result-state {
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 10px !important;
-    height: 100%;
-}
-.embedded-view .empty-result-state i {
-    color: var(--border-color); /* 浅灰色图标 */
-}
-
-
 
 /* ==========================================================================
    9. 树形连接线 (Tree Guide Lines) - Border 重构版 (终极视觉统一)
@@ -746,13 +661,3 @@ button[data-action="create-first-folder"]:hover,
     /* 这样竖线正好在横线的下边缘截止，形成完美直角 */
     height: 21px; 
 }
-
-/* --- 交互优化 --- */
-/* .children .tree-item:hover::before {
-    border-top-color: var(--accent-orange);
-    transition: border-color 0.2s ease;
-}
-.children .tree-item:hover::after {
-    border-left-color: var(--accent-orange);
-    transition: border-color 0.2s ease;
-} */
