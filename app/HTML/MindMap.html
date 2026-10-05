@@ -436,6 +436,10 @@
         .toolbar .btn { min-width: 32px; min-height: 32px; padding: 6px 8px; }
         .toolbar .btn > i { font-size: 16px; }
         .toolbar .btn:active:not(:disabled):not(.primary) { background: color-mix(in srgb, var(--primary) 12%, var(--toolbar-bg)); }
+        .toolbar .btn:is([aria-expanded="true"], [aria-pressed="true"]):not(:disabled):not(.primary) {
+            color: var(--primary);
+            background: color-mix(in srgb, var(--primary) 12%, transparent);
+        }
         .toolbar .divider { background: var(--toolbar-border); margin: 0 6px; opacity: 1; flex-shrink: 0; }
         .map-search-panel {
             position: fixed;
@@ -2800,10 +2804,10 @@
         <button class="btn" id="btn-color" disabled title="设置卡片颜色">
             <i class="ri-palette-line"></i>
         </button>
-        <button class="btn" id="btn-rainbow" title="切换彩虹分支模式">
+        <button class="btn" id="btn-rainbow" title="切换彩虹分支模式" aria-pressed="false">
             <i class="ri-rainbow-line"></i>
         </button>
-        <button class="btn" id="btn-search" type="button" title="搜索定位 (Ctrl+F)" aria-label="搜索定位">
+        <button class="btn" id="btn-search" type="button" title="搜索定位 (Ctrl+F)" aria-label="搜索定位" aria-controls="mapSearchPanel" aria-expanded="false">
             <i class="ri-search-line"></i>
         </button>
         <button class="btn" id="btn-document-material" type="button" title="文档素材" aria-label="文档素材" aria-controls="mindMapLinkPreview" aria-expanded="false">

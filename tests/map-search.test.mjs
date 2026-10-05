@@ -78,8 +78,8 @@ const clipboardApplySource = mindMap.slice(
 );
 assert.doesNotMatch(clipboardApplySource, /document\.activeElement === input/,
     '剪贴板异步读取完成时不应因 WebView2 焦点时序而放弃短文本搜索');
-assert.match(mindMap, /\$\('#btn-search'\)\.onclick = \(\) => openMapSearch\(\)/,
-    '工具栏搜索按钮不应自动读取剪贴板');
+assert.match(mindMap, /\$\('#btn-search'\)\.onclick = \(\) => \{\s*if \(isMapSearchOpen\(\)\) closeMapSearch\(\);\s*else openMapSearch\(\);\s*\}/,
+    '工具栏搜索按钮应切换面板开关，打开时不自动读取剪贴板');
 assert.match(mindMap, /input\.addEventListener\('paste', event => \{[\s\S]*?getMindMapClipboardNodes\(JSON\.parse\(text\)\)[\s\S]*?pasteMindMapNodesToSelection\(nodes\)/,
     '搜索框接收到脑图 JSON 时应阻止文本粘贴，并将其作为当前选中节点的子树导入');
 assert.match(mindMap, /if \(isMapSearchOpen\(\)\) \{[\s\S]*?activeEl === \$\('#mapSearchInput'\)\) return;/,
@@ -279,6 +279,19 @@ const buttons = new Map(['#btn-search-scope', '#btn-search-visible'].map(id => [
     attributes: {}, classList: { toggle() {} },
     setAttribute(key, value) { this.attributes[key] = value; },
 }]));
+const searchPanelClasses = new Set(['active']);
+const searchPanel = {
+    attributes: { 'aria-hidden': 'false' },
+    classList: {
+        contains: name => searchPanelClasses.has(name),
+        remove: name => searchPanelClasses.delete(name),
+    },
+    contains: () => false,
+    setAttribute(key, value) { this.attributes[key] = value; },
+};
+const searchInput = { value: '' };
+buttons.set('#mapSearchPanel', searchPanel);
+buttons.set('#mapSearchInput', searchInput);
 const frames = [];
 const pulses = [];
 let renderCount = 0;
@@ -288,10 +301,9 @@ const tabSearchContext = vm.createContext({
     mindMapWorkbook: workbook, state: liveState, mapSearchState: searchRuntime,
     mindMapTabRuntime: new Map(),
     window: { innerWidth: 1200, innerHeight: 800 },
-    document: { getElementById: id => ({ id }) },
+    document: { getElementById: id => ({ id }), querySelector: () => null },
     sessionStorage: { setItem() {} },
     $: selector => buttons.get(selector),
-    isMapSearchOpen: () => true,
     getRenderedMapSearchNodeIds: () => new Set(['root-a']),
     renderMapSearchResults() {},
     renderTree: () => { renderCount += 1; },
@@ -301,16 +313,17 @@ const tabSearchContext = vm.createContext({
     syncCurrentInput: () => { commitCount += 1; liveState.data.children[0].content = '提交的编辑内容'; },
     closeMindMapRelationEditor() {}, closeMindMapRelationNavigationMenu() {},
     saveStorage() {}, scrollActiveMindMapTabIntoView() {}, updateSelection() {},
-    cancelMapSearchPendingFocus() {}, closeMapSearch() {}, clearTimeout() {},
+    cancelMapSearchPendingFocus() {}, clearTimeout() {},
     requestAnimationFrame: callback => frames.push(callback),
     centerMapNodeInVisibleArea() {},
     pulseMapSearchTarget: card => pulses.push(card.id),
 });
 vm.runInContext(pureSearchSource, tabSearchContext);
+vm.runInContext(mindMap.slice(mindMap.indexOf('function isMapSearchOpen'), mindMap.indexOf('function isMapNodeTemporarilyExpanded')), tabSearchContext);
 vm.runInContext(mindMap.slice(mindMap.indexOf('function syncMapSearchScopeButton'), mindMap.indexOf('function renderMapSearchResults')), tabSearchContext);
 vm.runInContext(executeSearchSource, tabSearchContext);
 vm.runInContext(mindMap.slice(mindMap.indexOf('function clearMapSearchReveal'), mindMap.indexOf('function syncMapSearchScopeButton')), tabSearchContext);
-vm.runInContext(mindMap.slice(mindMap.indexOf('function resetMapSearch'), mindMap.indexOf('function centerMapNodeInVisibleArea')), tabSearchContext);
+vm.runInContext(mindMap.slice(mindMap.indexOf('function closeMapSearch'), mindMap.indexOf('function centerMapNodeInVisibleArea')), tabSearchContext);
 vm.runInContext(mindMap.slice(mindMap.indexOf('function getActiveMindMapTab'), mindMap.indexOf('function replaceMindMapWorkbook')), tabSearchContext);
 vm.runInContext(mindMap.slice(mindMap.indexOf('function commitCurrentMindMapTabEdits'), mindMap.indexOf('function scrollActiveMindMapTabIntoView')), tabSearchContext);
 vm.runInContext(mindMap.slice(mindMap.indexOf('function activateMindMapTab'), mindMap.indexOf('function addMindMapTab')), tabSearchContext);
@@ -359,9 +372,46 @@ tabSearchContext.executeMapSearch('命中');
 assert.equal(searchRuntime.visibleOnly, true, '切回当前 Tab 应保留原过滤偏好');
 assert.equal(searchRuntime.results.length, 0, '切回当前 Tab 后应重新应用未折叠卡片过滤');
 assert.equal(buttons.get('#btn-search-visible').disabled, false, '当前 Tab 应重新启用过滤按钮');
+
+searchRuntime.visibleOnly = false;
+searchInput.value = '命中';
+tabSearchContext.executeMapSearch(searchInput.value);
+tabSearchContext.activateMindMapTab('tab-b');
+assert.equal(tabSearchContext.isMapSearchOpen(), true, '手动切换 Tab 不得关闭已打开的搜索面板');
+assert.equal(searchPanel.attributes['aria-hidden'], 'false', '切页后搜索面板应保持可访问');
+assert.equal(searchInput.value, '命中', '手动切页应保留输入框中的关键词');
+assert.equal(searchRuntime.query, '命中', '手动切页应保留搜索状态中的关键词');
+assert.deepEqual([...searchRuntime.results.map(result => result.tabId)], ['tab-b'],
+    '当前 Tab 模式在手动切页后应更新为目标页的结果');
+
+searchRuntime.visibleOnly = true;
+tabSearchContext.getRenderedMapSearchNodeIds = () => new Set(workbook.activeTabId === 'tab-a'
+    ? ['root-a', 'shared-id'] : ['root-b', 'parent-b']);
+tabSearchContext.executeMapSearch(searchInput.value);
+assert.equal(searchRuntime.results.length, 0, '目标页折叠路径中的卡片应被过滤');
+tabSearchContext.activateMindMapTab('tab-a');
+assert.equal(searchRuntime.visibleOnly, true, '手动切页应保留未折叠卡片过滤偏好');
+assert.deepEqual([...searchRuntime.results.map(result => result.tabId)], ['tab-a'],
+    '切页后应按新页已渲染的卡片更新过滤结果');
+
+searchRuntime.allTabs = true;
+tabSearchContext.executeMapSearch(searchInput.value);
+searchRuntime.activeIndex = 1;
+searchRuntime.hasLocated = true;
+const manualSwitchResults = searchRuntime.results;
+tabSearchContext.activateMindMapTab('tab-b');
+assert.equal(tabSearchContext.isMapSearchOpen(), true, '全局模式下手动切页也应保持搜索面板打开');
+assert.equal(searchRuntime.allTabs, true, '手动切页应保留全局搜索范围');
+assert.equal(searchRuntime.results, manualSwitchResults, '手动切页应保留全局搜索结果列表');
+assert.equal(searchRuntime.activeIndex, 1, '手动切页应保留全局搜索结果位置');
+assert.equal(searchRuntime.hasLocated, true, '手动切页后应能继续导航到下一个全局结果');
+
 tabSearchContext.resetMapSearch();
 assert.equal(searchRuntime.allTabs, false, '完整重置搜索应恢复默认的当前 Tab 范围');
 assert.equal(searchRuntime.query, '', '完整重置应清除关键词');
+assert.equal(tabSearchContext.isMapSearchOpen(), false, '完整重置仍应关闭搜索面板');
+tabSearchContext.activateMindMapTab('tab-a');
+assert.equal(tabSearchContext.isMapSearchOpen(), false, '切换 Tab 不应自动打开已关闭的搜索面板');
 // !SECTION 跨页面搜索行为
 
 console.log('搜索定位校验通过：默认当前页、全局检索、跨页连续定位、编辑保留、折叠过滤与原有搜索行为完整。');

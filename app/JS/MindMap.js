@@ -1285,9 +1285,14 @@ function scrollActiveMindMapTabIntoView() {
 function activateMindMapTab(tabId, options = {}) {
     if (!mindMapWorkbook.tabs.some(tab => tab.id === tabId)) return false;
     if (mindMapWorkbook.activeTabId === tabId && !options.force) return true;
+    const preserveSearch = options.preserveSearch ?? isMapSearchOpen();
     if (!options.skipCurrentSync) commitCurrentMindMapTabEdits();
     mindMapWorkbook.activeTabId = tabId;
-    loadActiveMindMapTab({ preserveSearch: options.preserveSearch });
+    loadActiveMindMapTab({ preserveSearch });
+    if (preserveSearch) {
+        if (mapSearchState.allTabs) updateMapSearchHighlights();
+        else executeMapSearch(mapSearchState.query);
+    }
     persistMindMapWorkbookSession(false);
     saveStorage();
     scrollActiveMindMapTabIntoView();

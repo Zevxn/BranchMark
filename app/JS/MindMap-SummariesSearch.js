@@ -1771,6 +1771,7 @@ function openMapSearch({ prefillFromClipboard = false } = {}) {
     const requestId = ++mapSearchState.clipboardRequestId;
     panel.classList.add('active');
     panel.setAttribute('aria-hidden', 'false');
+    $('#btn-search')?.setAttribute('aria-expanded', 'true');
     executeMapSearch(input.value);
     focusMapSearchInput(input);
     if (prefillFromClipboard) {
@@ -1786,6 +1787,7 @@ function closeMapSearch() {
     if (panel.contains(document.activeElement)) document.activeElement.blur();
     panel.classList.remove('active');
     panel.setAttribute('aria-hidden', 'true');
+    $('#btn-search')?.setAttribute('aria-expanded', 'false');
     clearMapSearchHighlights();
     document.querySelector('.node-card.search-active')?.classList.remove('search-active');
 }
@@ -1796,7 +1798,7 @@ function resetMapSearch({ preserveSearch = false } = {}) {
     if (mapSearchState.pulseTimer) clearTimeout(mapSearchState.pulseTimer);
     mapSearchState.pulseTimer = null;
     if (preserveSearch) {
-        // 搜索跳转只清除旧页的临时展开与异步请求，保留关键词和结果位置。
+        // 切换页面只清除旧页的临时展开与异步请求，保留关键词和结果位置。
         cancelMapSearchPendingFocus();
         mapSearchState.clipboardRequestId += 1;
         return;
@@ -1898,7 +1900,10 @@ function initializeMapSearch() {
     const results = $('#mapSearchResults');
     if (!panel || !input || !results) return;
 
-    $('#btn-search').onclick = () => openMapSearch();
+    $('#btn-search').onclick = () => {
+        if (isMapSearchOpen()) closeMapSearch();
+        else openMapSearch();
+    };
     $('#btn-search-close').onclick = closeMapSearch;
     $('#btn-search-prev').onclick = () => navigateMapSearch(-1);
     $('#btn-search-next').onclick = () => navigateMapSearch(1);

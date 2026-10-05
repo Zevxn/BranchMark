@@ -134,16 +134,6 @@ function initializeMapToolbar() {
 
     $('#btn-rainbow').onclick = () => {
         state.rainbowMode = !state.rainbowMode; // 切换状态
-        
-        // 视觉反馈：按钮高亮
-        const btn = $('#btn-rainbow');
-        if (state.rainbowMode) {
-            btn.classList.add('primary'); // 借用 primary 样式表示激活
-            btn.style.color = '#fff';     // 确保文字白色
-        } else {
-            btn.classList.remove('primary');
-            btn.style.color = '';
-        }
 
         // 禁用/启用手动颜色按钮，避免冲突
         updateToolbar();

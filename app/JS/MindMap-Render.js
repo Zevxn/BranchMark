@@ -936,10 +936,10 @@ function updateToolbar() {
     $('#btn-undo').disabled = state.historyIndex <= 0; $('#btn-redo').disabled = state.historyIndex >= state.history.length - 1;
     $('#btn-color').disabled = (!hasSel && !hasSummary) || (hasSel && state.rainbowMode);
     $('#btn-color').title = hasSummary ? '设置总结颜色' : '设置卡片颜色';
+    $('#btn-rainbow')?.setAttribute('aria-pressed', String(state.rainbowMode));
 
     const compactButton = $('#btn-compact-view');
     if (compactButton) {
-        compactButton.classList.toggle('primary', state.compactView);
         compactButton.setAttribute('aria-pressed', String(state.compactView));
         compactButton.title = state.compactView
             ? '退出精简视图'
