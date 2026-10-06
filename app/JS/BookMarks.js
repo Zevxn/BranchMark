@@ -62,20 +62,8 @@ function installLongPress(el, { delay = 600, onLongPress } = {}) {
 const uiContainer = document.createElement('div');
 uiContainer.className = 'bookmark-manager-container';
 uiContainer.innerHTML = `
-    <button class="magic-btn btn-red" id="favBtn" style="overflow: hidden;">
-        <div class="btn-content">
-            <div class="layer layer-icon">
-                <svg class="star-svg" viewBox="0 0 24 24">
-                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                </svg>
-            </div>
-            <div class="layer layer-rate">
-                <span class="rate-num" id="rateVal">1.0</span>
-                <div class="slider-track">
-                    <div class="slider-fill" id="rateFill" style="width: 20%"></div>
-                </div>
-            </div>
-        </div>
+    <button class="magic-btn" id="favBtn" type="button" title="收藏夹 (Ctrl+G)" aria-label="收藏夹" aria-controls="bookmarkPanel">
+        <span class="bookmark-mindmap-count" id="bookmarkMindMapCount" aria-hidden="true">0</span>
     </button>
     <div class="bookmark-panel" id="bookmarkPanel">
         <div class="panel-header">
@@ -365,9 +353,11 @@ class myBookmarkManager {
             //     rootOrder: []
             // };
         }
+        this.updateMindMapCount();
     }
 
     async saveToStorage() {
+        this.updateMindMapCount();
         try {
             this.isSelfChange = false;
             await idbSet({
@@ -1303,8 +1293,19 @@ class myBookmarkManager {
     }
 // !SECTION 下拉菜单
 
-// SECTION 渲染面包屑导航和收藏夹树
+// SECTION 渲染收藏夹界面
+    updateMindMapCount() {
+        const count = Object.values(this.data.items || {}).filter(item => item?.type === 'mindmap').length;
+        const countElement = document.getElementById('bookmarkMindMapCount');
+        countElement.textContent = String(count);
+        countElement.dataset.digits = String(Math.min(String(count).length, 4));
+        const button = document.getElementById('favBtn');
+        button.title = `收藏夹 · ${count} 个思维导图 (Ctrl+G)`;
+        button.setAttribute('aria-label', `收藏夹，${count} 个思维导图`);
+    }
+
     render() {
+        this.updateMindMapCount();
         this.renderBreadcrumb();
         this.renderTree();
     }
@@ -1453,7 +1454,7 @@ class myBookmarkManager {
         this.applyFilter();
     }
 
-// !SECTION 渲染面包屑导航和收藏夹树
+// !SECTION 渲染收藏夹界面
 
 // SECTION 新增内容渲染
     renderFolderContent(folderId) {
