@@ -202,6 +202,117 @@ async function openBranchMarkProjectUrl(url) {
     }
 }
 
+function initializeBranchMarkUpdateDialog(tauriCore) {
+    const modal = $('#branchMarkUpdateModal');
+    const confirmButton = $('#confirmBranchMarkUpdate');
+    const laterButton = $('#laterBranchMarkUpdate');
+    const progress = $('#branchMarkUpdateProgress');
+    const message = $('#branchMarkUpdateMessage');
+    const errorLabel = $('#branchMarkUpdateError');
+    let update = null;
+    let busy = false;
+    let downloaded = false;
+    let returnFocus = null;
+
+    const close = () => {
+        if (busy) return;
+        modal.classList.remove('show');
+        modal.setAttribute('aria-hidden', 'true');
+        if (returnFocus?.isConnected) returnFocus.focus();
+    };
+    const setBusy = value => {
+        busy = value;
+        confirmButton.disabled = value;
+        laterButton.disabled = value;
+        modal.setAttribute('aria-busy', String(value));
+    };
+    laterButton.addEventListener('click', close);
+    modal.addEventListener('click', event => {
+        if (event.target === modal) close();
+    });
+    // 捕获阶段拦截快捷键，避免模态框打开时改变底层导图。
+    window.addEventListener('keydown', event => {
+        if (!modal.classList.contains('show')) return;
+        event.stopImmediatePropagation();
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            close();
+        } else if (event.key === 'Tab') {
+            event.preventDefault();
+            if (!busy) (document.activeElement === confirmButton ? laterButton : confirmButton).focus();
+        }
+    }, { capture: true });
+
+    confirmButton.addEventListener('click', async () => {
+        if (busy || !update) return;
+        setBusy(true);
+        errorLabel.textContent = '';
+        try {
+            if (!downloaded) {
+                progress.hidden = false;
+                progress.removeAttribute('value');
+                message.textContent = '正在下载更新…';
+                confirmButton.textContent = '下载中…';
+                const onProgress = new tauriCore.Channel();
+                onProgress.onmessage = ({ downloaded: received, total }) => {
+                    if (total > 0) {
+                        const percent = Math.min(100, Math.floor(received / total * 100));
+                        progress.value = percent;
+                        message.textContent = `正在下载更新… ${percent}%`;
+                    } else {
+                        progress.removeAttribute('value');
+                        message.textContent = `正在下载更新… ${(received / 1024 / 1024).toFixed(1)} MB`;
+                    }
+                };
+                await tauriCore.invoke('download_branchmark_update', { version: update.version, onProgress });
+                downloaded = true;
+            }
+            progress.value = 100;
+            message.textContent = '下载与校验完成，正在保存当前导图…';
+            confirmButton.textContent = '准备安装…';
+            commitCurrentMindMapTabEdits();
+            const currentFileId = sessionStorage.getItem('currentFileID');
+            if (!bookmarkManager?.data?.items?.[currentFileId]) {
+                throw new Error('请关闭此窗口，先保存当前新建导图，再回来继续安装。');
+            }
+            if (!await saveMindMapData(true, false)) {
+                throw new Error('当前导图保存失败，请关闭此窗口并保存成功后重试。');
+            }
+            // 等待保存当前文件引用的写入完成，再交给会退出应用的安装器。
+            await chrome.storage.local.set({ currentFileID: currentFileId });
+            message.textContent = '当前导图已保存，即将退出并安装更新…';
+            confirmButton.textContent = '安装中…';
+            await tauriCore.invoke('install_branchmark_update', { version: update.version });
+        } catch (error) {
+            console.warn('[BranchMark] 更新失败:', error);
+            errorLabel.textContent = error.message || String(error);
+            message.textContent = downloaded ? '更新包已就绪，可以重试安装。' : '更新未完成，请重试。';
+            confirmButton.textContent = downloaded ? '重试安装' : '重试下载';
+        } finally {
+            setBusy(false);
+        }
+    });
+
+    return info => {
+        if (busy) return;
+        if (update?.version !== info.version) downloaded = false;
+        update = info;
+        returnFocus = $('#btn-settings') || document.activeElement;
+        setMindMapSettingsPopoverOpen(false);
+        $('#branchMarkUpdateTitle').textContent = `发现新版本 v${info.version.replace(/^v/, '')}`;
+        $('#branchMarkUpdateCurrent').textContent = `当前版本：v${info.currentVersion.replace(/^v/, '')}`;
+        // 发布说明作为纯文本展示，不执行远端 HTML 或 Markdown 脚本。
+        $('#branchMarkUpdateNotes').textContent = info.notes || '此版本未提供更新说明。';
+        errorLabel.textContent = '';
+        progress.hidden = !downloaded;
+        message.textContent = downloaded ? '更新包已就绪，安装前会保存当前导图。' : '更新前会保存当前导图，安装时将退出应用。';
+        confirmButton.textContent = downloaded ? '继续安装' : '立即更新';
+        modal.classList.add('show');
+        modal.setAttribute('aria-hidden', 'false');
+        laterButton.focus();
+    };
+}
+
 function initializeBranchMarkAbout() {
     const homeButton = $('#btn-project-home');
     const checkButton = $('#btn-check-update');
@@ -211,6 +322,10 @@ function initializeBranchMarkAbout() {
 
     let currentVersion = null;
     let releaseUrl = '';
+    const tauriCore = !window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && window.__TAURI__?.core;
+    const nativeUpdater = typeof tauriCore?.invoke === 'function';
+    const showUpdateDialog = nativeUpdater ? initializeBranchMarkUpdateDialog(tauriCore) : null;
+    let nativeUpdate = null;
     const setStatus = text => {
         statusLabel.textContent = text;
         statusLabel.hidden = !text;
@@ -218,7 +333,9 @@ function initializeBranchMarkAbout() {
     };
     const loadVersion = async () => {
         try {
-            const data = await fetchBranchMarkJson(new URL('../version.json', location.href));
+            const data = nativeUpdater
+                ? { version: await tauriCore.invoke('get_branchmark_version') }
+                : await fetchBranchMarkJson(new URL('../version.json', location.href));
             currentVersion = parseBranchMarkVersion(data.version);
             if (!currentVersion) throw new Error('无效的版本号');
             versionLabel.textContent = `v${String(data.version).replace(/^v/, '')}`;
@@ -232,6 +349,10 @@ function initializeBranchMarkAbout() {
     homeButton.addEventListener('click', () => void openBranchMarkProjectUrl(BRANCHMARK_PROJECT_URL));
     checkButton.addEventListener('click', async () => {
         if (checkButton.disabled) return;
+        if (nativeUpdate) {
+            showUpdateDialog(nativeUpdate);
+            return;
+        }
         if (releaseUrl) {
             await openBranchMarkProjectUrl(releaseUrl);
             return;
@@ -255,6 +376,23 @@ function initializeBranchMarkAbout() {
             if (compareBranchMarkVersions(latestVersion, currentVersion) > 0) {
                 releaseUrl = `${BRANCHMARK_PROJECT_URL}/releases/tag/${encodeURIComponent(release.tag_name)}`;
                 setStatus(`发现新版 ${release.tag_name}`);
+                if (nativeUpdater) {
+                    // 版本判断统一使用 GitHub；自动安装信息缺失不影响查看新版。
+                    if (release.assets?.some(asset => asset.name === 'latest.json')) {
+                        try {
+                            const update = await tauriCore.invoke('check_branchmark_update');
+                            const updateVersion = parseBranchMarkVersion(update?.version);
+                            if (updateVersion && compareBranchMarkVersions(updateVersion, latestVersion) === 0) {
+                                nativeUpdate = update;
+                                releaseUrl = '';
+                                showUpdateDialog(nativeUpdate);
+                            }
+                        } catch (error) {
+                            console.warn('[BranchMark] 自动更新暂不可用:', error);
+                        }
+                    }
+                    if (!nativeUpdate) setStatus(`发现新版 ${release.tag_name}，自动更新暂不可用，请查看新版`);
+                }
             } else {
                 setStatus('已是最新版本');
             }
@@ -263,7 +401,7 @@ function initializeBranchMarkAbout() {
             setStatus(error.status === 404 ? '暂无可用的正式版本' : '检查失败，请重试');
         } finally {
             checkButton.disabled = false;
-            checkButton.textContent = releaseUrl ? '查看新版' : '检查更新';
+            checkButton.textContent = nativeUpdate ? `更新到 v${nativeUpdate.version.replace(/^v/, '')}` : releaseUrl ? '查看新版' : '检查更新';
             checkButton.removeAttribute('aria-busy');
             positionMindMapSettingsPopover();
         }

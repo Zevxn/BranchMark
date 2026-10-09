@@ -12,6 +12,7 @@ node_modules/
 /desktop/build/
 /desktop-tauri/src-tauri/target/
 /desktop-tauri/src-tauri/gen/schemas/
+/.tauri-updater/
 
 # Test and coverage output
 /coverage/

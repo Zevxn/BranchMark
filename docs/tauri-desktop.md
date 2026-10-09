@@ -18,6 +18,27 @@ Windows 上也可以双击项目根目录的 `build-tauri.bat` 一键打包。�
 
 构建需要 Node.js、Rust 工具链、Windows C++ 构建工具和 WebView2。应用图标复用 Electron 桌面版已有的 BranchMark 图标资源。
 
+## 软件更新与发布
+
+Tauri、浏览器和 Quicker 的“检查更新”统一读取 GitHub 最新正式版信息并比较版本号。没有新版时直接显示“已是最新版本”，不读取更新清单。Tauri 发现新版且发布附件包含 `latest.json` 时，再读取自动更新信息；清单版本必须与发现的正式版一致。清单缺失、不可用或版本不一致时，提示“自动更新暂不可用，请查看新版”，仍可打开 GitHub 发布页。
+
+自动更新可用时显示确认窗口，包含当前版本、新版本、更新说明和“立即更新 / 稍后”。选择稍后可以关闭窗口，设置按钮保留“更新到 v版本号”。选择更新后下载并验证签名，显示下载进度；完成后保存当前导图，再退出并启动安装器，安装结束后重新打开应用。新建但尚未保存的导图必须先手动保存；保存失败时不会启动安装。下载、校验或启动安装失败可在窗口内重试。浏览器和 Quicker 使用 GitHub 发布页入口。
+
+更新签名公钥已写入 `desktop-tauri/src-tauri/tauri.conf.json`。配套私钥位于本地 `.tauri-updater/branchmark.key`，该目录已被 Git 忽略。请将私钥和 `.pub` 文件备份到安全位置；不要提交或上传私钥。换机器构建时恢复这两个文件，或通过 `TAURI_SIGNING_PRIVATE_KEY` 和可选的 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 提供原有密钥。应持续使用同一签名密钥，避免已安装的客户端无法验证后续更新。
+
+`npm run tauri:build` 和 `build-tauri.bat` 会自动使用本地密钥签名，生成 NSIS/MSI 安装包及 `.sig`，并在 `desktop-tauri/src-tauri/target/release/bundle/latest.json` 生成更新清单。清单默认使用 NSIS 包进行应用内更新，按架构匹配；MSI 仍可手动安装。
+
+发布前统一修改根 `package.json`、`app/version.json`、`desktop-tauri/package.json`、`src-tauri/Cargo.toml` 和 `tauri.conf.json` 的版本号；涉及 Electron 发布时同时同步其版本。可通过环境变量提供 UTF-8 更新说明文件：
+
+```powershell
+$env:BRANCHMARK_UPDATE_NOTES_FILE = 'docs/release-notes.md'
+npm run tauri:build
+```
+
+构建后在 GitHub 创建与清单一致的正式 Release（例如版本 `1.0.3` 使用标签 `v1.0.3`），上传同一次构建生成的 `latest.json` 和对应版本的 `BranchMark_版本_x64-setup.exe`。`latest.json` 中已包含 `.exe.sig` 的签名内容，`.sig` 可单独上传留存，客户端无需下载它。仅上传普通安装包不能启用应用内更新，但不影响版本检查和打开发布页。更新说明直接显示清单的 `notes`，以纯文本展示。未提供说明文件时显示“此版本未提供更新说明”。
+
+首次接入更新功能的版本需要用户手动安装一次。之后只有发布了包含更新清单和签名安装包的新版本，才能完成真实的检查、下载、安装验证。Windows 使用 `passive` 安装模式，显示安装进度，必要时仍会出现系统权限提示。
+
 ## 存储与宿主能力
 
 Tauri 主窗口始终使用 WebView2 的默认用户数据目录。业务数据位于默认应用数据目录或用户选择的目录；`EBWebView`、缓存、GPUCache、Crashpad 和其他 WebView 配置继续由 WebView2 保存在默认位置。

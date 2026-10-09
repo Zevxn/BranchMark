@@ -11,6 +11,7 @@ use std::{
 use tauri::{path::BaseDirectory, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod storage;
+mod updater;
 
 const APP_IDENTIFIER: &str = "com.deepconvo.mindmap.tauri";
 const STORAGE_CONFIG_FILE: &str = "storage-location.json";
@@ -717,6 +718,8 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             choose_storage_directory,
             get_storage_location,
@@ -731,6 +734,10 @@ pub fn run() {
             open_local_file,
             set_window_theme,
             toggle_window_fullscreen,
+            updater::check_branchmark_update,
+            updater::get_branchmark_version,
+            updater::download_branchmark_update,
+            updater::install_branchmark_update,
         ])
         .setup(|app| {
             match apply_pending_storage_directory(app.handle()) {

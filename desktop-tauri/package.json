@@ -1,6 +1,6 @@
 {
   "name": "deepconvo-mindmap-tauri",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "BranchMark 的 Tauri 桌面外壳",
   "license": "GPL-3.0-only",
@@ -10,8 +10,8 @@
   },
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build --bundles nsis,msi",
-    "build:win": "tauri build --bundles nsis,msi"
+    "build": "node ../scripts/build-tauri.mjs",
+    "build:win": "node ../scripts/build-tauri.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.10.1"

@@ -963,6 +963,29 @@
             line-height: 20px;
         }
         .mindmap-tab-modal-error:empty { display: none; }
+        /* SECTION 软件更新窗口 */
+        #branchMarkUpdateModal .modal-content {
+            width: min(480px, calc(100vw - 32px));
+            max-height: calc(100dvh - 32px);
+            display: flex;
+            flex-direction: column;
+        }
+        #branchMarkUpdateModal .bookmark-modal-body { min-height: 0; overflow-y: auto; }
+        #branchMarkUpdateCurrent { margin-bottom: 14px; }
+        #branchMarkUpdateNotes {
+            max-height: 35vh;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            color: var(--text-color);
+            padding: 12px;
+            border: 1px solid var(--toolbar-border);
+            border-radius: 6px;
+        }
+        #branchMarkUpdateProgress { width: 100%; margin-top: 16px; accent-color: var(--primary); }
+        #branchMarkUpdateMessage { margin-top: 14px; font-size: 13px; }
+        #branchMarkUpdateModal .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        /* !SECTION 软件更新窗口 */
         #imageUploadSettingsModal .modal-content {
             width: min(380px, calc(100vw - 32px));
         }
@@ -3251,6 +3274,28 @@
             </div>
         </div>
     </div>
+    <!-- SECTION 软件更新窗口 -->
+    <div class="mymodal" id="branchMarkUpdateModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="branchMarkUpdateTitle" aria-describedby="branchMarkUpdateMessage">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="branchMarkUpdateTitle">发现新版本</h3>
+            </div>
+            <div class="bookmark-modal-body">
+                <p id="branchMarkUpdateCurrent"></p>
+                <div id="branchMarkUpdateNotes" aria-label="更新说明"></div>
+                <progress id="branchMarkUpdateProgress" max="100" aria-label="更新下载进度" hidden></progress>
+                <p id="branchMarkUpdateMessage" role="status"></p>
+                <div class="mindmap-tab-modal-error" id="branchMarkUpdateError" role="alert"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="laterBranchMarkUpdate" type="button">稍后</button>
+                <button class="btn btn-primary" id="confirmBranchMarkUpdate" type="button">立即更新</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- !SECTION 软件更新窗口 -->
+
     <div class="mymodal" id="imageUploadSettingsModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="imageUploadSettingsTitle" aria-describedby="imageUploadSettingsHelp">
         <div class="modal-content mindmap-tab-modal-content">
             <div class="modal-header">
