@@ -7,7 +7,7 @@ const updateSource = source.slice(source.indexOf('// SECTION 项目与版本更�
 
 // SECTION 更新流程行为检查
 
-function setup({ native = true, saved = true } = {}) {
+function setup({ native = true, saved = true, storage = {} } = {}) {
     const calls = [];
     const elements = new Map();
     const document = { activeElement: null };
@@ -48,8 +48,9 @@ function setup({ native = true, saved = true } = {}) {
         },
     };
     const keyHandlers = [];
+    const windowHandlers = {};
     const context = vm.createContext({
-        window: { __TAURI__: native ? { core } : undefined, addEventListener: (name, handler) => keyHandlers.push(handler), open: url => calls.push(url) },
+        window: { __TAURI__: native ? { core } : undefined, addEventListener(name, handler) { windowHandlers[name] = handler; if (name === 'keydown') keyHandlers.push(handler); }, open: url => calls.push(url) },
         document, $: element, URL, AbortController, setTimeout, clearTimeout,
         location: { href: 'http://localhost/HTML/MindMap.html' },
         console: { warn() {} },
@@ -58,7 +59,14 @@ function setup({ native = true, saved = true } = {}) {
         bookmarkManager: { data: { items: saved ? { 'map-1': {} } : {} } },
         commitCurrentMindMapTabEdits: () => calls.push('commit'),
         saveMindMapData: async () => { calls.push('save'); return state.saveResult; },
-        chrome: { storage: { local: { async set() { calls.push('persist-reference'); if (state.storageError) throw new Error('引用写入失败'); } } } },
+        chrome: { storage: { local: {
+            async get(key) { return { [key]: storage[key] }; },
+            async set(values) {
+                if (state.storageError) throw new Error('引用写入失败');
+                if ('currentFileID' in values) calls.push('persist-reference');
+                Object.assign(storage, values);
+            },
+        } } },
         fetch: async url => {
             const versionFile = String(url).includes('version.json');
             calls.push(versionFile ? 'fetch-version' : 'fetch-release');
@@ -74,8 +82,38 @@ function setup({ native = true, saved = true } = {}) {
     });
     vm.runInContext(updateSource, context);
     context.initializeBranchMarkAbout();
-    return { calls, element, state, info, keyHandlers, document };
+    return { calls, element, state, info, keyHandlers, document, windowHandlers };
 }
+
+const reminders = {};
+const startup = setup({ storage: reminders });
+await startup.windowHandlers.load();
+assert.equal(startup.element('#branchMarkUpdateModal').classList.contains('show'), true);
+assert.equal(startup.calls.includes('download_branchmark_update'), false);
+await startup.element('#laterBranchMarkUpdate').click();
+const restarted = setup({ storage: reminders });
+await restarted.windowHandlers.load();
+assert.equal(restarted.element('#branchMarkUpdateModal').classList.contains('show'), false, '重启后同一版本不再自动提醒');
+await restarted.element('#btn-check-update').click();
+assert.equal(restarted.element('#branchMarkUpdateModal').classList.contains('show'), true, '已提醒的版本仍可手动打开');
+const newer = setup({ storage: reminders });
+newer.state.releaseVersion = 'v1.0.4';
+newer.info.version = '1.0.4';
+await newer.windowHandlers.load();
+assert.equal(newer.element('#branchMarkUpdateModal').classList.contains('show'), true, '更高版本重新自动提醒');
+const manualStorage = {};
+const manual = setup({ storage: manualStorage });
+await manual.element('#btn-check-update').click();
+await manual.element('#laterBranchMarkUpdate').click();
+const afterManual = setup({ storage: manualStorage });
+await afterManual.windowHandlers.load();
+assert.equal(afterManual.element('#branchMarkUpdateModal').classList.contains('show'), false, '手动查看过的版本不再自动提醒');
+const reminderFailure = setup();
+reminderFailure.state.storageError = true;
+await reminderFailure.windowHandlers.load();
+assert.equal(reminderFailure.element('#branchMarkUpdateModal').classList.contains('show'), false, '提醒记录写入失败时保持安静');
+await reminderFailure.element('#btn-check-update').click();
+assert.equal(reminderFailure.element('#branchMarkUpdateModal').classList.contains('show'), true);
 
 const first = setup();
 await first.element('#btn-check-update').click();
@@ -172,6 +210,6 @@ await browser.element('#btn-check-update').click();
 assert.equal(browser.calls.at(-1), 'https://github.com/Zevxn/BranchMark/releases/tag/v1.0.3');
 assert.equal(browser.element('#branchMarkUpdateModal').classList.contains('show'), false);
 
-console.log('Tauri 更新流程检查通过：统一版本判断、缺失或异常清单回退、确认/稍后、进度、重试及保存门槛。');
+console.log('Tauri 更新流程检查通过：每个版本只自动提醒一次、手动打开、统一版本判断、清单回退、进度、重试及保存门槛。');
 
 // !SECTION 更新流程行为检查

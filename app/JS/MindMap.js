@@ -133,6 +133,7 @@ function setMindMapSettingsPopoverOpen(open) {
 // SECTION 项目与版本更新
 
 const BRANCHMARK_PROJECT_URL = 'https://github.com/Zevxn/BranchMark';
+const BRANCHMARK_UPDATE_NOTIFIED_VERSION_KEY = 'branchmark_update_notified_version';
 
 function parseBranchMarkVersion(value) {
     const match = String(value || '').trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*))?(?:\+[\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*)?$/);
@@ -326,6 +327,25 @@ function initializeBranchMarkAbout() {
     const nativeUpdater = typeof tauriCore?.invoke === 'function';
     const showUpdateDialog = nativeUpdater ? initializeBranchMarkUpdateDialog(tauriCore) : null;
     let nativeUpdate = null;
+    const showNativeUpdate = async (automatic) => {
+        try {
+            const stored = await chrome.storage.local.get(BRANCHMARK_UPDATE_NOTIFIED_VERSION_KEY);
+            const notifiedVersion = parseBranchMarkVersion(stored[BRANCHMARK_UPDATE_NOTIFIED_VERSION_KEY]);
+            const alreadyNotified = notifiedVersion && compareBranchMarkVersions(
+                notifiedVersion, parseBranchMarkVersion(nativeUpdate.version)
+            ) >= 0;
+            if (automatic && alreadyNotified) return;
+            if (!alreadyNotified) {
+                // 展示前持久化提醒记录，关闭窗口或重启软件后不再自动提醒该版本。
+                await chrome.storage.local.set({ [BRANCHMARK_UPDATE_NOTIFIED_VERSION_KEY]: nativeUpdate.version });
+            }
+        } catch (error) {
+            console.warn('[BranchMark] 保存更新提醒记录失败:', error);
+            // 无法可靠记录时保持自动检查安静，手动检查仍可打开窗口。
+            if (automatic) return;
+        }
+        showUpdateDialog(nativeUpdate);
+    };
     const setStatus = text => {
         statusLabel.textContent = text;
         statusLabel.hidden = !text;
@@ -347,14 +367,14 @@ function initializeBranchMarkAbout() {
     };
     const versionReady = loadVersion();
     homeButton.addEventListener('click', () => void openBranchMarkProjectUrl(BRANCHMARK_PROJECT_URL));
-    checkButton.addEventListener('click', async () => {
+    const checkForUpdates = async ({ automatic = false } = {}) => {
         if (checkButton.disabled) return;
         if (nativeUpdate) {
-            showUpdateDialog(nativeUpdate);
+            if (!automatic) await showNativeUpdate(false);
             return;
         }
         if (releaseUrl) {
-            await openBranchMarkProjectUrl(releaseUrl);
+            if (!automatic) await openBranchMarkProjectUrl(releaseUrl);
             return;
         }
         checkButton.disabled = true;
@@ -365,7 +385,7 @@ function initializeBranchMarkAbout() {
             await versionReady;
             if (!currentVersion) await loadVersion();
             if (!currentVersion) {
-                setStatus('无法读取当前版本，请重试');
+                if (!automatic) setStatus('无法读取当前版本，请重试');
                 return;
             }
             const release = await fetchBranchMarkJson('https://api.github.com/repos/Zevxn/BranchMark/releases/latest');
@@ -385,7 +405,7 @@ function initializeBranchMarkAbout() {
                             if (updateVersion && compareBranchMarkVersions(updateVersion, latestVersion) === 0) {
                                 nativeUpdate = update;
                                 releaseUrl = '';
-                                showUpdateDialog(nativeUpdate);
+                                await showNativeUpdate(automatic);
                             }
                         } catch (error) {
                             console.warn('[BranchMark] 自动更新暂不可用:', error);
@@ -398,14 +418,22 @@ function initializeBranchMarkAbout() {
             }
         } catch (error) {
             console.warn('[BranchMark] 检查更新失败:', error);
-            setStatus(error.status === 404 ? '暂无可用的正式版本' : '检查失败，请重试');
+            if (!automatic) setStatus(error.status === 404 ? '暂无可用的正式版本' : '检查失败，请重试');
         } finally {
             checkButton.disabled = false;
             checkButton.textContent = nativeUpdate ? `更新到 v${nativeUpdate.version.replace(/^v/, '')}` : releaseUrl ? '查看新版' : '检查更新';
             checkButton.removeAttribute('aria-busy');
             positionMindMapSettingsPopover();
         }
-    });
+    };
+    checkButton.addEventListener('click', () => checkForUpdates());
+
+    // 桌面版页面加载完成后检查一次；失败保持安静，不自动打开发布页。
+    if (nativeUpdater) {
+        const checkOnStartup = () => checkForUpdates({ automatic: true });
+        if (document.readyState === 'complete') checkOnStartup();
+        else window.addEventListener('load', checkOnStartup, { once: true });
+    }
 }
 
 // !SECTION 项目与版本更新

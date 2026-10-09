@@ -669,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "deepconvo-mindmap-tauri"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "rfd",
  "serde",
