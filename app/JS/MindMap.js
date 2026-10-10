@@ -1348,7 +1348,10 @@ function replaceMindMapWorkbook(workbook) {
 }
 
 async function updateState(MindMapData,newCurrentFileID,pageTitle,otherPageOpen=false){       // 思维导图页面加载思维导图文件
-    if (!otherPageOpen) await saveMindMapData(true,false);  // 询问保存当前文件
+    // 规范化会补齐节点字段；文件校验必须保留磁盘上的原始内容。
+    const fileSnapshot = window.__DEEPCONVO_NATIVE_TAURI_HOST__ ? structuredClone(MindMapData) : null;
+    const isSameFile = String(newCurrentFileID) === sessionStorage.getItem('currentFileID');
+    if (!otherPageOpen && !isSameFile) await saveMindMapData(true,false);  // 切换文件前保存
     document.title = pageTitle;
     replaceMindMapWorkbook(normalizeMindMapWorkbookSnapshot(MindMapData, pageTitle, {
         documentId: newCurrentFileID,
@@ -1356,6 +1359,10 @@ async function updateState(MindMapData,newCurrentFileID,pageTitle,otherPageOpen=
     sessionStorage.setItem('currentFileID', newCurrentFileID);
     persistMindMapWorkbookSession(false);
     sessionStorage.setItem('pageTitle', pageTitle);
+    if (window.__DEEPCONVO_NATIVE_TAURI_HOST__) {
+        await sendRuntimeMessage({ action: 'TAURI_ACCEPT_MINDMAP_FILE', id: newCurrentFileID, snapshot: fileSnapshot });
+    }
+    updateMindMapFileActions();
 }
 
 function updateDockData(qaData) {           // 思维导图页面加载卡片坞数据
@@ -1366,6 +1373,7 @@ function updateDockData(qaData) {           // 思维导图页面加载卡片坞
 
 async function saveMindMapData(isForce=false,notify=true){           // 保存
     if (!bookmarkManager || !isForce) return false;
+    if (mindMapFileReloading) return false;
     const saveData = getMindMapWorkbookSnapshot();
     const currentFileID = sessionStorage.getItem('currentFileID');
     const bookmarkItems = bookmarkManager.data?.items || {};
@@ -1389,7 +1397,9 @@ async function saveMindMapData(isForce=false,notify=true){           // 保存
         return true;
     } catch (error) {
         console.error('[MindMap] 保存思维导图失败:', error);
-        if (notify) showTopToast(`❌ 保存失败：${error.message || '数据未能写入'}`);
+        const externalChange = /文件已被外部修改/.test(error.message);
+        if (externalChange) clearTimeout(saveToCloudTimer);
+        if (notify || externalChange) showTopToast(`❌ 保存失败：${error.message || '数据未能写入'}`);
         return false;
     }
 }
@@ -1410,7 +1420,115 @@ function new_MindMap(){
     });
     persistMindMapWorkbookSession(false);
     sessionStorage.removeItem('currentFileID');
+    updateMindMapFileActions();
 }
+
+// SECTION 当前导图文件操作
+let mindMapFileReloading = false;
+
+function getCurrentMindMapFileId() {
+    const id = sessionStorage.getItem('currentFileID');
+    return id && id !== 'null' && id !== 'undefined' ? id : null;
+}
+
+function updateMindMapFileActions() {
+    const native = Boolean(window.__DEEPCONVO_NATIVE_TAURI_HOST__);
+    const id = getCurrentMindMapFileId();
+    for (const [selector, label] of [
+        ['#btn-copy-map-path', '复制当前导图文件路径'],
+        ['#btn-reload-map', '从硬盘重新加载当前导图'],
+    ]) {
+        const button = $(selector);
+        if (!button) continue;
+        button.hidden = !native;
+        button.disabled = !id || mindMapFileReloading;
+        button.title = id ? label : '保存导图后可使用此功能';
+    }
+}
+
+function getMindMapFileContentSignature(snapshot, id) {
+    const workbook = normalizeMindMapWorkbookSnapshot(structuredClone(snapshot), document.title, { documentId: id, allowEmpty: false });
+    // 切换标签页、缩放与滚动不属于需要确认放弃的内容编辑。
+    return JSON.stringify(workbook.tabs.map(tab => ({ name: tab.name, data: tab.data })));
+}
+
+async function copyCurrentMindMapFilePath() {
+    const id = getCurrentMindMapFileId();
+    if (!window.__DEEPCONVO_NATIVE_TAURI_HOST__ || !id) return;
+    const button = $('#btn-copy-map-path');
+    button.disabled = true;
+    try {
+        const path = await window.__TAURI__.core.invoke('get_mindmap_file_path', { id });
+        if (getCurrentMindMapFileId() !== id) return;
+        // 剪贴板使用普通 Windows 路径，网络共享保留开头的双反斜杠。
+        const clipboardPath = path
+            .replace(/^\\\\\?\\UNC\\/i, '\\\\')
+            .replace(/^\\\\\?\\(?=[a-z]:\\)/i, '');
+        await navigator.clipboard.writeText(clipboardPath);
+        showTopToast('✅ 已复制当前导图文件路径');
+    } catch (error) {
+        showTopToast(`❌ 复制失败：${error.message || error}`);
+    } finally {
+        updateMindMapFileActions();
+    }
+}
+
+async function reloadCurrentMindMapFile() {
+    const id = getCurrentMindMapFileId();
+    if (!window.__DEEPCONVO_NATIVE_TAURI_HOST__ || !id || mindMapFileReloading) return;
+    if (state.mode !== 'IDLE' || state.editingNode || document.querySelector('.mymodal.show')) return;
+    const originalWorkbook = mindMapWorkbook;
+    mindMapFileReloading = true;
+    updateMindMapFileActions();
+    try {
+        const baseline = await sendRuntimeMessage({ action: 'TAURI_GET_MINDMAP_BASELINE', id });
+        const current = getMindMapWorkbookSnapshot();
+        const signature = getMindMapFileContentSignature(current, id);
+        if (!baseline.snapshot || signature !== getMindMapFileContentSignature(baseline.snapshot, id)) {
+            if (!await confirmMindMapFileAction('重新加载导图',
+                '重新加载将放弃页面中未保存的修改，是否继续？', '重新加载')) return;
+        }
+        // 读取失败仍保留当前画布；取消旧定时器，避免它随后保存旧快照。
+        clearTimeout(saveTimer);
+        clearTimeout(saveToCloudTimer);
+        const snapshot = await idbGet(`MindMapData.__REF__${id}-extra`);
+        if (!snapshot) throw new Error('当前导图文件不存在，当前画布已保留');
+        if (Array.isArray(snapshot.tabs) && snapshot.tabs.length === 0) throw new Error('导图文件没有有效页面');
+        const workbook = normalizeMindMapWorkbookSnapshot(structuredClone(snapshot), document.title, {
+            documentId: id, allowEmpty: false,
+        });
+        if (getCurrentMindMapFileId() !== id || mindMapWorkbook !== originalWorkbook) return;
+        if (state.mode !== 'IDLE' || state.editingNode
+            || signature !== getMindMapFileContentSignature(getMindMapWorkbookSnapshot(), id)) {
+            showTopToast('⚠️ 页面正在编辑，本次未重新加载，请操作完成后重试');
+            return;
+        }
+        const activeTab = workbook.tabs.find(tab => tab.id === current.activeTabId)
+            || (!Array.isArray(snapshot.tabs) && current.tabs.length === 1 ? workbook.tabs[0] : null);
+        if (activeTab) {
+            const previousTab = current.tabs.find(tab => tab.id === current.activeTabId);
+            workbook.activeTabId = activeTab.id;
+            activeTab.view = previousTab.view;
+            activeTab.scrollMap = sanitizeMindMapScrollMap(previousTab.scrollMap, activeTab.data);
+        }
+        replaceMindMapWorkbook(workbook);
+        persistMindMapWorkbookSession(false);
+        await sendRuntimeMessage({ action: 'TAURI_ACCEPT_MINDMAP_FILE', id, snapshot });
+        showTopToast('✅ 已重新加载当前导图');
+    } catch (error) {
+        showTopToast(`❌ 重新加载失败：${error.message || error}`);
+    } finally {
+        mindMapFileReloading = false;
+        updateMindMapFileActions();
+    }
+}
+
+function initializeMindMapFileActions() {
+    $('#btn-copy-map-path')?.addEventListener('click', copyCurrentMindMapFilePath);
+    $('#btn-reload-map')?.addEventListener('click', reloadCurrentMindMapFile);
+    updateMindMapFileActions();
+}
+// !SECTION 当前导图文件操作
 
 let mindMapTabContextTargetId = null;
 let draggedMindMapTabId = null;
@@ -1494,19 +1612,23 @@ function hideMindMapTabModal(modal) {
 }
 
 function confirmMindMapJsonOverwrite(filename) {
+    return confirmMindMapFileAction('确认覆盖', `文件“${filename}”已存在，是否覆盖？取消将保留原文件。`, '覆盖');
+}
+
+function confirmMindMapFileAction(titleText, message, confirmText) {
     const modal = $('#mindMapTabDeleteModal');
     const title = $('#mindMapTabDeleteTitle');
     const text = $('#mindMapTabDeleteText');
     const confirmButton = $('#confirmMindMapTabDelete');
     if (!modal || !title || !text || !confirmButton) {
-        return Promise.reject(new Error('覆盖确认弹窗不可用'));
+        return Promise.reject(new Error('文件操作确认弹窗不可用'));
     }
     if (document.querySelector('.mymodal.show')) return Promise.resolve(false);
 
     mindMapTabDeleteTargetId = null;
-    title.textContent = '确认覆盖';
-    text.textContent = `文件“${filename}”已存在，是否覆盖？取消将保留原文件。`;
-    confirmButton.textContent = '覆盖';
+    title.textContent = titleText;
+    text.textContent = message;
+    confirmButton.textContent = confirmText;
     return new Promise(resolve => {
         mindMapFileOverwriteResolve = resolve;
         showMindMapTabModal(modal);
@@ -1995,6 +2117,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeNativeDragDrop(); // 初始化原生拖拽
     initializeEditorToolbar();  // 初始化md编辑器
     initializeMapToolbar();     // 初始化思维导图工具栏
+    initializeMindMapFileActions(); // 当前导图路径与重新加载
     initializeMapSearch();      // 初始化搜索定位
     initializeMindMapRelations(); // 初始化卡片关联线
     initializeMindMapSummaries(); // 初始化多卡片总结

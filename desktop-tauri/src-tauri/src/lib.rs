@@ -346,6 +346,7 @@ fn write_storage_values(
     bucket: String,
     values: BTreeMap<String, Value>,
     removed_keys: Vec<String>,
+    expected_maps: Option<BTreeMap<String, Option<Value>>>,
 ) -> Result<(), String> {
     let config = load_storage_config(&app)?;
     let directory = active_storage_directory(&app, config.active_directory.as_deref())?;
@@ -355,7 +356,21 @@ fn write_storage_values(
             directory.display()
         ));
     }
+    if bucket == "idb" {
+        if let Some(expected) = expected_maps {
+            storage::check_map_versions(&directory, &expected)?;
+        }
+    }
     storage::write_values(&directory, &bucket, values, removed_keys)
+}
+
+#[tauri::command]
+fn get_mindmap_file_path(app: AppHandle, id: String) -> Result<String, String> {
+    let config = load_storage_config(&app)?;
+    let directory = active_storage_directory(&app, config.active_directory.as_deref())?;
+    Ok(storage::mindmap_path(&directory, &id)?
+        .to_string_lossy()
+        .into_owned())
 }
 
 #[tauri::command]
@@ -725,6 +740,7 @@ pub fn run() {
             get_storage_location,
             read_storage_values,
             write_storage_values,
+            get_mindmap_file_path,
             schedule_storage_directory,
             schedule_default_storage_directory,
             choose_json_export_directory,

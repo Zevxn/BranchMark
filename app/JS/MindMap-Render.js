@@ -924,6 +924,7 @@ function updateTransform() {
 };
 
 function updateToolbar() {
+    updateMindMapFileActions();
     const hasSel = state.selectedIds.size > 0;
     const hasRelation = Boolean(state.selectedRelationId);
     const hasSummary = Boolean(state.selectedSummaryId);

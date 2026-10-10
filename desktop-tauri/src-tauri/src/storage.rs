@@ -109,6 +109,29 @@ fn value_path(directory: &Path, key: &str) -> Result<PathBuf, String> {
     Ok(parent.join(format!("{}.json", encode_key(file_key)?)))
 }
 
+pub(super) fn mindmap_path(directory: &Path, id: &str) -> Result<PathBuf, String> {
+    let path = value_path(directory, &format!("{MAP_PREFIX}{id}{MAP_SUFFIX}"))?;
+    if read_regular_file(&path, "导图文件")?.is_none() {
+        return Err("当前导图文件不存在，请先保存导图".to_string());
+    }
+    Ok(path)
+}
+
+pub(super) fn check_map_versions(
+    directory: &Path,
+    expected: &BTreeMap<String, Option<Value>>,
+) -> Result<(), String> {
+    for (key, value) in expected {
+        if !key.starts_with(MAP_PREFIX) || !key.ends_with(MAP_SUFFIX) {
+            return Err("导图文件校验键无效".to_string());
+        }
+        if read_value(&value_path(directory, key)?)?.as_ref() != value.as_ref() {
+            return Err("文件已被外部修改，请先重新加载当前导图。".to_string());
+        }
+    }
+    Ok(())
+}
+
 fn read_state(directory: &Path) -> Result<Values, String> {
     let data = read_value(&directory.join(STATE_FILE))?.unwrap_or_else(|| serde_json::json!({}));
     let mut values: Values = serde_json::from_value(data)
@@ -310,6 +333,46 @@ mod tests {
             vec![],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn external_map_changes_are_checked_before_saving() {
+        let directory = TestDirectory::new();
+        let key = "MindMapData.__REF__A:中文-extra";
+        let original = serde_json::json!({"data":{"topic":"原内容"}});
+        let expected = BTreeMap::from([(key.to_string(), Some(original.clone()))]);
+        save(&directory.0, "idb", key, original.clone());
+        check_map_versions(&directory.0, &expected).unwrap();
+        let path = mindmap_path(&directory.0, "A:中文").unwrap();
+        assert!(path.is_absolute());
+        assert_eq!(
+            path.file_name().unwrap(),
+            "%41%3A%E4%B8%AD%E6%96%87.json"
+        );
+        // 格式和字段顺序变化不属于内容冲突。
+        fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({"data":original,"version":1})).unwrap(),
+        )
+        .unwrap();
+        check_map_versions(&directory.0, &expected).unwrap();
+        save(
+            &directory.0,
+            "idb",
+            key,
+            serde_json::json!({"data":{"topic":"Agent 修改"}}),
+        );
+        assert!(check_map_versions(&directory.0, &expected)
+            .unwrap_err()
+            .contains("外部修改"));
+        fs::write(&path, b"{incomplete").unwrap();
+        assert!(check_map_versions(&directory.0, &expected).is_err());
+        fs::remove_file(&path).unwrap();
+        assert!(check_map_versions(&directory.0, &expected)
+            .unwrap_err()
+            .contains("外部修改"));
+        assert!(mindmap_path(&directory.0, "A:中文").is_err());
+        check_map_versions(&directory.0, &BTreeMap::from([(key.to_string(), None)])).unwrap();
     }
 
     #[test]

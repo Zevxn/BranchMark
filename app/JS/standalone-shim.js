@@ -57,6 +57,9 @@
     let tauriStorageData = null;
     let tauriStorageLoadPromise = null;
     let tauriStorageWriteQueue = Promise.resolve();
+    const tauriMindMapBaselines = new Map();
+    const tauriMindMapBaselineKey = 'branchmark:current-map-file-baseline';
+    const isTauriMindMapKey = key => /^MindMapData\.__REF__(.+)-extra$/.test(key);
 
     // !SECTION 宿主环境与 Quicker 状态初始化
     // SECTION Quicker 状态与本地存储适配
@@ -210,6 +213,12 @@
             tauriStorageLoadPromise = (async () => {
                 const values = await tauriCore.invoke('read_storage_values', { bucket: 'chrome', keys: null });
                 tauriStorageData = { chrome: normalizeTauriStorageValues(values), idb: {} };
+                try {
+                    const saved = JSON.parse(window.sessionStorage?.getItem(tauriMindMapBaselineKey) || 'null');
+                    if (saved && isTauriMindMapKey(saved.key)) tauriMindMapBaselines.set(saved.key, saved.value);
+                } catch (error) {
+                    console.warn('[Tauri] 恢复导图文件基线失败:', error);
+                }
                 return tauriStorageData;
             })().catch(error => {
                 tauriStorageLoadPromise = null;
@@ -225,11 +234,32 @@
         return tauriStorageData;
     }
 
+    function persistTauriMindMapBaseline() {
+        const id = tauriStorageData.chrome.currentFileID;
+        const key = `MindMapData.__REF__${id}-extra`;
+        if (!tauriMindMapBaselines.has(key)) return;
+        try {
+            window.sessionStorage?.setItem(tauriMindMapBaselineKey, JSON.stringify({
+                key, value: tauriMindMapBaselines.get(key),
+            }));
+        } catch (error) {
+            console.warn('[Tauri] 缓存导图文件基线失败:', error);
+        }
+    }
+
+    function queueTauriStorageOperation(callback) {
+        const operation = tauriStorageWriteQueue.then(async () => {
+            await ensureTauriStorageLoaded();
+            return callback();
+        });
+        tauriStorageWriteQueue = operation.catch(() => {});
+        return operation;
+    }
+
     function updateTauriStorage(bucketName, values, removedKeys = []) {
         const nextValues = clone(values || {});
         const nextRemovedKeys = [...removedKeys].filter(Boolean);
-        const operation = tauriStorageWriteQueue.then(async () => {
-            await ensureTauriStorageLoaded();
+        return queueTauriStorageOperation(async () => {
             const bucket = tauriStorageData[bucketName];
             // MindMapData 是当前导图的内存快照，业务状态文件只保存导图 ID。
             const persistedValues = Object.fromEntries(Object.entries(nextValues).filter(([key, value]) =>
@@ -241,7 +271,17 @@
                     bucket: bucketName,
                     values: persistedValues,
                     removedKeys: persistedRemovedKeys,
+                    expectedMaps: bucketName === 'idb'
+                        ? Object.fromEntries(Object.keys(persistedValues).filter(isTauriMindMapKey)
+                            .map(key => [key, clone(tauriMindMapBaselines.get(key) ?? null)]))
+                        : null,
                 });
+            }
+            if (bucketName === 'idb') {
+                Object.entries(nextValues).forEach(([key, value]) => {
+                    if (isTauriMindMapKey(key)) tauriMindMapBaselines.set(key, clone(value));
+                });
+                nextRemovedKeys.forEach(key => tauriMindMapBaselines.delete(key));
             }
             if (bucketName === 'chrome') {
                 if (Object.hasOwn(nextValues, 'currentFileID') && nextValues.currentFileID !== bucket.currentFileID) {
@@ -250,9 +290,8 @@
                 Object.assign(bucket, nextValues);
                 nextRemovedKeys.forEach(key => delete bucket[key]);
             }
+            persistTauriMindMapBaseline();
         });
-        tauriStorageWriteQueue = operation.catch(() => {});
-        return operation;
     }
 
     async function loadTauriCurrentMindMap(keys) {
@@ -355,11 +394,18 @@
 
     async function idbRead(keys) {
         if (tauriCore) {
-            await waitForTauriStorage();
             const list = keys === null || keys === undefined
                 ? null
                 : (Array.isArray(keys) ? keys : [keys]);
-            return normalizeTauriStorageValues(await tauriCore.invoke('read_storage_values', { bucket: 'idb', keys: list }));
+            return queueTauriStorageOperation(async () => {
+                const values = normalizeTauriStorageValues(await tauriCore.invoke('read_storage_values', { bucket: 'idb', keys: list }));
+                // 普通读取不接受已变更文件；仅在成功重新加载后显式更新已有基线。
+                (list || Object.keys(values)).filter(isTauriMindMapKey).forEach(key => {
+                    if (!tauriMindMapBaselines.has(key)) tauriMindMapBaselines.set(key, clone(values[key] ?? null));
+                });
+                persistTauriMindMapBaseline();
+                return values;
+            });
         }
 
         const db = await openDatabase();    // Quicker 中使用 IndexedDB 时会返回 null
@@ -445,6 +491,21 @@
 
     async function handleRuntimeMessage(message) {
         switch (message && message.action) {
+            case 'TAURI_GET_MINDMAP_BASELINE':
+            case 'TAURI_ACCEPT_MINDMAP_FILE': {
+                if (!tauriCore) return { success: false, error: '此功能仅适用于桌面版' };
+                const key = `MindMapData.__REF__${message.id}-extra`;
+                return queueTauriStorageOperation(() => {
+                    if (message.action === 'TAURI_ACCEPT_MINDMAP_FILE') {
+                        tauriMindMapBaselines.set(key, clone(message.snapshot));
+                        if (String(tauriStorageData.chrome.currentFileID) === String(message.id)) {
+                            tauriStorageData.chrome.MindMapData = clone(message.snapshot);
+                        }
+                        persistTauriMindMapBaseline();
+                    }
+                    return { success: true, snapshot: clone(tauriMindMapBaselines.get(key)) };
+                });
+            }
             case 'IDB_GET':
                 return { success: true, data: await idbRead(message.keys) };
             case 'IDB_SET':

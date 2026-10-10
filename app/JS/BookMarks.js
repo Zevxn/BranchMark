@@ -91,7 +91,7 @@ uiContainer.innerHTML = `
 
         <div class="search-bar-row" id="searchBarRow">
             <div class="search-input-group">
-                <input type="text" class="search-input" id="searchInput" data-i18n-placeholder="bookmarks.search_placeholder" placeholder="搜索名称或链接..." autocomplete="off">
+                <input type="text" class="search-input" id="searchInput" data-i18n-placeholder="bookmarks.search_placeholder" placeholder="搜索导图名称..." autocomplete="off">
                 <i class="fa-solid fa-arrow-right search-action-icon" id="doSearchIcon" data-i18n-title="bookmarks.search_title" title="搜索"></i>
             </div>
         </div>
@@ -2149,6 +2149,7 @@ class myBookmarkManager {
                 currentFileID: itemId, MindMapData: this.replyData, MindMapAction: 'open', fileName: name
             });
             sessionStorage.setItem('currentFileID', itemId);
+            if (typeof updateMindMapFileActions === 'function') updateMindMapFileActions();
             console.log('confirmNewItem 调用-this.data.items[itemId]',this.replyData);
         }else if (this.action==='save_markdown'){    // 只有脑图页面才有保存思维导图的动作
             if (location.href.includes('preview.html')){

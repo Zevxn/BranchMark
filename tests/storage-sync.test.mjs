@@ -20,6 +20,7 @@ function startRuntime({
     tauri = null,
     indexedDB = null,
     storageValues = new Map(),
+    sessionValues = new Map(),
     host = 'mindmap.test',
 } = {}) {
     const location = { href: `https://${host}/HTML/MindMap.html` };
@@ -28,6 +29,7 @@ function startRuntime({
         createElement() { return { click() {} }; },
     };
     const window = { location, document, open() {} };
+    window.sessionStorage = createLocalStorage(sessionValues);
     if (webview) window.chrome = { webview };
     if (bridge) window.$quickerSync = bridge;
     if (tauri) window.__TAURI__ = { core: { invoke: tauri } };
@@ -260,6 +262,13 @@ const tauriInvoke = async (command, args = {}) => {
             .map(key => [key, structuredClone(values[key])]));
     }
     if (command === 'write_storage_values') {
+        for (const [key, expected] of Object.entries(args.expectedMaps || {})) {
+            assert.ok(/^MindMapData\.__REF__.+-extra$/.test(key));
+            if (unreadableKeys.has(key)) throw new Error('测试：导图文件损坏');
+            if (JSON.stringify(values[key] ?? null) !== JSON.stringify(expected)) {
+                throw new Error('文件已被外部修改，请先重新加载当前导图。');
+            }
+        }
         if (failNextWrite || (failWriteKey && Object.hasOwn(args.values, failWriteKey))) {
             failNextWrite = false;
             failWriteKey = null;
@@ -367,6 +376,38 @@ assert.equal((await afterDelete.window.chrome.storage.local.get('MindMapData')).
 assert.deepEqual(tauriValues.idb[mapKey], tauriEditedSnapshot, '删除其他文件不能影响已保存导图');
 // !SECTION Tauri 分文件存储
 
+// SECTION 外部导图修改与写入保护
+const fileSession = new Map();
+await tauriReloaded.window.chrome.storage.local.set({ currentFileID: 'tauri_file' });
+const externalRuntime = startRuntime({ tauri: tauriInvoke, sessionValues: fileSession });
+const externalMessage = message => externalRuntime.window.chrome.runtime.sendMessage(message);
+await externalMessage({ action: 'IDB_GET', keys: mapKey });
+const agentSnapshot = structuredClone(tauriEditedSnapshot);
+agentSnapshot.tabs[0].data.topic = 'Agent 修改';
+tauriValues.idb[mapKey] = agentSnapshot;
+await assert.rejects(externalMessage({ action: 'IDB_SET', data: { [mapKey]: tauriEditedSnapshot } }), /外部修改/);
+assert.deepEqual(tauriValues.idb[mapKey], agentSnapshot, '保存冲突不得覆盖外部文件');
+await externalMessage({ action: 'IDB_GET', keys: mapKey });
+await assert.rejects(externalMessage({ action: 'IDB_SET', data: { [mapKey]: tauriEditedSnapshot } }), /外部修改/,
+    '普通读取不得提前接受外部版本');
+const restoredRuntime = startRuntime({ tauri: tauriInvoke, sessionValues: fileSession });
+await assert.rejects(restoredRuntime.window.chrome.runtime.sendMessage({
+    action: 'IDB_SET', data: { [mapKey]: tauriEditedSnapshot },
+}), /外部修改/, '页面刷新后仍需保留旧文件基线，不能把外部修改当成可覆盖版本');
+await externalMessage({ action: 'TAURI_ACCEPT_MINDMAP_FILE', id: 'tauri_file', snapshot: agentSnapshot });
+await externalMessage({ action: 'IDB_SET', data: { [mapKey]: tauriEditedSnapshot } });
+await externalMessage({ action: 'IDB_SET', data: { [mapKey]: tauriEditedSnapshot } });
+assert.deepEqual(tauriValues.idb[mapKey], tauriEditedSnapshot, '接受新版本后可继续保存，应用自身保存不应冲突');
+delete tauriValues.idb[mapKey];
+await assert.rejects(externalMessage({ action: 'IDB_SET', data: { [mapKey]: tauriEditedSnapshot } }), /外部修改/);
+assert.equal(Object.hasOwn(tauriValues.idb, mapKey), false, '外部删除文件后不得自动重建旧内容');
+tauriValues.idb[mapKey] = tauriEditedSnapshot;
+unreadableKeys.add(mapKey);
+await assert.rejects(externalMessage({ action: 'IDB_SET', data: { [mapKey]: tauriEditedSnapshot } }), /文件损坏/);
+unreadableKeys.clear();
+await tauriReloaded.window.chrome.storage.local.set({ currentFileID: null });
+// !SECTION 外部导图修改与写入保护
+
 // SECTION 收藏夹与文件一致性
 const bookmarksSource = await readFile('app/JS/BookMarks.js', 'utf8');
 const testSession = new Map();
@@ -374,7 +415,7 @@ const bookmarkContext = vm.createContext({
     window: tauriReloaded.window,
     chrome: tauriReloaded.window.chrome,
     console: { log() {} },
-    document: { title: '', getElementById() { return {}; } },
+    document: { title: '', getElementById() { return { dataset: {}, setAttribute() {} }; } },
     sessionStorage: { setItem(key, value) { testSession.set(key, value); } },
     async idbGet(keys) {
         const response = await tauriReloaded.window.chrome.runtime.sendMessage({ action: 'IDB_GET', keys });

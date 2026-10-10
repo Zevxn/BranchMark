@@ -260,6 +260,8 @@
         #btn-settings { flex: 0 0 auto; }
         #btn-storage-location { flex: 0 0 auto; }
         #btn-storage-location[hidden],
+        #btn-copy-map-path[hidden],
+        #btn-reload-map[hidden],
         .mindmap-tauri-storage[hidden] { display: none !important; }
         .mindmap-settings-popover {
             position: fixed;
@@ -2217,8 +2219,9 @@
         .modal-win.fullscreen { width: 100vw; height: 100vh; border: none; border-radius: 0; }
         .modal-win.narrow { width: 900px; max-width: 95vw; }
         .modal-head { padding: 12px 24px; border-bottom: 1px solid var(--header-border-bottom); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; background: var(--header-bg-bottom); }
-        .modal-head .btn { min-height: 36px; font-family: inherit; line-height: 20px; transition: background-color 0.15s ease, color 0.15s ease; }
+        .modal-head .btn { min-height: 36px; font-family: inherit; font-weight: 500; line-height: 20px; transition: background-color 0.15s ease, color 0.15s ease; }
         .modal-head .btn.primary { min-width: 64px; padding: 7px 14px; color: var(--modal-primary-text); }
+        #btn-close-modal { justify-content: center; }
         .modal-head .btn.primary:hover { background: color-mix(in srgb, var(--primary) 88%, black); }
         #modalTopicInput { color: var(--text-color); }
         .modal-body { flex: 1; display: flex; overflow: hidden; min-height: 0; }
@@ -2843,6 +2846,8 @@
         <div class="divider"></div>
         <button class="btn" id="btn-new"><i class="ri-file-add-line" title="新建脑图"></i></button>
         <button class="btn" id="btn-save"><i class="ri-save-3-fill" title="保存脑图"></i></button>
+        <button class="btn" id="btn-copy-map-path" type="button" title="复制当前导图文件路径" aria-label="复制当前导图文件路径" hidden disabled><i class="ri-file-copy-line" aria-hidden="true"></i></button>
+        <button class="btn" id="btn-reload-map" type="button" title="从硬盘重新加载当前导图" aria-label="从硬盘重新加载当前导图" hidden disabled><i class="ri-refresh-line" aria-hidden="true"></i></button>
         <button class="btn" id="btn-open"><i class="ri-download-2-fill" title="导入脑图"></i></button>
         <button class="btn" id="btn-export"><i class="ri-upload-2-fill" title="导出脑图"></i></button>
         <div class="divider"></div>
