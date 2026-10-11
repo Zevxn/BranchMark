@@ -367,6 +367,7 @@ function renderInteractiveBlocks(element) {
                 }
                 // 隐藏期间仍参与布局；只在主题就绪且尺寸匹配当前视口后显示。
                 if (event.data.ready === true) frame.classList.remove('is-loading');
+                if (!expanded) wrapper.dispatchEvent(new CustomEvent('branchmark-content-resize', { bubbles: true }));
             }
         };
 

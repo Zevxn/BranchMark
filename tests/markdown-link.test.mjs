@@ -31,6 +31,7 @@ const location = {
 };
 const context = vm.createContext({
     URL,
+    CustomEvent: Event,
     console,
     document: { baseURI: location.href },
     location,
@@ -134,7 +135,11 @@ function createLink(href) {
 
 async function bindLink(href) {
     const link = createLink(href);
-    await context.processRichContent({ querySelectorAll: selector => selector === 'a[href]' ? [link] : [] });
+    await context.processRichContent({
+        dataset: {},
+        dispatchEvent() {},
+        querySelectorAll: selector => selector === 'a[href]' ? [link] : [],
+    });
     return link;
 }
 

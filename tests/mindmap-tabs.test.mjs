@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
-const [html, mindMap] = await Promise.all([
+const [html, mindMap, richContentSource] = await Promise.all([
     readFile('app/HTML/MindMap.html', 'utf8'),
     readMindMapSource(),
+    readFile('app/JS/renderMD.js', 'utf8'),
 ]);
 
 const normalizerSource = mindMap.slice(
@@ -270,5 +271,132 @@ assert.deepEqual(subtree.relations.map(relation => relation.id), ['internal_rela
 assert.deepEqual(subtree.summaries.map(summary => summary.id), ['internal_summary'],
     '新页面只应保留成员全部位于子树内的总结');
 assert.equal(JSON.stringify(sourceTree), sourceTreeBefore, '创建页面不得修改来源导图');
+
+// SECTION 富文本异步撑高时的滚动恢复
+class ScrollBody extends EventTarget {
+    constructor() {
+        super();
+        this.isConnected = true;
+        this.dataset = {};
+        this.loadingCount = 2;
+        this.maxTop = 20;
+        this.top = 0;
+    }
+    closest() { return { dataset: { nodeId: 'root' } }; }
+    hasAttribute(name) { return name === 'data-rich-content-pending' && 'richContentPending' in this.dataset; }
+    querySelector() { return this.loadingCount > 0 ? {} : null; }
+    get scrollTop() { return this.top; }
+    set scrollTop(value) { this.top = Math.max(0, Math.min(value, this.maxTop)); }
+    resize(maxTop, loadingCount) {
+        this.maxTop = maxTop;
+        this.loadingCount = loadingCount;
+        this.dispatchEvent(new Event('branchmark-content-resize'));
+    }
+}
+const scrollCallbacks = [];
+let scrollBody = new ScrollBody();
+const scrollState = { scrollMap: new Map([['root', 800]]), data: {} };
+const scrollContext = vm.createContext({
+    state: scrollState,
+    AbortController,
+    document: { querySelectorAll: () => [scrollBody] },
+    sanitizeMindMapScrollMap: value => Object.fromEntries(value),
+    requestAnimationFrame: callback => scrollCallbacks.push(callback),
+    setTimeout: callback => scrollCallbacks.push(callback),
+});
+vm.runInContext(mindMap.slice(mindMap.indexOf('const pendingCardScrollRestores'),
+    mindMap.indexOf('function saveStorage')), scrollContext);
+scrollContext.restoreGlobalScrolls();
+scrollCallbacks.splice(0).forEach(callback => callback());
+assert.equal(scrollBody.scrollTop, 20, '加载期间浏览器会将滚动位置截到当前内容范围');
+scrollContext.saveGlobalScrolls();
+assert.equal(scrollState.scrollMap.get('root'), 800, '等待撑高期间保存不得覆盖原滚动位置');
+scrollBody.resize(350, 1);
+scrollContext.saveGlobalScrolls();
+assert.equal(scrollState.scrollMap.get('root'), 800, '多个交互块应等待全部就绪');
+scrollBody.resize(1200, 0);
+assert.equal(scrollBody.scrollTop, 800, '超过原有定时重试窗口后仍应恢复滚动位置');
+scrollBody.scrollTop = 500;
+scrollBody.dispatchEvent(new Event('scroll'));
+scrollBody.resize(1400, 0);
+assert.equal(scrollBody.scrollTop, 500, '完成恢复后控件尺寸变化不得拉回用户位置');
+scrollContext.saveGlobalScrolls();
+assert.equal(scrollState.scrollMap.get('root'), 500);
+
+scrollBody = new ScrollBody();
+scrollContext.restoreGlobalScrolls();
+scrollBody.scrollTop = 5;
+scrollBody.dispatchEvent(new Event('scroll'));
+scrollBody.resize(1200, 0);
+scrollCallbacks.splice(0).forEach(callback => callback());
+assert.equal(scrollBody.scrollTop, 5, '等待期间主动滚动应取消后续恢复');
+scrollContext.saveGlobalScrolls();
+assert.equal(scrollState.scrollMap.get('root'), 5);
+
+scrollBody = new ScrollBody();
+scrollContext.restoreGlobalScrolls();
+const detachedBody = scrollBody;
+detachedBody.isConnected = false;
+scrollBody = new ScrollBody();
+scrollBody.loadingCount = 0;
+scrollBody.maxTop = 100;
+scrollState.scrollMap = new Map([['root', 35]]);
+scrollContext.restoreGlobalScrolls();
+scrollCallbacks.splice(0).forEach(callback => callback());
+assert.equal(scrollBody.scrollTop, 35, '旧页面排队的恢复任务不得影响新页面同 ID 卡片');
+
+// 运行真实富文本流程，只替代 Mermaid 库的耗时渲染，验证多个图表和混合内容。
+const diagrams = [];
+Object.assign(scrollContext, {
+    CustomEvent: Event,
+    window: {},
+    getMarkdownTauriCore: () => null,
+    mermaid: {},
+    mermaidDiagramStates: new WeakMap(),
+    renderMermaidDiagram: () => new Promise((resolve, reject) => diagrams.push({ resolve, reject })),
+});
+scrollContext.document.createElement = () => ({ appendChild() {} });
+vm.runInContext(richContentSource.slice(richContentSource.indexOf('async function processRichContent(element)'),
+    richContentSource.indexOf('// !SECTION 富文本渲染')), scrollContext);
+function createMermaidBody(interactiveCount = 0) {
+    const body = new ScrollBody();
+    body.loadingCount = interactiveCount;
+    body.querySelectorAll = selector => selector === 'code.language-mermaid'
+        ? [1, 2].map(() => ({ textContent: 'graph TD; A-->B', parentElement: { replaceWith() {} } })) : [];
+    return body;
+}
+for (const interactiveCount of [0, 1]) {
+    scrollBody = createMermaidBody(interactiveCount);
+    scrollState.scrollMap = new Map([['root', 800]]);
+    const rendering = scrollContext.processRichContent(scrollBody);
+    scrollContext.restoreGlobalScrolls();
+    scrollCallbacks.splice(0).forEach(callback => callback());
+    scrollContext.saveGlobalScrolls();
+    assert.equal(scrollState.scrollMap.get('root'), 800, 'Mermaid 未完成时不得保存截短的位置');
+    scrollBody.maxTop = 350;
+    diagrams.shift().resolve();
+    await new Promise(setImmediate);
+    scrollBody.resize(350, interactiveCount);
+    scrollContext.saveGlobalScrolls();
+    assert.equal(scrollState.scrollMap.get('root'), 800, '首张图完成后仍应等待剩余图表');
+    scrollBody.maxTop = 1200;
+    diagrams.shift().resolve();
+    await rendering;
+    assert.equal(scrollBody.scrollTop, 800, '全部 Mermaid 完成后应恢复真实滚动位置');
+    assert.equal('richContentPending' in scrollBody.dataset, false);
+    if (interactiveCount) {
+        scrollBody.scrollTop = 20;
+        scrollContext.saveGlobalScrolls();
+        assert.equal(scrollState.scrollMap.get('root'), 800, '混合卡片仍应等待交互 iframe 完成');
+        scrollBody.resize(1400, 0);
+        assert.equal(scrollBody.scrollTop, 800);
+    }
+}
+scrollBody = createMermaidBody();
+const failedRendering = scrollContext.processRichContent(scrollBody);
+diagrams.shift().reject(new Error('渲染异常'));
+await assert.rejects(failedRendering, /渲染异常/);
+assert.equal('richContentPending' in scrollBody.dataset, false, '异常也必须清理加载标记');
+// !SECTION 富文本异步撑高时的滚动恢复
 
 console.log('多页面 Tab 校验通过：旧数据迁移、页面状态隔离、基础交互与工作簿持久化逻辑完整。');

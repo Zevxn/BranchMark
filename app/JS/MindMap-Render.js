@@ -224,11 +224,15 @@ function commitMindMapInlineEditor() {
 
 // !SECTION 选择样式与拖拽提交
 // SECTION 存储与历史记录
+const pendingCardScrollRestores = new WeakMap();
+
 function saveGlobalScrolls() {
     state.scrollMap = new Map(Object.entries(sanitizeMindMapScrollMap(state.scrollMap, state.data)));
     document.querySelectorAll('.card-body').forEach(el => {
         const card = el.closest('.node-card');
         if (!card) return;
+        // 异步内容尚未撑高时，临时截短的位置不能覆盖已保存的位置。
+        if (pendingCardScrollRestores.has(el)) return;
         const nodeId = card.dataset.nodeId;
         const scrollTop = Number(el.scrollTop);
         if (Number.isFinite(scrollTop) && scrollTop > 0) state.scrollMap.set(nodeId, scrollTop);
@@ -237,17 +241,42 @@ function saveGlobalScrolls() {
 };
 
 function restoreGlobalScrolls() {
-    const restore = () => {
-        document.querySelectorAll('.card-body').forEach(el => {
-            const card = el.closest('.node-card');
-            if(card && state.scrollMap.has(card.dataset.nodeId)) {
-                el.scrollTop = state.scrollMap.get(card.dataset.nodeId);
-            }
-        });
-    };
-    restore();
-    requestAnimationFrame(restore);
-    setTimeout(restore, 50);
+    document.querySelectorAll('.card-body').forEach(el => {
+        const card = el.closest('.node-card');
+        if (!card || !state.scrollMap.has(card.dataset.nodeId) || pendingCardScrollRestores.has(el)) return;
+        const top = state.scrollMap.get(card.dataset.nodeId);
+        const controller = new AbortController();
+        let lastTop = el.scrollTop;
+        const finish = () => {
+            controller.abort();
+            pendingCardScrollRestores.delete(el);
+        };
+        const isLoading = () => el.hasAttribute('data-rich-content-pending')
+            || el.querySelector('.interactive-block-frame.is-loading');
+        const restore = () => {
+            if (controller.signal.aborted) return;
+            if (!el.isConnected) { finish(); return; }
+            el.scrollTop = top;
+            lastTop = el.scrollTop;
+        };
+        if (isLoading()) {
+            pendingCardScrollRestores.set(el, top);
+            el.addEventListener('branchmark-content-resize', () => {
+                restore();
+                if (!isLoading()) finish();
+            }, { signal: controller.signal });
+            el.addEventListener('scroll', () => {
+                // 保留用户在等待期间主动选择的位置，不被稍后的就绪消息拉回。
+                if (Math.abs(el.scrollTop - lastTop) > 1) finish();
+            }, { passive: true, signal: controller.signal });
+        }
+        restore();
+        requestAnimationFrame(restore);
+        setTimeout(() => {
+            restore();
+            if (!isLoading()) finish();
+        }, 50);
+    });
 };
 
 function saveStorage() {

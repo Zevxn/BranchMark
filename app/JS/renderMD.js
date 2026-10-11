@@ -923,6 +923,8 @@ function renderMermaidDiagram(diagram) {
             diagram.svg = '';
             diagram.fullscreenButton.hidden = true;
             updateMermaidFullscreenDiagram(diagram, errorContent);
+        } finally {
+            diagram.wrapper.dispatchEvent(new CustomEvent('branchmark-content-resize', { bubbles: true }));
         }
     });
     mermaidRenderQueue = task.catch(() => {});
@@ -950,6 +952,20 @@ if (typeof mermaid !== 'undefined') initializeMermaidTheme(getMermaidTheme());
 // SECTION 富文本渲染
 // =============================================================================
 async function processRichContent(element) {
+    if (!element) return;
+    element.dataset.richContentPending = String((Number(element.dataset.richContentPending) || 0) + 1);
+    try {
+        await renderRichContent(element);
+    } finally {
+        const pending = Number(element.dataset.richContentPending) - 1;
+        if (pending > 0) element.dataset.richContentPending = String(pending);
+        else delete element.dataset.richContentPending;
+        // 包括 Mermaid、公式和高亮处理；成功或失败都通知外层重新恢复布局状态。
+        element.dispatchEvent(new CustomEvent('branchmark-content-resize', { bubbles: true }));
+    }
+}
+
+async function renderRichContent(element) {
     if (!element) return;
     if (typeof renderInteractiveBlocks === 'function') renderInteractiveBlocks(element);
     const useQuickerSubprogram = Boolean(
