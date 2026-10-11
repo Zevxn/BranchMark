@@ -1,0 +1,210 @@
+/* SECTION Markdown 交互块与放大窗口 */
+.interactive-block {
+    /* 保留自动布局的默认宽度，并填满较宽卡片的正文区域。 */
+    width: max(560px, 100%);
+    max-width: 100%;
+    height: var(--interactive-inline-height, 320px);
+    margin: 12px 0;
+    cursor: auto;
+}
+
+.interactive-block-surface {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    color: var(--text-color);
+    background: var(--card-bg);
+    border: 0;
+    border-radius: 8px;
+}
+
+.interactive-block-surface.is-expanded {
+    --interactive-side-spacing: clamp(12px, 2vw, 24px);
+    position: fixed;
+    inset: 0;
+    width: var(--interactive-width, 1200px);
+    height: var(--interactive-height, 320px);
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    margin: auto;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.interactive-block-surface::backdrop {
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.interactive-block-toolbar {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    height: 30px;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 1px 8px;
+    color: var(--text-color-secondary);
+    background: var(--card-bg);
+    font: 11px/1.4 system-ui, sans-serif;
+}
+
+.interactive-block-toolbar > span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1;
+}
+
+.interactive-block-toolbar > span > i {
+    font-size: 13px;
+}
+
+.interactive-block-expand {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.interactive-block-surface:hover .interactive-block-expand,
+.interactive-block-expand:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+@media (hover: none) {
+    .interactive-block-expand {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+.interactive-block-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.interactive-block-action:hover {
+    background: var(--btn-hover);
+    color: var(--primary);
+}
+
+.interactive-block-action:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.interactive-block-action[hidden] {
+    display: none;
+}
+
+/* 放大窗口沿用 Mermaid 的关闭按钮样式，顶部和右侧均留出 5px。 */
+.interactive-block-surface.is-expanded .interactive-block-toolbar {
+    height: 40px;
+    padding: 5px;
+}
+
+.interactive-block-close {
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--toolbar-border);
+    border-radius: 50%;
+    background: var(--toolbar-bg);
+    color: var(--text-color);
+    font-size: 18px;
+    transition: transform 0.3s ease;
+    transform-origin: center;
+}
+
+.interactive-block-close:hover {
+    background: #ff4d4f;
+    color: white;
+    transform: rotate(90deg);
+}
+
+.interactive-block-close:active {
+    transform: scale(0.95);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .interactive-block-close {
+        transition: none;
+    }
+}
+
+.interactive-block-viewport {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.interactive-block-surface.is-expanded .interactive-block-frame {
+    width: calc(100% - var(--interactive-side-spacing) - var(--interactive-side-spacing));
+    margin-inline: var(--interactive-side-spacing);
+}
+
+.interactive-block-scrollbar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 8px;
+    background: transparent;
+    touch-action: none;
+    cursor: default;
+}
+
+.interactive-block-scrollbar[hidden] {
+    display: none;
+}
+
+.interactive-block-scrollbar:focus-visible {
+    outline: 1px solid var(--primary);
+    outline-offset: -1px;
+}
+
+.interactive-block-scrollbar-thumb {
+    width: 4px;
+    margin: 0 2px;
+    border-radius: 4px;
+    background: var(--scroll-thumb);
+    opacity: 0.7;
+}
+
+.interactive-block-scrollbar:hover .interactive-block-scrollbar-thumb,
+.interactive-block-scrollbar.is-dragging .interactive-block-scrollbar-thumb {
+    background: var(--scroll-thumb-hover);
+    opacity: 1;
+}
+
+.interactive-block-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border: 0;
+    background: var(--card-bg);
+}
+
+/* 拖动节点或平移画布时，避免 iframe 截获后续鼠标移动和松开事件。 */
+#app.cursor-grabbing .interactive-block-frame {
+    pointer-events: none;
+}
+/* !SECTION Markdown 交互块与放大窗口 */

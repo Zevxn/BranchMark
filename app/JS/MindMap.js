@@ -35,6 +35,7 @@ function getMindMapExportBaseName() {
 function applyMindMapTheme(theme) {
     const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
     document.documentElement.dataset.theme = normalizedTheme;
+    if (typeof updateInteractiveBlockTheme === 'function') updateInteractiveBlockTheme();
     if (typeof updateMermaidTheme === 'function') {
         updateMermaidTheme().catch(error => console.warn('[Mermaid] 同步图表主题失败:', error));
     }

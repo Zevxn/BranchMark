@@ -919,7 +919,7 @@ function renderDock() {
 
 function updateTransform() {
     $('#canvas-layer').style.transform = `translate(${state.view.tx}px, ${state.view.ty}px) scale(${state.view.scale})`;
-    $('#app').className = state.mode==='PANNING'?'cursor-grabbing':(state.mode==='SELECTING'?'cursor-crosshair':'cursor-grab');
+    $('#app').className = (state.mode==='PANNING' || state.mode==='DRAGGING')?'cursor-grabbing':(state.mode==='SELECTING'?'cursor-crosshair':'cursor-grab');
     updateMindMapSummarySelectionAction();
 };
 

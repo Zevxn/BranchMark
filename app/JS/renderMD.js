@@ -951,6 +951,7 @@ if (typeof mermaid !== 'undefined') initializeMermaidTheme(getMermaidTheme());
 // =============================================================================
 async function processRichContent(element) {
     if (!element) return;
+    if (typeof renderInteractiveBlocks === 'function') renderInteractiveBlocks(element);
     const useQuickerSubprogram = Boolean(
         window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && getMarkdownQuickerSubprogram(),
     );
@@ -1689,7 +1690,7 @@ class RenderedMarkdownDragger {
     }
 
     getTarget(event) {
-        if (event.target.closest('button, a, input, textarea, .mermaid-btn, .document-markdown-block.is-removing')) return null;
+        if (event.target.closest('button, a, input, textarea, .mermaid-btn, .interactive-block, .document-markdown-block.is-removing')) return null;
         const block = event.target.closest('.document-markdown-block');
         return block && this.root.contains(block) ? block : null;
     }

@@ -11,6 +11,7 @@ BranchMark 是一款以本地数据为核心的思维导图与 Markdown 知识�
 - **思维导图编辑**：节点增删、拖拽、缩放、折叠、卡片与便利贴模式、撤销和重做。
 - **多标签页**：一份导图可包含多个页面，各页保存自己的节点与视图状态。
 - **Markdown 内容**：公式、Mermaid 图表、代码高亮、图片和链接渲染。
+- **交互笔记**：`interactive` 代码块运行 HTML/CSS/JavaScript，支持放大查看和继续操作。
 - **文档整理**：Markdown 文档素材预览、目录导航和内容块拖拽摘取。
 - **卡片关联与总结**：建立节点关联、添加多卡片总结，配合地图搜索定位内容。
 - **收藏夹目录**：文件夹管理、搜索、排序、重命名、移动和多选操作。
@@ -83,6 +84,31 @@ npm run desktop:build
 - JSON 导出保存一份导图的完整工作簿，包括标签页、节点、关联、总结和视图信息。它不等同于整个收藏夹与全部设置的备份。
 - Markdown 中引用的外部图片、网页和文件仍依赖各自的地址或文件位置；打开这些资源可能产生网络请求。
 
+## Markdown 交互块
+
+在笔记的 Markdown 源码中使用 `interactive` 围栏代码块，放入自包含的 HTML（可以包含 CSS 和 JavaScript）：
+
+````markdown
+拖动滑块，观察参数变化：
+
+```interactive
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<style>body { font: 14px system-ui; padding: 16px; }</style>
+<label>参数：
+  <input type="range" min="0" max="100" value="50"
+         oninput="document.querySelector('output').value = this.value">
+</label>
+<output>50</output>
+</html>
+```
+````
+
+交互块在笔记内根据内容自动撑高，内容变化时同步调整。右上角可放大查看，竖向滑块悬浮在网页背景上，不占用内容宽度；使用关闭按钮、Esc 或点击窗口外侧还原。放大与还原复用同一个 iframe，保留当次运行的输入和脚本状态。源码随 Markdown 保存、复制和导出；普通 Markdown 阅读器将它显示为代码块。
+
+交互脚本在隔离的 iframe 中运行，不提供访问导图数据或浏览器/Quicker/Tauri 宿主接口的通道。建议使用自包含代码；相对资源地址和依赖同源存储的代码不保证可用。修改源码、重新渲染笔记或刷新页面会重新运行，任意脚本内部状态不会自动保存到导图文件。
+
 ## 开发
 
 核心源码位于 `app/`。页面使用按顺序加载的经典 JavaScript 脚本；修改时需要保留跨文件的共享状态与调用约定。
@@ -92,6 +118,8 @@ npm run check
 npm test
 npm run build
 ```
+
+交互块的定向运行验证使用 `npm run test:interactive`（需先安装 `desktop/` 的依赖）；测试通过隐藏的 Electron 窗口直接加载 `app/`，不需要构建 `dist/`。
 
 `npm run build` 会清理并从 `app/` 重新生成 `dist/`。可用 `node scripts/dev-server.mjs --dist` 运行构建产物。
 
