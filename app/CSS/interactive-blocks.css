@@ -207,7 +207,8 @@
     visibility: hidden;
 }
 
-/* 拖动节点、平移或框选时，避免 iframe 截获后续鼠标移动和松开事件。 */
+/* 空格导航、拖动节点、平移或框选时，避免 iframe 截获画布操作。 */
+body.space-mode #app .interactive-block-surface:not(.is-expanded) .interactive-block-frame,
 #app.cursor-grabbing .interactive-block-frame,
 #app.cursor-crosshair .interactive-block-frame {
     pointer-events: none;

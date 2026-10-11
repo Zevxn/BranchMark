@@ -330,6 +330,137 @@ function positionMindMapContextMenu(menu, clientX, clientY) {
     submenu.style.bottom = 'auto';
 }
 
+// SECTION 交互学习提示词设置与复制
+const DEFAULT_INTERACTIVE_LEARNING_PROMPT = `根据上述内容设计交互学习控件。这个交互控件将嵌入 BranchMark 思维导图的笔记中，请提供源代码，并遵守以下规范：
+
+【视觉融合】
+- 使用简洁的工具型界面，减少装饰性标题、渐变、发光和重复卡片嵌套。
+- html、body 和最外层容器背景透明，不设置整页深蓝色或其他固定背景。
+- 内部面板使用中性灰，仅通过轻微底色和细边框区分层级。
+- 强调色用于曲线、选中状态和关键数值，避免大面积铺色。
+- 所有文字、边框、面板和图表颜色统一通过 CSS 变量管理。
+- 滑块采用简约扁平化 UI，细长的深灰色无描边圆角轨道
+- 图表优先使用 SVG，保证导图缩放后仍清晰；如使用 Canvas，需适配高分屏，并预留根据宿主缩放比例提高绘制分辨率、重新绘图的能力。
+
+【亮暗主题】
+- 嵌入时服从宿主主题，不自行固定 color-scheme，也不只根据操作系统主题判断。
+- 在 DOMContentLoaded 后，通过
+  getComputedStyle(document.documentElement).colorScheme
+  读取宿主提供的 light 或 dark，并设置控件自己的主题变量。
+- 监听来自 parent 的 branchmark-interactive-theme 消息，
+  在 requestAnimationFrame 中重新读取 color-scheme，更新主题。
+- Canvas、SVG、坐标轴、网格线、提示框也必须同步主题；
+  切换主题时保留输入值和交互状态。
+- 独立打开 HTML 时，才使用 prefers-color-scheme 作为主题依据。
+
+【参考颜色】
+亮色：正文 #24292e，次要文字 #666666，
+面板 #f6f8fa，边框 #e1e4e8，强调色 #007bff。
+暗色：正文 #e0e0e0，次要文字 #aaaaaa，
+面板 #303030，边框 #444444，强调色 #4dabf7。
+(除上述参考颜色外，可根据内容需要选用其他颜色，让交互控件更直观、美观但不花里胡哨。例如：绿色 #51cf66、橙色 #ffa94d、蓝紫色 #818cf8、青色 #22b8cf、玫红色 #f783ac。)
+
+【嵌入布局】
+- 宽度跟随容器，内容自然撑高。
+- 不使用固定页面高度或 100vh/min-height:100vh 撑满页面。
+- 窄窗口合理换行，宽窗口恢复多栏布局。
+- 输出自包含 HTML，包含所需 CSS 和 JavaScript。`;
+
+function applyInteractivePromptSetting(value) {
+    const prompt = typeof value === 'string' ? value.trim() : '';
+    mindMapSettings.interactivePrompt = prompt === DEFAULT_INTERACTIVE_LEARNING_PROMPT ? '' : prompt;
+    $('#settingInteractivePromptValue').textContent = mindMapSettings.interactivePrompt ? '已自定义' : '默认';
+}
+
+function initializeInteractivePromptSettings() {
+    const modal = $('#interactivePromptSettingsModal');
+    const input = $('#interactivePromptInput');
+    const error = $('#interactivePromptError');
+    const saveButton = $('#saveInteractivePrompt');
+    const close = () => hideMindMapTabModal(modal);
+
+    $('#btn-edit-interactive-prompt').onclick = () => {
+        input.value = mindMapSettings.interactivePrompt || DEFAULT_INTERACTIVE_LEARNING_PROMPT;
+        error.textContent = '';
+        setMindMapSettingsPopoverOpen(false);
+        // 关闭弹窗后返回仍可见的设置按钮。
+        $('#btn-settings').focus();
+        showMindMapTabModal(modal);
+        requestAnimationFrame(() => input.focus());
+    };
+    $('#cancelInteractivePrompt').onclick = close;
+    $('#resetInteractivePrompt').onclick = () => {
+        input.value = DEFAULT_INTERACTIVE_LEARNING_PROMPT;
+        error.textContent = '';
+        input.focus();
+    };
+    input.addEventListener('input', () => { error.textContent = ''; });
+    saveButton.onclick = async () => {
+        if (saveButton.disabled || !modal.classList.contains('show')) return;
+        const prompt = input.value.trim();
+        if (!prompt) {
+            error.textContent = '提示词不能为空。';
+            input.focus();
+            return;
+        }
+        saveButton.disabled = true;
+        error.textContent = '';
+        try {
+            await chrome.storage.local.set({
+                [MINDMAP_INTERACTIVE_PROMPT_STORAGE_KEY]: prompt === DEFAULT_INTERACTIVE_LEARNING_PROMPT ? '' : prompt
+            });
+            applyInteractivePromptSetting(prompt);
+            close();
+            showTopToast('✅ 交互提示词已保存');
+        } catch (err) {
+            console.warn('[MindMap] 保存交互提示词失败:', err);
+            error.textContent = '保存失败，请重试。';
+        } finally {
+            saveButton.disabled = false;
+        }
+    };
+    modal.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if (event.isComposing || event.keyCode === 229) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            close();
+        } else if (event.key === 'Tab') {
+            const controls = Array.from(modal.querySelectorAll('textarea, button')).filter(control => !control.disabled);
+            const first = controls[0];
+            const last = controls[controls.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        }
+    });
+    modal.addEventListener('mousedown', event => {
+        event.stopPropagation();
+        modal.dataset.backdropPressed = event.target === modal ? 'true' : 'false';
+    });
+    modal.addEventListener('click', event => {
+        const shouldClose = event.target === modal && modal.dataset.backdropPressed === 'true';
+        delete modal.dataset.backdropPressed;
+        if (shouldClose) close();
+    });
+}
+
+async function copyInteractiveLearningPrompt(markdown) {
+    const prompt = `${markdown}\n\n${mindMapSettings.interactivePrompt || DEFAULT_INTERACTIVE_LEARNING_PROMPT}`;
+    try {
+        await navigator.clipboard.writeText(prompt);
+        showTopToast('✅ 交互学习提示词已复制！');
+    } catch (error) {
+        console.warn('[MindMap] 复制交互学习提示词失败:', error);
+        showTopToast('❌ 复制提示词失败，请重试');
+    }
+}
+// !SECTION 交互学习提示词设置与复制
+
 function initializeMapContextMenu() {
     const contextMenu = document.getElementById('contextMenu');
     let contextTargetKind = 'node';
@@ -464,6 +595,14 @@ function initializeMapContextMenu() {
         if (swatch) {
             action = 'set-color';
             colorVal = swatch.dataset.color; // 【修改】使用 data-val
+        }
+        if (action === 'copy-interactive-prompt') {
+            const target = contextTargetKind === 'summary'
+                ? getMindMapSummaryById(contextTargetId)
+                : findNode(state.data, contextTargetId);
+            contextMenu.classList.remove('active');
+            if (target) void copyInteractiveLearningPrompt(target.content || target.topic || '');
+            return;
         }
         if (contextTargetKind === 'summary') {
             const summary = getMindMapSummaryById(contextTargetId);

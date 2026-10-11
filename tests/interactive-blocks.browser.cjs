@@ -208,7 +208,7 @@ async function run() {
     await waitFor('window.interactiveReports.some(item => item.scrollTop > 100)');
     assert.ok(await evaluate('Number(window.testSurface.querySelector(".interactive-block-scrollbar").getAttribute("aria-valuenow")) > 100'),
         '拖动悬浮滑块应滚动网页并同步位置');
-    await evaluate(`window.dispatchEvent(new MessageEvent('message', { source: window, data: { type: 'branchmark-interactive-escape' } }))`);
+    await evaluate(`window.dispatchEvent(new MessageEvent('message', { source: window, data: { type: 'branchmark-interactive-event', event: { type: 'keydown', key: 'Escape' } } }))`);
     assert.equal(await evaluate('window.testSurface.matches(":modal")'), true, '其他来源不能通过关闭消息控制此交互块');
     await evaluate('window.testFrame.contentWindow.postMessage("focus", "*")');
     await waitFor('window.interactiveReports.some(item => item.focused)');

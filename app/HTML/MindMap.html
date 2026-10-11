@@ -1000,6 +1000,45 @@
             font-size: 13px;
             line-height: 20px;
         }
+        /* SECTION 交互提示词设置 */
+        #interactivePromptSettingsModal .modal-content {
+            width: 720px;
+            max-height: calc(100dvh - 32px);
+            display: flex;
+            flex-direction: column;
+        }
+        #interactivePromptSettingsModal .bookmark-modal-body {
+            min-height: 0;
+            overflow-y: auto;
+        }
+        #interactivePromptSettingsModal .modal-header,
+        #interactivePromptSettingsModal .modal-footer { flex-shrink: 0; }
+        #interactivePromptHelp {
+            margin: 0 0 12px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        #interactivePromptInput {
+            display: block;
+            box-sizing: border-box;
+            width: 100%;
+            height: clamp(180px, 50dvh, 480px);
+            padding: 12px;
+            resize: vertical;
+            color: var(--text-color);
+            background: var(--bg-input);
+            border: 1px solid var(--toolbar-border);
+            border-radius: 6px;
+            font: 13px/1.65 var(--code-font-family);
+        }
+        #interactivePromptInput:focus {
+            outline: 2px solid var(--primary);
+            outline-offset: -2px;
+            background: var(--bg-input-focus);
+        }
+        #resetInteractivePrompt { margin-right: auto; }
+        #interactivePromptSettingsModal .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        /* !SECTION 交互提示词设置 */
         .tree-connector-layer,
         .relation-layer {
             position: absolute;
@@ -2495,6 +2534,7 @@
         }
 
         .context-menu.active {display: flex;  animation: fadeIn 0.1s ease-out;}
+        #contextMenu { width: max-content; min-width: 140px; }
 
         @keyframes fadeIn {
             from { opacity: 0; }
@@ -2990,6 +3030,14 @@
                 <span class="mindmap-setting-switch" aria-hidden="true"></span>
             </span>
         </label>
+        <div class="mindmap-setting-row">
+            <span class="mindmap-setting-icon"><i class="ri-code-s-slash-line" aria-hidden="true"></i></span>
+            <span class="mindmap-setting-copy">
+                <span class="mindmap-setting-name">交互提示词</span>
+                <span class="mindmap-setting-value" id="settingInteractivePromptValue">默认</span>
+            </span>
+            <button class="mindmap-storage-reset" id="btn-edit-interactive-prompt" type="button">编辑</button>
+        </div>
         <div class="mindmap-setting-row mindmap-project-row">
             <button class="mindmap-setting-icon mindmap-project-link" id="btn-project-home" type="button" title="打开 GitHub 项目主页" aria-label="打开 BranchMark GitHub 项目主页">
                 <i class="ri-github-line" aria-hidden="true"></i>
@@ -3205,6 +3253,9 @@
         <div class="menu-item" data-action="copy-md">
             <i class="ri-markdown-fill"></i> 复制md
         </div>
+        <div class="menu-item" data-action="copy-interactive-prompt" title="复制交互学习提示词">
+            <i class="ri-code-s-slash-line"></i> 交互提示
+        </div>
         <div class="menu-item" data-action="copy-mindmap-link">
             <i class="ri-link-m"></i> 复制链接
         </div>
@@ -3358,6 +3409,26 @@
             </div>
         </div>
     </div>
+
+    <!-- SECTION 交互提示词设置 -->
+    <div class="mymodal" id="interactivePromptSettingsModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="interactivePromptSettingsTitle" aria-describedby="interactivePromptHelp">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="interactivePromptSettingsTitle">交互提示词</h3>
+            </div>
+            <div class="bookmark-modal-body">
+                <p id="interactivePromptHelp">复制时会自动在前面添加卡片源码，下方只需填写生成交互学习控件的要求。此设置对所有导图和页面生效。</p>
+                <textarea id="interactivePromptInput" spellcheck="false" aria-label="生成交互学习控件的提示词" aria-describedby="interactivePromptHelp interactivePromptError"></textarea>
+                <div class="mindmap-tab-modal-error" id="interactivePromptError" role="alert"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="resetInteractivePrompt" type="button">恢复默认</button>
+                <button class="btn btn-secondary" id="cancelInteractivePrompt" type="button">取消</button>
+                <button class="btn btn-primary" id="saveInteractivePrompt" type="button">保存</button>
+            </div>
+        </div>
+    </div>
+    <!-- !SECTION 交互提示词设置 -->
 
     <div class="modal-mask" id="editorModal">
         <div class="modal-win" id="modalWin">

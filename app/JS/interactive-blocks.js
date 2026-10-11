@@ -31,14 +31,37 @@ function updateInteractiveBlockTheme() {
     });
 }
 
-function createInteractiveBlockDocument(source) {
-    // iframe 内的键盘事件不会冒泡到导图，只转发未被组件消费的 Esc。
+// iframe 与外层容器共用事件归属规则；新增导图操作只需在这里决定归属。
+function getInteractiveBlockEventAction(event, context) {
+    if (event.type === 'keyup' && event.code === 'Space' && context.spacePressed) return 'space';
+    if (event.type === 'keydown' && event.key === 'Escape' && !event.defaultPrevented && context.expanded) return 'escape';
+    if (event.type === 'contextmenu') return context.owner && !context.expanded ? 'contextmenu' : '';
+    if (context.owner !== 'node' || context.expanded) return '';
+    if (event.type === 'keydown') {
+        if (event.code === 'Space') {
+            const active = context.activeElement;
+            const typing = active && (active.isContentEditable || active.tagName === 'TEXTAREA'
+                || (active.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color'].includes(active.type)));
+            return typing ? '' : 'space';
+        }
+        if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
+            && context.mode === 'IDLE') return 'tab';
+    }
+    if (context.spacePressed && (event.type === 'mousedown' || event.type === 'wheel')) return 'canvas';
+    if (event.type === 'mousedown' && event.button === 0 && context.mode === 'IDLE') return 'select';
+    return '';
+}
+
+function createInteractiveBlockDocument(source, owner = '') {
+    // iframe 内的键盘事件不会冒泡到导图，显式转发卡片导航键和未被组件消费的 Esc。
     // 前置 doctype 保持标准模式，后续完整 HTML 或 HTML 片段均由浏览器解析。
     return `<!doctype html><script>
         (() => {
         let pending = false;
+        let forwardingSpace = false;
         let themeReady = false;
         let themeRevision = 0;
+        const getEventAction = ${getInteractiveBlockEventAction.toString()};
         const sheet = document.createElement('style');
         sheet.textContent = ${JSON.stringify(getInteractiveBlockThemeStyle())};
         // 在控件源码执行前提供宿主主题，避免首次读取到默认亮色。
@@ -93,18 +116,33 @@ function createInteractiveBlockDocument(source) {
         addEventListener('load', scheduleSize, true);
         addEventListener('resize', scheduleSize);
         addEventListener('scroll', reportScroll, { passive: true });
-        // 仅通知宿主选中所属卡片，保留控件自身的焦点和鼠标操作。
-        addEventListener('mousedown', event => {
-            if (event.button !== 0) return;
-            parent.postMessage({ type: 'branchmark-interactive-select', ctrlKey: event.ctrlKey }, '*');
-        }, true);
-        // iframe 的右键不会冒泡到宿主，由宿主决定是否显示导图菜单。
-        addEventListener('contextmenu', event => {
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            parent.postMessage({ type: 'branchmark-interactive-contextmenu',
-                x: event.clientX, y: event.clientY }, '*');
-        }, true);
+        function forwardEvent(event) {
+            const action = getEventAction(event, {
+                owner: ${JSON.stringify(owner)}, mode: 'IDLE',
+                expanded: document.documentElement.hasAttribute('data-branchmark-expanded'),
+                spacePressed: forwardingSpace, activeElement: document.activeElement
+            });
+            // 选中只通知宿主，控件继续获得焦点；Esc 留到冒泡阶段让控件先处理。
+            if (event.type === 'contextmenu' || action === 'space' || action === 'tab') {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+            if (!action || action === 'canvas') return;
+            if (action === 'space') forwardingSpace = event.type === 'keydown';
+            parent.postMessage({ type: 'branchmark-interactive-event', event: {
+                type: event.type, key: event.key, code: event.code, button: event.button,
+                ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey,
+                repeat: event.repeat, clientX: event.clientX, clientY: event.clientY
+            } }, '*');
+        }
+        ['mousedown', 'contextmenu', 'keydown', 'keyup'].forEach(type => {
+            addEventListener(type, event => {
+                if (event.key !== 'Escape') forwardEvent(event);
+            }, true);
+        });
+        addEventListener('keydown', event => {
+            if (event.key === 'Escape') forwardEvent(event);
+        });
         addEventListener('message', event => {
             if (event.source !== parent) return;
             if (event.data?.type === 'branchmark-interactive-measure') scheduleSize();
@@ -125,11 +163,6 @@ function createInteractiveBlockDocument(source) {
                     themeReady = true;
                     scheduleSize();
                 }));
-            }
-        });
-        addEventListener('keydown', event => {
-            if (event.key === 'Escape' && !event.defaultPrevented) {
-                parent.postMessage({ type: 'branchmark-interactive-escape' }, '*');
             }
         });
         })();
@@ -178,7 +211,8 @@ function renderInteractiveBlocks(element) {
         frame.addEventListener('load', () => {
             frame.contentWindow?.postMessage({ type: 'branchmark-interactive-theme', css: getInteractiveBlockThemeStyle() }, '*');
         });
-        frame.srcdoc = createInteractiveBlockDocument(code.textContent);
+        const owner = code.closest('.node-card') ? 'node' : code.closest('.summary-editor') ? 'summary' : '';
+        frame.srcdoc = createInteractiveBlockDocument(code.textContent, owner);
         const viewport = document.createElement('div');
         viewport.className = 'interactive-block-viewport';
         const scrollbar = document.createElement('div');
@@ -201,21 +235,53 @@ function renderInteractiveBlocks(element) {
         let scrollMax = 0;
         let thumbTravel = 0;
         let dragOffset = null;
-        function selectOwnerCard(ctrlKey) {
-            if (expanded || !wrapper.isConnected || state.mode !== 'IDLE') return;
-            const card = wrapper.closest('.node-card');
-            if (!card) return;
-            clearSelectedMindMapRelation();
-            clearSelectedMindMapSummary();
-            const id = card.dataset.nodeId;
-            if (ctrlKey) {
-                if (state.selectedIds.has(id)) state.selectedIds.delete(id);
-                else state.selectedIds.add(id);
-            } else if (!state.selectedIds.has(id)) {
-                state.selectedIds.clear();
-                state.selectedIds.add(id);
+        function handleInteraction(event, fromFrame = false) {
+            const card = wrapper.closest('.node-card, .summary-editor');
+            const action = getInteractiveBlockEventAction(event, {
+                owner: wrapper.isConnected && card ? (card.matches('.node-card') ? 'node' : 'summary') : '',
+                expanded, mode: state.mode, spacePressed: isSpacePressed,
+                activeElement: fromFrame ? null : document.activeElement
+            });
+            switch (action) {
+                case 'select': {
+                    clearSelectedMindMapRelation();
+                    clearSelectedMindMapSummary();
+                    const id = card.dataset.nodeId;
+                    if (event.ctrlKey === true) {
+                        if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+                        else state.selectedIds.add(id);
+                    } else if (!state.selectedIds.has(id)) {
+                        state.selectedIds.clear();
+                        state.selectedIds.add(id);
+                    }
+                    updateSelection();
+                    break;
+                }
+                case 'tab':
+                    // 复用导图快捷键入口的选中节点、编辑状态等判断。
+                    if (!fromFrame) event.preventDefault();
+                    window.dispatchEvent(new KeyboardEvent('keydown', {
+                        key: 'Tab', code: 'Tab', bubbles: true, cancelable: true
+                    }));
+                    break;
+                case 'space':
+                    // 外层原事件直接冒泡；iframe 事件经同一宿主入口更新导航状态。
+                    if (fromFrame) document.body.dispatchEvent(new KeyboardEvent(event.type, {
+                        key: ' ', code: 'Space', repeat: event.repeat === true, bubbles: true, cancelable: true
+                    }));
+                    break;
+                case 'contextmenu':
+                    if (fromFrame) card.dispatchEvent(new MouseEvent('contextmenu', {
+                        bubbles: true, cancelable: true, view: window, button: 2,
+                        clientX: event.clientX, clientY: event.clientY
+                    }));
+                    break;
+                case 'escape':
+                    if (!fromFrame) event.preventDefault();
+                    restore();
+                    break;
             }
-            updateSelection();
+            return action;
         }
         function scrollToTop(top) {
             scrollTop = Math.max(0, Math.min(scrollMax, top));
@@ -257,24 +323,19 @@ function renderInteractiveBlocks(element) {
         });
         const handleMessage = event => {
             if (event.source !== frame.contentWindow) return;
-            if (event.data?.type === 'branchmark-interactive-select') {
-                selectOwnerCard(event.data.ctrlKey === true);
+            if (event.data?.type === 'branchmark-interactive-event') {
+                const input = event.data.event;
+                if (!input || !['mousedown', 'contextmenu', 'keydown', 'keyup'].includes(input.type)) return;
+                if (input.type === 'contextmenu') {
+                    if (!Number.isFinite(input.clientX) || !Number.isFinite(input.clientY)) return;
+                    const bounds = frame.getBoundingClientRect();
+                    // iframe 坐标是未缩放的 CSS 像素，转换成宿主视口坐标。
+                    input.clientX = bounds.left + input.clientX * bounds.width / (frame.clientWidth || 1);
+                    input.clientY = bounds.top + input.clientY * bounds.height / (frame.clientHeight || 1);
+                }
+                handleInteraction(input, true);
                 return;
             }
-            if (event.data?.type === 'branchmark-interactive-contextmenu') {
-                const { x, y } = event.data;
-                if (!Number.isFinite(x) || !Number.isFinite(y) || !frame.isConnected || expanded) return;
-                if (!wrapper.closest('.node-card, .summary-editor')) return;
-                const bounds = frame.getBoundingClientRect();
-                // iframe 内坐标是未缩放的 CSS 像素，转换成导图页面的视口坐标。
-                frame.dispatchEvent(new MouseEvent('contextmenu', {
-                    bubbles: true, cancelable: true, view: window, button: 2,
-                    clientX: bounds.left + x * bounds.width / (frame.clientWidth || 1),
-                    clientY: bounds.top + y * bounds.height / (frame.clientHeight || 1)
-                }));
-                return;
-            }
-            if (event.data?.type === 'branchmark-interactive-escape') restore();
             if (expanded && event.data?.type === 'branchmark-interactive-scroll') {
                 const { top, height, total, viewportHeight } = event.data;
                 if (![top, height, total, viewportHeight].every(Number.isFinite) || height <= 0) return;
@@ -361,22 +422,12 @@ function renderInteractiveBlocks(element) {
                 || event.clientY < bounds.top || event.clientY > bounds.bottom) restore();
         });
 
-        // 标题栏和控件空白处也能选中所属卡片，无需向导图转发拖拽事件。
-        wrapper.addEventListener('mousedown', event => {
-            if (event.button === 0) selectOwnerCard(event.ctrlKey);
-        });
-        // 卡片内的右键交给导图菜单；放大窗口与编辑预览中只屏蔽原生菜单。
-        wrapper.addEventListener('contextmenu', event => {
-            event.preventDefault();
-            if (expanded || !wrapper.closest('.node-card, .summary-editor')) event.stopPropagation();
-        });
-        // 工具按钮与容器空白处也不能触发导图拖拽、缩放、编辑或全局快捷键。
-        ['pointerdown', 'mousedown', 'click', 'dblclick', 'wheel', 'keydown', 'keyup'].forEach(type => {
+        // iframe 与工具栏统一分流：导图导航放行，其余事件留在控件内。
+        ['pointerdown', 'mousedown', 'click', 'dblclick', 'wheel', 'keydown', 'keyup', 'contextmenu'].forEach(type => {
             wrapper.addEventListener(type, event => {
-                if (type === 'keydown' && event.key === 'Escape' && expanded) {
-                    event.preventDefault();
-                    restore();
-                }
+                if (type === 'contextmenu') event.preventDefault();
+                const action = handleInteraction(event);
+                if (action === 'space' || action === 'canvas' || action === 'contextmenu') return;
                 event.stopPropagation();
             });
         });
