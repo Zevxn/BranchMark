@@ -203,8 +203,13 @@
     background: var(--card-bg);
 }
 
-/* 拖动节点或平移画布时，避免 iframe 截获后续鼠标移动和松开事件。 */
-#app.cursor-grabbing .interactive-block-frame {
+.interactive-block-frame.is-loading {
+    visibility: hidden;
+}
+
+/* 拖动节点、平移或框选时，避免 iframe 截获后续鼠标移动和松开事件。 */
+#app.cursor-grabbing .interactive-block-frame,
+#app.cursor-crosshair .interactive-block-frame {
     pointer-events: none;
 }
 /* !SECTION Markdown 交互块与放大窗口 */

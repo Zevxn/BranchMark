@@ -99,7 +99,7 @@ function onMouseUp(e) {
                         }
                     }
                 });
-                if(changed) { recordHistory(); parentsToUpdate.forEach(pid => updateChildrenDOM(pid)); } else renderTree();
+                if(changed) { recordHistory(); parentsToUpdate.forEach(pid => updateChildrenDOM(pid)); }
             } else {
                 let target = findNode(state.data, state.drag.targetId);
                 let parent = findParent(state.data, state.drag.targetId);
@@ -171,7 +171,8 @@ function onMouseUp(e) {
                     }
                 }
             }
-        } else renderTree();
+        }
+        // 无有效落点或未执行移动时保留现有 DOM，下方统一清理拖动提示和样式。
     }
     else if(state.mode==='SELECTING') {
         const b = $('#selRect').getBoundingClientRect();

@@ -37,8 +37,12 @@ function createInteractiveBlockDocument(source) {
     return `<!doctype html><script>
         (() => {
         let pending = false;
+        let themeReady = false;
+        let themeRevision = 0;
         const sheet = document.createElement('style');
         sheet.textContent = ${JSON.stringify(getInteractiveBlockThemeStyle())};
+        // 在控件源码执行前提供宿主主题，避免首次读取到默认亮色。
+        document.head.appendChild(sheet);
         function reportScroll() {
             const root = document.scrollingElement;
             if (!root) return;
@@ -69,7 +73,8 @@ function createInteractiveBlockDocument(source) {
             const width = Math.ceil(right + (parseFloat(style.paddingRight) || 0) + (parseFloat(style.marginRight) || 0) + verticalScrollbar);
             const horizontalScrollbar = Math.max(0, innerHeight - document.documentElement.clientHeight);
             const height = Math.ceil(bottom + (parseFloat(style.paddingBottom) || 0) + (parseFloat(style.marginBottom) || 0) + horizontalScrollbar);
-            parent.postMessage({ type: 'branchmark-interactive-size', width, height, viewportWidth: innerWidth }, '*');
+            parent.postMessage({ type: 'branchmark-interactive-size', width, height,
+                viewportWidth: innerWidth, ready: themeReady }, '*');
             reportScroll();
         }
         function scheduleSize() {
@@ -78,6 +83,7 @@ function createInteractiveBlockDocument(source) {
             requestAnimationFrame(reportSize);
         }
         addEventListener('DOMContentLoaded', () => {
+            // 放回末尾，保持宿主样式在控件解析完成后的优先顺序。
             document.head.appendChild(sheet);
             new ResizeObserver(scheduleSize).observe(document.body);
             new MutationObserver(scheduleSize).observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
@@ -87,6 +93,11 @@ function createInteractiveBlockDocument(source) {
         addEventListener('load', scheduleSize, true);
         addEventListener('resize', scheduleSize);
         addEventListener('scroll', reportScroll, { passive: true });
+        // 仅通知宿主选中所属卡片，保留控件自身的焦点和鼠标操作。
+        addEventListener('mousedown', event => {
+            if (event.button !== 0) return;
+            parent.postMessage({ type: 'branchmark-interactive-select', ctrlKey: event.ctrlKey }, '*');
+        }, true);
         // iframe 的右键不会冒泡到宿主，由宿主决定是否显示导图菜单。
         addEventListener('contextmenu', event => {
             event.preventDefault();
@@ -107,6 +118,13 @@ function createInteractiveBlockDocument(source) {
             }
             if (event.data?.type === 'branchmark-interactive-theme' && typeof event.data.css === 'string') {
                 sheet.textContent = event.data.css;
+                const revision = ++themeRevision;
+                // 等控件自己的主题消息监听器及其下一帧绘制完成后，再报告可显示的尺寸。
+                requestAnimationFrame(() => requestAnimationFrame(() => {
+                    if (revision !== themeRevision) return;
+                    themeReady = true;
+                    scheduleSize();
+                }));
             }
         });
         addEventListener('keydown', event => {
@@ -151,7 +169,7 @@ function renderInteractiveBlocks(element) {
         toolbar.append(expandButton, closeButton);
 
         const frame = document.createElement('iframe');
-        frame.className = 'interactive-block-frame';
+        frame.className = 'interactive-block-frame is-loading';
         frame.title = '交互内容';
         // 仅允许交互脚本；不授予对父页面的同源访问、弹窗或顶层导航能力。
         frame.setAttribute('sandbox', 'allow-scripts');
@@ -183,6 +201,22 @@ function renderInteractiveBlocks(element) {
         let scrollMax = 0;
         let thumbTravel = 0;
         let dragOffset = null;
+        function selectOwnerCard(ctrlKey) {
+            if (expanded || !wrapper.isConnected || state.mode !== 'IDLE') return;
+            const card = wrapper.closest('.node-card');
+            if (!card) return;
+            clearSelectedMindMapRelation();
+            clearSelectedMindMapSummary();
+            const id = card.dataset.nodeId;
+            if (ctrlKey) {
+                if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+                else state.selectedIds.add(id);
+            } else if (!state.selectedIds.has(id)) {
+                state.selectedIds.clear();
+                state.selectedIds.add(id);
+            }
+            updateSelection();
+        }
         function scrollToTop(top) {
             scrollTop = Math.max(0, Math.min(scrollMax, top));
             frame.contentWindow?.postMessage({ type: 'branchmark-interactive-scroll-to', top: scrollTop }, '*');
@@ -223,6 +257,10 @@ function renderInteractiveBlocks(element) {
         });
         const handleMessage = event => {
             if (event.source !== frame.contentWindow) return;
+            if (event.data?.type === 'branchmark-interactive-select') {
+                selectOwnerCard(event.data.ctrlKey === true);
+                return;
+            }
             if (event.data?.type === 'branchmark-interactive-contextmenu') {
                 const { x, y } = event.data;
                 if (!Number.isFinite(x) || !Number.isFinite(y) || !frame.isConnected || expanded) return;
@@ -266,6 +304,8 @@ function renderInteractiveBlocks(element) {
                 } else {
                     wrapper.style.setProperty('--interactive-inline-height', `${surfaceHeight}px`);
                 }
+                // 隐藏期间仍参与布局；只在主题就绪且尺寸匹配当前视口后显示。
+                if (event.data.ready === true) frame.classList.remove('is-loading');
             }
         };
 
@@ -321,6 +361,10 @@ function renderInteractiveBlocks(element) {
                 || event.clientY < bounds.top || event.clientY > bounds.bottom) restore();
         });
 
+        // 标题栏和控件空白处也能选中所属卡片，无需向导图转发拖拽事件。
+        wrapper.addEventListener('mousedown', event => {
+            if (event.button === 0) selectOwnerCard(event.ctrlKey);
+        });
         // 卡片内的右键交给导图菜单；放大窗口与编辑预览中只屏蔽原生菜单。
         wrapper.addEventListener('contextmenu', event => {
             event.preventDefault();
