@@ -1323,10 +1323,15 @@
             color: var(--text-color);
             box-shadow: inset 0 0 0 1000px rgba(0, 0, 0, 0.65);
         }
-        .summary-selection-action {
+        .mindmap-selection-actions {
             position: fixed;
             z-index: 850;
             display: none;
+            align-items: center;
+            gap: 6px;
+        }
+        .summary-selection-action {
+            display: inline-flex;
             align-items: center;
             gap: 6px;
             padding: 7px 11px;
@@ -2252,6 +2257,28 @@
 
 
         /* !SECTION 卡片折叠按钮 */
+        /* SECTION 分屏阅读 */
+        .split-reader.active { display: flex; flex-direction: column; align-items: stretch; background: var(--card-bg); backdrop-filter: none; }
+        .split-reader-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--toolbar-border); background: var(--header-bg-bottom); color: var(--text-color); flex-shrink: 0; }
+        .split-reader-grid { display: grid; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+        .split-reader-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+        .split-reader-title { flex-shrink: 0; margin: 0; padding: 12px 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; color: var(--text-color); border-bottom: 1px solid var(--toolbar-border); }
+        .split-reader-content { flex: 1; min-height: 0; padding: 20px; overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; color: var(--text-color); user-select: text; cursor: auto; }
+        .split-reader-content > :first-child { margin-top: 0; }
+        .split-reader-empty { color: var(--text-color-secondary); }
+        .split-reader-resizer { display: flex; align-items: center; justify-content: center; cursor: col-resize; touch-action: none; background: var(--card-bg); outline-offset: -2px; }
+        .split-reader-resizer::before { content: ''; width: 2px; height: 100%; background: var(--toolbar-border); }
+        .split-reader[data-layout="rows"] .split-reader-resizer { cursor: row-resize; }
+        .split-reader[data-layout="rows"] .split-reader-resizer::before { width: 100%; height: 2px; }
+        .split-reader-resizer:hover::before, .split-reader-resizer:focus-visible::before { background: var(--primary); }
+        .split-reader.is-resizing, .split-reader.is-resizing * { cursor: col-resize !important; user-select: none !important; }
+        .split-reader[data-layout="rows"].is-resizing, .split-reader[data-layout="rows"].is-resizing * { cursor: row-resize !important; }
+        body.split-reader-open .mindmap-link-preview { z-index: 2100; }
+        @media (max-width: 480px) {
+            .split-reader-head { padding: 8px; gap: 6px; font-size: 13px; }
+            .split-reader-content { padding: 12px; }
+        }
+        /* !SECTION 分屏阅读 */
         /* SECTION 模态框 */
         /* ====== 模态框 ========================================================================== */
         .modal-mask { position: fixed; inset: 0; background: var(--modal-mask); z-index: 2000; display: none; justify-content: center; align-items: center; backdrop-filter: blur(3px); }
@@ -3175,9 +3202,17 @@
             <div class="root-locator" id="tree-root"></div>
             <div class="summary-label-layer" id="summary-label-layer"></div>
         </div>
-        <button class="summary-selection-action" id="summarySelectionAction" type="button">
-            <i class="ri-braces-line"></i><span>添加总结</span>
-        </button>
+        <div class="mindmap-selection-actions" id="mindMapSelectionActions" role="group" aria-label="多选卡片操作">
+            <button class="summary-selection-action" id="summarySelectionAction" type="button">
+                <i class="ri-braces-line" aria-hidden="true"></i><span>添加总结</span>
+            </button>
+            <button class="summary-selection-action" id="splitSelectionAction" type="button">
+                <i class="ri-layout-column-line" aria-hidden="true"></i><span>分屏阅读</span>
+            </button>
+            <button class="summary-selection-action" id="relationSelectionAction" type="button">
+                <i class="ri-links-line" aria-hidden="true"></i><span>添加关联</span>
+            </button>
+        </div>
         <!-- 框选功能”（Marquee Selection / Box Selection）时的那个蓝色半透明矩形框 -->
         <div class="selection-rect" id="selRect"></div>
         <div class="insert-line" id="insertLine"></div>
@@ -3273,6 +3308,9 @@
         </div>
         <div class="menu-item" data-action="add-relation" style="display:none">
             <i class="ri-links-line"></i> 添加关联
+        </div>
+        <div class="menu-item" data-action="split-read" style="display:none">
+            <i class="ri-layout-column-line"></i> 分屏阅读
         </div>
         <div class="menu-item" data-action="create-tab-from-node" style="display:none">
             <i class="ri-file-add-line"></i> 新建页面
@@ -3429,6 +3467,23 @@
         </div>
     </div>
     <!-- !SECTION 交互提示词设置 -->
+
+    <!-- SECTION 分屏阅读 -->
+    <div class="modal-mask split-reader" id="mindMapSplitReader" role="dialog" aria-modal="true" aria-labelledby="splitReaderHeading" aria-hidden="true" data-layout="columns">
+        <div class="split-reader-head">
+            <strong id="splitReaderHeading">分屏阅读</strong>
+            <div class="mindmap-link-preview-actions">
+                <button class="mindmap-link-preview-action" id="btn-split-reader-layout" type="button" title="切换为上下排列" aria-label="切换为上下排列">
+                    <i class="ri-layout-row-line" aria-hidden="true"></i>
+                </button>
+                <button class="mindmap-link-preview-action danger" id="btn-split-reader-close" type="button" title="退出分屏阅读 (Esc)" aria-label="退出分屏阅读">
+                    <i class="ri-close-line" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+        <div class="split-reader-grid" id="splitReaderGrid"></div>
+    </div>
+    <!-- !SECTION 分屏阅读 -->
 
     <div class="modal-mask" id="editorModal">
         <div class="modal-win" id="modalWin">

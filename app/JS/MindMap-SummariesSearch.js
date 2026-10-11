@@ -877,14 +877,20 @@ function createMindMapSummaryEditor(summaryId) {
 }
 
 function updateMindMapSummarySelectionAction() {
-    const action = $('#summarySelectionAction');
+    const action = $('#mindMapSelectionActions');
     if (!action) return;
+    const nodeIds = Array.from(state.selectedIds);
     const selection = getMindMapSummarySelection();
-    if (!selection) {
+    const canSplit = nodeIds.length === 2 || nodeIds.length === 3;
+    const canRelate = nodeIds.length === 2;
+    $('#summarySelectionAction').style.display = selection ? '' : 'none';
+    $('#splitSelectionAction').style.display = canSplit ? '' : 'none';
+    $('#relationSelectionAction').style.display = canRelate ? '' : 'none';
+    if (!selection && !canSplit && !canRelate) {
         action.style.display = 'none';
         return;
     }
-    const rects = selection.nodeIds
+    const rects = nodeIds
         .map(nodeId => document.getElementById(`card-${nodeId}`)?.getBoundingClientRect())
         .filter(Boolean);
     if (rects.length < MINDMAP_SUMMARY_MIN_NODES) {
@@ -1406,8 +1412,13 @@ function scheduleRenderMindMapSummaries() {
 function initializeMindMapSummaries() {
     const action = $('#summarySelectionAction');
     if (!$('#summary-brace-layer') || !$('#summary-label-layer') || !action) return;
-    action.addEventListener('mousedown', event => event.stopPropagation());
+    $('#mindMapSelectionActions').addEventListener('mousedown', event => event.stopPropagation());
     action.addEventListener('click', addSummaryForSelectedCards);
+    $('#splitSelectionAction').addEventListener('click', openMindMapSplitReader);
+    $('#relationSelectionAction').addEventListener('click', event => addRelationBetweenSelectedCards({
+        x: event.clientX,
+        y: event.clientY,
+    }));
     window.addEventListener('resize', scheduleRenderMindMapSummaries);
     scheduleRenderMindMapSummaries();
 }

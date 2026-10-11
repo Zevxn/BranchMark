@@ -1196,6 +1196,7 @@ let isSyncingPreview = false;
 let rootObserver = null;
 
 document.addEventListener('keydown', (e) => {
+    if (isMindMapSplitReaderOpen()) return;
     // 1. 判断当前焦点是否在输入框、文本域或可编辑元素(如节点标题)内
     const activeEl = document.activeElement;
     const isTyping = activeEl && (
@@ -1309,6 +1310,7 @@ function persistMindMapWorkbookSession(captureScroll = true) {
 }
 
 function resetMindMapTabTransientState(options = {}) {
+    closeMindMapSplitReader(false);
     state.selectedIds.clear();
     state.selectedRelationId = null;
     state.selectedSummaryId = null;
@@ -2118,6 +2120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeMapMouseEvents(); // 初始化鼠标事件
     initializeMindMapContentPreview(); // 折叠/便利贴的全文预览与标准卡片的长文档目录
     initializeMindMapInternalLinkPreview(); // 导图内链接点击后的固定预览
+    initializeMindMapSplitReader(); // 多选卡片的全屏分屏阅读
     initializeMindMapDocumentPreview(); // 长文档素材预览与内容块拖入
     initializeMapContextMenu(); // 初始化右键菜单
     initializeNativeDragDrop(); // 初始化原生拖拽
@@ -2215,6 +2218,7 @@ document.addEventListener('DOMContentLoaded', () => {
     /* --- MindMap.js 中的键盘监听部分 --- */
 
     window.addEventListener('keydown', (e) => {
+        if (isMindMapSplitReaderOpen() && !$('#editorModal')?.classList.contains('active')) return;
         // 1. 状态检测
         const activeEl = document.activeElement;
         

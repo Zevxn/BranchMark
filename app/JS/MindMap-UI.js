@@ -511,7 +511,7 @@ function initializeMapContextMenu() {
             contextTargetId = summary.id;
             selectMindMapSummary(summary.id);
             setDeleteLabel('删除总结');
-            ['cut', 'copy', 'paste', 'copy-mindmap-link', 'add-relation', 'create-tab-from-node', 'expand', 'collapse']
+            ['cut', 'copy', 'paste', 'copy-mindmap-link', 'add-relation', 'split-read', 'create-tab-from-node', 'expand', 'collapse']
                 .forEach(action => setActionVisibility(action, false));
             toStandardItem.style.display = summary.isSimple ? '' : 'none';
             toSimpleItem.style.display = summary.isSimple ? 'none' : '';
@@ -574,6 +574,8 @@ function initializeMapContextMenu() {
         // 右击双选中的任一卡片时保留双选，并提供与工具栏一致的关联入口。
         const canAddRelation = state.selectedIds.size === 2;
         addRelationItem.style.display = canAddRelation ? '' : 'none';
+        setActionVisibility('split-read', state.selectedIds.size === 2 || state.selectedIds.size === 3);
+        setActionVisibility('paste', state.selectedIds.size === 1);
         createTabItem.style.display = state.selectedIds.size === 1 ? '' : 'none';
         setActionVisibility('copy-mindmap-link', true);
         positionMindMapContextMenu(contextMenu, e.clientX, e.clientY);
@@ -655,6 +657,11 @@ function initializeMapContextMenu() {
         if (action === 'add-relation') {
             addRelationBetweenSelectedCards({ x: e.clientX, y: e.clientY });
             contextMenu.classList.remove('active');
+            return;
+        }
+        if (action === 'split-read') {
+            contextMenu.classList.remove('active');
+            openMindMapSplitReader();
             return;
         }
         if (action === 'create-tab-from-node') {
@@ -1071,6 +1078,7 @@ function moveMindMapSelectionByArrow(key) {
 
 function openMindMapEditor(node, readOnly = false, focusSource = false) {
     if (!node) return;
+    if (isMindMapSplitReaderOpen()) closeMindMapInternalLinkPreview();
     const entityKind = getMindMapSummaryById(node.id) === node ? 'summary' : 'node';
     syncCurrentInput();
     state.editingNode = node;
@@ -1154,6 +1162,13 @@ function initializeMapClickEvents() {
             e.stopPropagation();
             return;
         }
+        const splitPane = t.closest('.split-reader-pane');
+        if (splitPane) {
+            if (t.closest('button, input, textarea, select')) return;
+            const node = findNode(state.data, splitPane.dataset.nodeId);
+            if (node) openMindMapEditor(node, false, true);
+            return;
+        }
         
         // --- 修复：支持 Dock 卡片双击 ---
         const dockCard = t.closest('.dock-card');
@@ -1194,6 +1209,283 @@ function initializeMapClickEvents() {
 }
 
 // !SECTION 节点选择与键盘导航
+
+// SECTION 分屏阅读
+const MINDMAP_SPLIT_READER_WIDTHS_KEY = 'mindmap_split_reader_widths';
+const mindMapSplitReaderState = {
+    nodes: [],
+    layout: 'columns',
+    ratios: { columns: {}, rows: {} },
+    returnFocus: null,
+    drag: null,
+};
+
+function isMindMapSplitReaderOpen() {
+    return Boolean($('#mindMapSplitReader')?.classList.contains('active'));
+}
+
+// 在可用空间内保留各栏最小尺寸；窄窗口按实际空间等比分配。
+function getMindMapSplitReaderSizes(ratios, available, minimum) {
+    const total = ratios.reduce((sum, value) => sum + value, 0);
+    const min = Math.min(minimum, available / ratios.length);
+    const remaining = Math.max(0, available - min * ratios.length);
+    const slack = ratios.map(value => Math.max(0, available * value / total - min));
+    const slackTotal = slack.reduce((sum, value) => sum + value, 0);
+    return slack.map(value => min + (slackTotal ? remaining * value / slackTotal : remaining / ratios.length));
+}
+
+function applyMindMapSplitReaderLayout() {
+    if (!isMindMapSplitReaderOpen()) return;
+    const reader = $('#mindMapSplitReader');
+    const grid = $('#splitReaderGrid');
+    const { nodes, layout, ratios } = mindMapSplitReaderState;
+    const columns = layout === 'columns';
+    const available = Math.max(0, (columns ? grid.clientWidth : grid.clientHeight) - (nodes.length - 1) * 10);
+    const weights = ratios[layout][nodes.length] || nodes.map(() => 1 / nodes.length);
+    const sizes = getMindMapSplitReaderSizes(weights, available, columns ? 280 : 120);
+    const tracks = sizes.map(size => `${size}px`).join(' 10px ');
+    reader.dataset.layout = layout;
+    grid.style.gridTemplateColumns = columns ? tracks : 'minmax(0, 1fr)';
+    grid.style.gridTemplateRows = columns ? 'minmax(0, 1fr)' : tracks;
+    const layoutButton = $('#btn-split-reader-layout');
+    layoutButton.innerHTML = `<i class="${columns ? 'ri-layout-row-line' : 'ri-layout-column-line'}" aria-hidden="true"></i>`;
+    layoutButton.title = columns ? '切换为上下排列' : '切换为左右排列';
+    layoutButton.setAttribute('aria-label', layoutButton.title);
+    grid.querySelectorAll('.split-reader-resizer').forEach((handle, index) => {
+        const pair = sizes[index] + sizes[index + 1];
+        const min = Math.min(columns ? 280 : 120, pair / 2);
+        handle.setAttribute('aria-orientation', columns ? 'vertical' : 'horizontal');
+        handle.setAttribute('aria-valuemin', String(pair ? Math.round(min / pair * 100) : 0));
+        handle.setAttribute('aria-valuemax', String(pair ? Math.round((pair - min) / pair * 100) : 100));
+        handle.setAttribute('aria-valuenow', String(pair ? Math.round(sizes[index] / pair * 100) : 50));
+    });
+}
+
+function saveMindMapSplitReaderWidths() {
+    if (mindMapSplitReaderState.layout !== 'columns') return;
+    void chrome.storage.local.set({ [MINDMAP_SPLIT_READER_WIDTHS_KEY]: mindMapSplitReaderState.ratios.columns })
+        .catch(error => console.warn('[MindMap] 保存分屏宽度失败:', error));
+}
+
+function resizeMindMapSplitReaderPair(index, delta, initialSizes) {
+    const { layout, nodes, ratios } = mindMapSplitReaderState;
+    const columns = layout === 'columns';
+    const sizes = initialSizes || Array.from($('#splitReaderGrid').querySelectorAll('.split-reader-pane'), pane => {
+        const rect = pane.getBoundingClientRect();
+        return columns ? rect.width : rect.height;
+    });
+    const pair = sizes[index] + sizes[index + 1];
+    const min = Math.min(columns ? 280 : 120, pair / 2);
+    const first = Math.max(min, Math.min(pair - min, sizes[index] + delta));
+    const next = [...sizes];
+    next[index] = first;
+    next[index + 1] = pair - first;
+    const total = next.reduce((sum, size) => sum + size, 0);
+    if (total <= 0) return;
+    ratios[layout][nodes.length] = next.map(size => size / total);
+    applyMindMapSplitReaderLayout();
+}
+
+function finishMindMapSplitReaderResize() {
+    const drag = mindMapSplitReaderState.drag;
+    if (!drag) return;
+    mindMapSplitReaderState.drag = null;
+    $('#mindMapSplitReader').classList.remove('is-resizing');
+    if (drag.handle.hasPointerCapture(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
+    saveMindMapSplitReaderWidths();
+}
+
+function closeMindMapSplitReader(restoreFocus = true) {
+    if (!isMindMapSplitReaderOpen()) return;
+    finishMindMapSplitReaderResize();
+    closeMindMapInternalLinkPreview();
+    const reader = $('#mindMapSplitReader');
+    reader.classList.remove('active');
+    reader.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('split-reader-open');
+    $('#splitReaderGrid').replaceChildren();
+    const returnFocus = mindMapSplitReaderState.returnFocus;
+    mindMapSplitReaderState.nodes = [];
+    mindMapSplitReaderState.returnFocus = null;
+    if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+}
+
+function updateMindMapSplitReaderNode(node, contentChanged) {
+    if (!isMindMapSplitReaderOpen()) return null;
+    const pane = Array.from($('#splitReaderGrid').querySelectorAll('.split-reader-pane'))
+        .find(element => element.dataset.nodeId === node.id);
+    if (!pane) return null;
+    const title = pane.querySelector('.split-reader-title');
+    title.textContent = String(node.topic || '').trim() || '未命名卡片';
+    title.title = title.textContent;
+    const body = pane.querySelector('.split-reader-content');
+    if (contentChanged) {
+        const scrollTop = body.scrollTop;
+        body.innerHTML = String(node.content || '').trim()
+            ? renderMarkdown(node.content)
+            : '<p class="split-reader-empty">这张卡片暂无正文内容。</p>';
+        body.scrollTop = scrollTop;
+        void processRichContent(body).then(() => {
+            if (body.isConnected) body.scrollTop = scrollTop;
+        }).catch(error => console.warn('[MindMap] 分屏内容渲染失败:', error));
+    }
+    return body;
+}
+
+function openMindMapSplitReader() {
+    const ids = Array.from(state.selectedIds);
+    if (ids.length !== 2 && ids.length !== 3) return;
+    const nodes = ids.map(id => findNode(state.data, id));
+    if (nodes.some(node => !node)) return;
+    mindMapSplitReaderState.returnFocus = document.activeElement;
+    commitMindMapInlineEditor();
+    mindMapSplitReaderState.nodes = nodes;
+    mindMapSplitReaderState.layout = window.innerWidth < nodes.length * 280 + (nodes.length - 1) * 10 ? 'rows' : 'columns';
+    isSpacePressed = false;
+    document.body.classList.remove('space-mode');
+    hideMindMapContentPreview();
+    closeMindMapInternalLinkPreview();
+    closeMapSearch();
+    const grid = $('#splitReaderGrid');
+    grid.replaceChildren();
+    nodes.forEach((node, index) => {
+        if (index > 0) {
+            const handle = document.createElement('div');
+            handle.className = 'split-reader-resizer';
+            handle.tabIndex = 0;
+            handle.dataset.index = String(index - 1);
+            handle.setAttribute('role', 'separator');
+            handle.setAttribute('aria-label', `调整第 ${index} 栏与第 ${index + 1} 栏的大小`);
+            grid.appendChild(handle);
+        }
+        const pane = document.createElement('section');
+        pane.className = 'split-reader-pane';
+        pane.dataset.nodeId = node.id;
+        const title = document.createElement('h2');
+        title.className = 'split-reader-title';
+        title.id = `split-reader-title-${index}`;
+        title.textContent = String(node.topic || '').trim() || '未命名卡片';
+        title.title = title.textContent;
+        const body = document.createElement('div');
+        body.className = 'split-reader-content md-content';
+        body.tabIndex = 0;
+        body.setAttribute('aria-labelledby', title.id);
+        body.innerHTML = String(node.content || '').trim()
+            ? renderMarkdown(node.content)
+            : '<p class="split-reader-empty">这张卡片暂无正文内容。</p>';
+        pane.append(title, body);
+        grid.appendChild(pane);
+    });
+    $('#splitReaderHeading').textContent = `分屏阅读 · ${nodes.length} 张卡片`;
+    const reader = $('#mindMapSplitReader');
+    reader.classList.add('active');
+    reader.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('split-reader-open');
+    applyMindMapSplitReaderLayout();
+    grid.querySelectorAll('.split-reader-content').forEach(body => {
+        void processRichContent(body).catch(error => console.warn('[MindMap] 分屏内容渲染失败:', error));
+    });
+    $('#btn-split-reader-close').focus({ preventScroll: true });
+}
+
+function initializeMindMapSplitReader() {
+    const grid = $('#splitReaderGrid');
+    $('#btn-split-reader-close').onclick = () => closeMindMapSplitReader();
+    $('#btn-split-reader-layout').onclick = () => {
+        finishMindMapSplitReaderResize();
+        mindMapSplitReaderState.layout = mindMapSplitReaderState.layout === 'columns' ? 'rows' : 'columns';
+        applyMindMapSplitReaderLayout();
+    };
+    grid.addEventListener('pointerdown', event => {
+        const handle = event.target.closest('.split-reader-resizer');
+        if (!handle || event.button !== 0 || mindMapSplitReaderState.drag) return;
+        event.preventDefault();
+        handle.focus();
+        const columns = mindMapSplitReaderState.layout === 'columns';
+        mindMapSplitReaderState.drag = {
+            handle, pointerId: event.pointerId, index: Number(handle.dataset.index),
+            start: columns ? event.clientX : event.clientY,
+            sizes: Array.from(grid.querySelectorAll('.split-reader-pane'), pane => {
+                const rect = pane.getBoundingClientRect();
+                return columns ? rect.width : rect.height;
+            }),
+        };
+        handle.setPointerCapture(event.pointerId);
+        $('#mindMapSplitReader').classList.add('is-resizing');
+    });
+    grid.addEventListener('pointermove', event => {
+        const drag = mindMapSplitReaderState.drag;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        const position = mindMapSplitReaderState.layout === 'columns' ? event.clientX : event.clientY;
+        resizeMindMapSplitReaderPair(drag.index, position - drag.start, drag.sizes);
+    });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type => {
+        grid.addEventListener(type, event => {
+            if (mindMapSplitReaderState.drag?.pointerId === event.pointerId) finishMindMapSplitReaderResize();
+        });
+    });
+    grid.addEventListener('keydown', event => {
+        const handle = event.target.closest('.split-reader-resizer');
+        if (!handle) return;
+        const columns = mindMapSplitReaderState.layout === 'columns';
+        const keys = columns ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+        if (!keys.includes(event.key)) return;
+        event.preventDefault();
+        resizeMindMapSplitReaderPair(Number(handle.dataset.index), (event.key === keys[0] ? -1 : 1) * (event.shiftKey ? 40 : 16));
+        saveMindMapSplitReaderWidths();
+    });
+    document.addEventListener('keydown', event => {
+        if (!isMindMapSplitReaderOpen() || event.defaultPrevented || $('#editorModal')?.classList.contains('active')) return;
+        // 图片和流程图先处理自己的 Esc，保留底层分屏。
+        if ($('#imagePreviewModal')?.classList.contains('active') || $('#mermaidModal')?.classList.contains('active')) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            if ($('#mindMapLinkPreview')?.classList.contains('is-open')) {
+                closeMindMapInternalLinkPreview();
+                $('#btn-split-reader-close').focus({ preventScroll: true });
+            } else closeMindMapSplitReader();
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a'
+            && $('#mindMapSplitReader').contains(document.activeElement)) {
+            const range = document.createRange();
+            range.selectNodeContents(document.activeElement.closest('.split-reader-content') || grid);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            event.preventDefault();
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+            event.preventDefault();
+            void saveMindMapData(true);
+        } else if (event.key === 'Tab') {
+            const scopes = [$('#mindMapSplitReader')];
+            if ($('#mindMapLinkPreview')?.classList.contains('is-open')) scopes.push($('#mindMapLinkPreview'));
+            const focusable = scopes.flatMap(scope => Array.from(scope.querySelectorAll('button, a[href], [tabindex="0"]')))
+                .filter(element => !element.disabled && element.getClientRects().length > 0);
+            const index = focusable.indexOf(document.activeElement);
+            const next = index < 0 ? (event.shiftKey ? focusable.length - 1 : 0)
+                : (index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length;
+            event.preventDefault();
+            event.stopPropagation();
+            focusable[next]?.focus();
+        }
+    }, { capture: true });
+    new ResizeObserver(() => {
+        finishMindMapSplitReaderResize();
+        applyMindMapSplitReaderLayout();
+    }).observe(grid);
+    chrome.storage.local.get({ [MINDMAP_SPLIT_READER_WIDTHS_KEY]: {} }).then(result => {
+        const saved = result?.[MINDMAP_SPLIT_READER_WIDTHS_KEY];
+        [2, 3].forEach(count => {
+            const weights = saved?.[count];
+            if (!mindMapSplitReaderState.ratios.columns[count] && Array.isArray(weights) && weights.length === count
+                && weights.every(value => Number.isFinite(value) && value > 0 && value <= 1)) {
+                mindMapSplitReaderState.ratios.columns[count] = weights;
+            }
+        });
+        applyMindMapSplitReaderLayout();
+    }).catch(error => console.warn('[MindMap] 读取分屏宽度失败:', error));
+}
+// !SECTION 分屏阅读
 
 // SECTION 内容预览与鼠标交互
 function clampMindMapContentPreview(value, min, max) {
@@ -1759,7 +2051,7 @@ function initializeMapMouseEvents() {
            e.target.closest('.map-search-panel') ||
            e.target.closest('.relation-hit') ||
            e.target.closest('.summary-editor') ||
-           e.target.closest('.summary-selection-action') ||
+           e.target.closest('.mindmap-selection-actions') ||
            e.target.closest('.fold-btn') ||    // 新增
            e.target.closest('.header-tools')   // 新增
         ) return;
@@ -2211,6 +2503,7 @@ function jumpToMindMapInternalLinkTarget() {
     }
 
     const shouldSwitchTab = mindMapWorkbook.activeTabId !== target.tabId;
+    closeMindMapSplitReader(false);
     closeMindMapInternalLinkPreview();
     if (shouldSwitchTab && !activateMindMapTab(target.tabId)) {
         showTopToast('❌ 无法打开链接所在页面');
@@ -2440,6 +2733,7 @@ function initializeEditorToolbar() {
     editor.addEventListener('scroll', () => { if(!isSyncingEditor) { isSyncingPreview=true; const p=editor.scrollTop/(editor.scrollHeight-editor.clientHeight); preview.scrollTop=p*(preview.scrollHeight-preview.clientHeight); setTimeout(()=>isSyncingPreview=false,10); } });
     preview.addEventListener('scroll', () => { if(!isSyncingPreview) { isSyncingEditor=true; const p=preview.scrollTop/(preview.scrollHeight-preview.clientHeight); editor.scrollTop=p*(editor.scrollHeight-editor.clientHeight); setTimeout(()=>isSyncingEditor=false,10); } });
     $('#btn-close-modal').onclick = () => {
+        let splitReaderBody = null;
         if(!state.isReadOnly && state.editingNode) {
             const t = $('#modalTopicInput').value;
             const c = $('#editorTextarea').value;
@@ -2478,11 +2772,13 @@ function initializeEditorToolbar() {
                     }
                 }
             }
+            splitReaderBody = updateMindMapSplitReaderNode(state.editingNode, contentChanged);
         }
         $('#editorModal').classList.remove('active'); 
         setCodeMenuOpen(false);
         state.editingNode = null;
         state.editingEntityKind = 'node';
+        splitReaderBody?.focus({ preventScroll: true });
     };
     
     
