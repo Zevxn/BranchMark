@@ -320,9 +320,11 @@ function initializeBranchMarkUpdateDialog(tauriCore) {
 function initializeBranchMarkAbout() {
     const homeButton = $('#btn-project-home');
     const checkButton = $('#btn-check-update');
+    const viewButton = $('#btn-view-update');
     const versionLabel = $('#branchMarkVersion');
     const statusLabel = $('#branchMarkUpdateStatus');
     if (!homeButton || !checkButton || !versionLabel || !statusLabel) return;
+    if (viewButton) viewButton.hidden = true;
 
     let currentVersion = null;
     let releaseUrl = '';
@@ -370,13 +372,16 @@ function initializeBranchMarkAbout() {
     };
     const versionReady = loadVersion();
     homeButton.addEventListener('click', () => void openBranchMarkProjectUrl(BRANCHMARK_PROJECT_URL));
+    viewButton?.addEventListener('click', () => {
+        if (releaseUrl) void openBranchMarkProjectUrl(releaseUrl);
+    });
     const checkForUpdates = async ({ automatic = false } = {}) => {
         if (checkButton.disabled) return;
         if (nativeUpdate) {
             if (!automatic) await showNativeUpdate(false);
             return;
         }
-        if (releaseUrl) {
+        if (releaseUrl && !nativeUpdater) {
             if (!automatic) await openBranchMarkProjectUrl(releaseUrl);
             return;
         }
@@ -401,6 +406,7 @@ function initializeBranchMarkAbout() {
                 setStatus(`发现新版 ${release.tag_name}`);
                 if (nativeUpdater) {
                     // 版本判断统一使用 GitHub；自动安装信息缺失不影响查看新版。
+                    let updateError = '新版暂未提供自动更新文件';
                     if (release.assets?.some(asset => asset.name === 'latest.json')) {
                         try {
                             const update = await tauriCore.invoke('check_branchmark_update');
@@ -409,22 +415,31 @@ function initializeBranchMarkAbout() {
                                 nativeUpdate = update;
                                 releaseUrl = '';
                                 await showNativeUpdate(automatic);
+                            } else if (!update) {
+                                updateError = '更新服务未返回可用更新';
+                            } else if (!updateVersion) {
+                                updateError = '更新服务返回的版本号无效';
+                            } else {
+                                updateError = `更新信息版本不一致（更新服务 v${update.version}，发布版本 ${release.tag_name}）`;
                             }
                         } catch (error) {
                             console.warn('[BranchMark] 自动更新暂不可用:', error);
+                            updateError = error.message || String(error);
                         }
                     }
-                    if (!nativeUpdate) setStatus(`发现新版 ${release.tag_name}，自动更新暂不可用，请查看新版`);
+                    if (!nativeUpdate) setStatus(`发现新版 ${release.tag_name}，自动更新暂不可用：${updateError}。可重试检查或查看新版。`);
                 }
             } else {
+                releaseUrl = '';
                 setStatus('已是最新版本');
             }
         } catch (error) {
             console.warn('[BranchMark] 检查更新失败:', error);
-            if (!automatic) setStatus(error.status === 404 ? '暂无可用的正式版本' : '检查失败，请重试');
+            if (!automatic) setStatus(error.status === 404 ? '暂无可用的正式版本' : `检查失败：${error.name === 'AbortError' ? '请求超时' : error.message || String(error)}。请重试。`);
         } finally {
             checkButton.disabled = false;
-            checkButton.textContent = nativeUpdate ? `更新到 v${nativeUpdate.version.replace(/^v/, '')}` : releaseUrl ? '查看新版' : '检查更新';
+            checkButton.textContent = nativeUpdate ? `更新到 v${nativeUpdate.version.replace(/^v/, '')}` : releaseUrl ? (nativeUpdater ? '重试检查' : '查看新版') : '检查更新';
+            if (viewButton) viewButton.hidden = !nativeUpdater || !releaseUrl;
             checkButton.removeAttribute('aria-busy');
             positionMindMapSettingsPopover();
         }

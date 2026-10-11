@@ -384,6 +384,9 @@
         .mindmap-project-link:focus-visible,
         #btn-check-update:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
         #btn-check-update { white-space: nowrap; }
+        #btn-view-update { align-self: flex-start; margin-top: 4px; padding: 0; border: 0; background: transparent; color: var(--primary); font: inherit; text-decoration: underline; cursor: pointer; }
+        #btn-view-update:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        #branchMarkUpdateStatus { overflow-wrap: anywhere; }
         .mindmap-setting-toggle {
             position: relative;
             width: 34px;
@@ -3075,6 +3078,7 @@
                     <span class="mindmap-setting-value" id="branchMarkVersion">读取版本中…</span>
                 </span>
                 <span class="mindmap-setting-value" id="branchMarkUpdateStatus" role="status" aria-live="polite" hidden></span>
+                <button id="btn-view-update" type="button" hidden>查看新版</button>
             </span>
             <button class="mindmap-storage-reset" id="btn-check-update" type="button">检查更新</button>
         </div>

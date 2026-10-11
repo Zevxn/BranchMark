@@ -67,6 +67,7 @@ npm run build
 
 ## Tauri 发布与更新说明
 
+- 升级项目版本号统一执行 `npm run version:set -- <版本号>`；根目录 `package.json` 是版本来源，其他网页、Electron、Tauri 和 Cargo 配置及锁文件由脚本同步。若已手动修改根目录版本号，执行 `npm run version:sync`，不要再逐个编辑版本字段；生成的安装包和 `latest.json` 仍需通过打包命令重新生成。
 - 准备 Tauri 发布产物时，必须根据上一已发布 Tag 到目标版本的最终实际变化整理面向用户的更新说明，覆盖该范围内全部已落地功能；同一功能合并描述，不包含中间方案、撤销内容或纯内部变更。
 - 应用内更新弹窗读取 `latest.json` 的 `notes` 字段，不会自动读取 GitHub Release 正文。`notes` 字符串必须使用纯文本，不包含 Markdown 标题、加粗、链接等格式标记；该要求针对字符串内容，与说明文件的扩展名无关。构建时将纯文本更新说明保存为 UTF-8 文件，通过环境变量 `BRANCHMARK_UPDATE_NOTES_FILE` 指定该文件，再执行已有 Tauri 打包命令；不得只填写 GitHub Release 正文而遗漏清单中的说明。
 - 发布前核对生成的 `latest.json`：`version` 与目标版本一致，`notes` 非空且为纯文本，与该版本 GitHub Release 正文保持信息内容一致，无需保持格式一致；下载地址和签名对应同一次构建的安装包。自动更新必须配套上传安装包和 `latest.json`；签名内容已写入清单，`.sig` 可选上传留存。

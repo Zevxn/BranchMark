@@ -136,6 +136,18 @@ npm run build
 
 开发约定见 [AGENTS.md](AGENTS.md)。
 
+### 版本号管理
+
+根目录 `package.json` 是项目版本号的统一来源。升级版本时执行一次：
+
+```powershell
+npm run version:set -- 1.0.7
+```
+
+命令会同步网页、Electron、Tauri、Cargo 配置及锁文件中的项目版本号，不修改第三方依赖版本，也不会创建 Git 提交或 Tag。若已手动修改根目录版本号，执行 `npm run version:sync` 同步其余文件。
+
+同步不会修改已有的 `dist/`、安装包或 `latest.json`；发布产物仍需重新构建，更新清单由 Tauri 打包命令生成。
+
 ## 问题反馈
 
 通过 [Issues](https://github.com/Zevxn/BranchMark/issues) 提交问题或功能建议。报告问题时，请说明运行方式、版本、复现步骤与预期行为，并使用去除私人内容的最小样例。

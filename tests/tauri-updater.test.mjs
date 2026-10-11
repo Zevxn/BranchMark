@@ -35,7 +35,7 @@ function setup({ native = true, saved = true, storage = {} } = {}) {
             calls.push(command);
             if (command === 'get_branchmark_version') return '1.0.2';
             if (command === 'check_branchmark_update') {
-                if (state.checkError) throw new Error('网络不可用');
+                if (state.checkError) throw typeof state.checkError === 'string' ? state.checkError : new Error('网络不可用');
                 return state.noUpdate ? null : info;
             }
             if (command === 'download_branchmark_update') {
@@ -171,6 +171,10 @@ failedCheck.state.apiStatus = 503;
 await failedCheck.element('#btn-check-update').click();
 assert.equal(failedCheck.element('#btn-check-update').disabled, false);
 assert.equal(failedCheck.element('#btn-check-update').textContent, '检查更新');
+assert.match(failedCheck.element('#branchMarkUpdateStatus').textContent, /HTTP 503/);
+failedCheck.state.apiStatus = 200;
+await failedCheck.element('#btn-check-update').click();
+assert.equal(failedCheck.element('#branchMarkUpdateModal').classList.contains('show'), true, '版本查询失败后可直接重试');
 
 const current = setup();
 current.state.releaseVersion = 'v1.0.2';
@@ -187,21 +191,51 @@ await olderRelease.element('#btn-check-update').click();
 assert.equal(olderRelease.element('#branchMarkUpdateStatus').textContent, '已是最新版本');
 assert.equal(olderRelease.calls.includes('check_branchmark_update'), false);
 
-for (const reason of ['missing', 'failed', 'stale', 'empty']) {
+for (const reason of ['missing', 'failed', 'stale', 'empty', 'invalid']) {
     const fallback = setup();
     if (reason === 'missing') fallback.state.hasManifest = false;
-    if (reason === 'failed') fallback.state.checkError = true;
+    if (reason === 'failed') fallback.state.checkError = '检查更新失败：request timed out';
     if (reason === 'stale') fallback.info.version = '1.0.4';
     if (reason === 'empty') fallback.state.noUpdate = true;
+    if (reason === 'invalid') fallback.info.version = 'invalid';
     await fallback.element('#btn-check-update').click();
     assert.match(fallback.element('#branchMarkUpdateStatus').textContent, /发现新版 v1.0.3.*自动更新暂不可用/);
-    assert.equal(fallback.element('#btn-check-update').textContent, '查看新版');
+    assert.equal(fallback.element('#btn-check-update').textContent, '重试检查');
+    assert.equal(fallback.element('#btn-view-update').hidden, false);
+    const expectedReason = {
+        missing: /新版暂未提供自动更新文件/,
+        failed: /检查更新失败：request timed out/,
+        stale: /更新信息版本不一致.*1\.0\.4.*v1\.0\.3/,
+        empty: /更新服务未返回可用更新/,
+        invalid: /更新服务返回的版本号无效/,
+    };
+    assert.match(fallback.element('#branchMarkUpdateStatus').textContent, expectedReason[reason]);
     assert.equal(fallback.element('#branchMarkUpdateModal').classList.contains('show'), false);
     assert.equal(fallback.calls.includes('download_branchmark_update'), false);
     if (reason === 'missing') assert.equal(fallback.calls.includes('check_branchmark_update'), false);
-    await fallback.element('#btn-check-update').click();
+    const checksBeforeView = fallback.calls.length;
+    await fallback.element('#btn-view-update').click();
     assert.equal(fallback.calls.at(-1), 'open_branchmark_url');
+    assert.equal(fallback.calls.length, checksBeforeView + 1, '查看新版只打开发布页');
+    fallback.state.hasManifest = true;
+    fallback.state.checkError = false;
+    fallback.state.noUpdate = false;
+    fallback.info.version = '1.0.3';
+    await fallback.element('#btn-check-update').click();
+    assert.equal(fallback.element('#branchMarkUpdateModal').classList.contains('show'), true, '失败恢复后无需重启即可重新检查');
+    assert.equal(fallback.element('#btn-check-update').textContent, '更新到 v1.0.3');
+    assert.equal(fallback.element('#btn-view-update').hidden, true);
 }
+
+const startupFailureStorage = {};
+const startupFailure = setup({ storage: startupFailureStorage });
+startupFailure.state.checkError = true;
+await startupFailure.windowHandlers.load();
+assert.equal(startupFailure.element('#branchMarkUpdateModal').classList.contains('show'), false);
+assert.equal(startupFailureStorage.branchmark_update_notified_version, undefined, '失败不消耗该版本的自动提醒机会');
+startupFailure.state.checkError = false;
+await startupFailure.element('#btn-check-update').click();
+assert.equal(startupFailure.element('#branchMarkUpdateModal').classList.contains('show'), true);
 
 const browser = setup({ native: false });
 await browser.element('#btn-check-update').click();
@@ -209,6 +243,7 @@ assert.equal(browser.element('#btn-check-update').textContent, '查看新版');
 await browser.element('#btn-check-update').click();
 assert.equal(browser.calls.at(-1), 'https://github.com/Zevxn/BranchMark/releases/tag/v1.0.3');
 assert.equal(browser.element('#branchMarkUpdateModal').classList.contains('show'), false);
+assert.equal(browser.element('#btn-view-update').hidden, true);
 
 console.log('Tauri 更新流程检查通过：每个版本只自动提醒一次、手动打开、统一版本判断、清单回退、进度、重试及保存门槛。');
 

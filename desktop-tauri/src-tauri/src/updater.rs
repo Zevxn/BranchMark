@@ -8,6 +8,20 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 // SECTION 更新检查与安装
 
+fn format_update_error(context: &str, error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let detail = cause.to_string();
+        if !detail.is_empty() && !message.contains(&detail) {
+            message.push_str("：");
+            message.push_str(&detail);
+        }
+        source = cause.source();
+    }
+    format!("{context}：{message}")
+}
+
 #[derive(Default)]
 pub struct UpdateState(Mutex<PendingUpdate>);
 
@@ -46,10 +60,10 @@ pub async fn check_branchmark_update(
         .updater_builder()
         .timeout(Duration::from_secs(15))
         .build()
-        .map_err(|error| error.to_string())?
+        .map_err(|error| format_update_error("初始化更新器失败", &error))?
         .check()
         .await
-        .map_err(|error| format!("检查更新失败：{error}"))?;
+        .map_err(|error| format_update_error("检查更新失败", &error))?;
     let info = update.as_ref().map(|update| UpdateInfo {
         version: update.version.clone(),
         current_version: update.current_version.clone(),
@@ -106,7 +120,7 @@ pub async fn download_branchmark_update(
         .await;
     let mut pending = state.0.lock().map_err(|_| "更新状态不可用")?;
     pending.downloading = false;
-    pending.bytes = Some(result.map_err(|error| format!("下载或校验失败：{error}"))?);
+    pending.bytes = Some(result.map_err(|error| format_update_error("下载或校验失败", &error))?);
     Ok(())
 }
 

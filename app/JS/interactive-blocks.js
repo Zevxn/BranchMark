@@ -13,6 +13,9 @@ function getInteractiveBlockThemeStyle() {
         :root[data-branchmark-expanded], :root[data-branchmark-expanded] > body {
             scrollbar-gutter: auto !important; scrollbar-width: auto !important; scrollbar-color: auto !important;
         }
+        :root[data-branchmark-expanded] > body {
+            padding-bottom: calc(var(--branchmark-body-padding-bottom, 0px) + var(--branchmark-bottom-spacing, 24px)) !important;
+        }
         :root[data-branchmark-expanded]::-webkit-scrollbar,
         :root[data-branchmark-expanded] > body::-webkit-scrollbar { width: 0 !important; }
         *::-webkit-scrollbar { width: ${theme.getPropertyValue('--scroll-size')}; height: ${theme.getPropertyValue('--scroll-size')}; }
@@ -147,7 +150,15 @@ function createInteractiveBlockDocument(source, owner = '') {
             if (event.source !== parent) return;
             if (event.data?.type === 'branchmark-interactive-measure') scheduleSize();
             if (event.data?.type === 'branchmark-interactive-expanded') {
-                document.documentElement.toggleAttribute('data-branchmark-expanded', event.data.expanded === true);
+                const root = document.documentElement;
+                // 留白位于网页自身，参与滚动范围；还原时保留控件原有的 padding。
+                if (event.data.expanded === true && !root.hasAttribute('data-branchmark-expanded')) {
+                    root.style.setProperty('--branchmark-body-padding-bottom', getComputedStyle(document.body).paddingBottom);
+                }
+                if (Number.isFinite(event.data.bottomSpacing) && event.data.bottomSpacing >= 0) {
+                    root.style.setProperty('--branchmark-bottom-spacing', event.data.bottomSpacing + 'px');
+                }
+                root.toggleAttribute('data-branchmark-expanded', event.data.expanded === true);
                 scheduleSize();
             }
             if (event.data?.type === 'branchmark-interactive-scroll-to' && Number.isFinite(event.data.top)) {
@@ -403,7 +414,8 @@ function renderInteractiveBlocks(element) {
             surface.showModal();
             expanded = true;
             expandedInteractiveBlock = { surface, restore };
-            frame.contentWindow.postMessage({ type: 'branchmark-interactive-expanded', expanded: true }, '*');
+            frame.contentWindow.postMessage({ type: 'branchmark-interactive-expanded', expanded: true,
+                bottomSpacing: parseFloat(getComputedStyle(frame).marginLeft) || 0 }, '*');
             frame.contentWindow.postMessage({ type: 'branchmark-interactive-measure' }, '*');
             observer.observe(document.body, { childList: true, subtree: true });
             closeButton.focus({ preventScroll: true });
