@@ -87,6 +87,13 @@ function createInteractiveBlockDocument(source) {
         addEventListener('load', scheduleSize, true);
         addEventListener('resize', scheduleSize);
         addEventListener('scroll', reportScroll, { passive: true });
+        // iframe 的右键不会冒泡到宿主，由宿主决定是否显示导图菜单。
+        addEventListener('contextmenu', event => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            parent.postMessage({ type: 'branchmark-interactive-contextmenu',
+                x: event.clientX, y: event.clientY }, '*');
+        }, true);
         addEventListener('message', event => {
             if (event.source !== parent) return;
             if (event.data?.type === 'branchmark-interactive-measure') scheduleSize();
@@ -216,6 +223,19 @@ function renderInteractiveBlocks(element) {
         });
         const handleMessage = event => {
             if (event.source !== frame.contentWindow) return;
+            if (event.data?.type === 'branchmark-interactive-contextmenu') {
+                const { x, y } = event.data;
+                if (!Number.isFinite(x) || !Number.isFinite(y) || !frame.isConnected || expanded) return;
+                if (!wrapper.closest('.node-card, .summary-editor')) return;
+                const bounds = frame.getBoundingClientRect();
+                // iframe 内坐标是未缩放的 CSS 像素，转换成导图页面的视口坐标。
+                frame.dispatchEvent(new MouseEvent('contextmenu', {
+                    bubbles: true, cancelable: true, view: window, button: 2,
+                    clientX: bounds.left + x * bounds.width / (frame.clientWidth || 1),
+                    clientY: bounds.top + y * bounds.height / (frame.clientHeight || 1)
+                }));
+                return;
+            }
             if (event.data?.type === 'branchmark-interactive-escape') restore();
             if (expanded && event.data?.type === 'branchmark-interactive-scroll') {
                 const { top, height, total, viewportHeight } = event.data;
@@ -301,8 +321,13 @@ function renderInteractiveBlocks(element) {
                 || event.clientY < bounds.top || event.clientY > bounds.bottom) restore();
         });
 
+        // 卡片内的右键交给导图菜单；放大窗口与编辑预览中只屏蔽原生菜单。
+        wrapper.addEventListener('contextmenu', event => {
+            event.preventDefault();
+            if (expanded || !wrapper.closest('.node-card, .summary-editor')) event.stopPropagation();
+        });
         // 工具按钮与容器空白处也不能触发导图拖拽、缩放、编辑或全局快捷键。
-        ['pointerdown', 'mousedown', 'click', 'dblclick', 'wheel', 'contextmenu', 'keydown', 'keyup'].forEach(type => {
+        ['pointerdown', 'mousedown', 'click', 'dblclick', 'wheel', 'keydown', 'keyup'].forEach(type => {
             wrapper.addEventListener(type, event => {
                 if (type === 'keydown' && event.key === 'Escape' && expanded) {
                     event.preventDefault();

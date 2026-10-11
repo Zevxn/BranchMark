@@ -2604,6 +2604,42 @@
             font-size: 16px;
         }
         .edit-btn:hover {background: var(--btn-hover);color: var(--primary);}
+        .editor-code-dropdown { position: relative; }
+        .editor-code-arrow { font-size: 10px; margin-left: 2px; }
+        .editor-code-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 4px;
+            width: 160px;
+            max-height: min(320px, 40vh);
+            overflow-y: auto;
+            padding: 4px;
+            background: var(--modal-bg);
+            border: 1px solid var(--toolbar-border);
+            border-radius: 6px;
+            box-shadow: 0 4px 12px var(--shadow-color-hover);
+            z-index: 100;
+            display: none;
+        }
+        .editor-code-menu.show { display: block; }
+        .editor-code-menu button {
+            display: block;
+            width: 100%;
+            padding: 6px 10px;
+            border: 0;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-color);
+            text-align: left;
+            font: 13px/1.4 system-ui, sans-serif;
+            cursor: pointer;
+        }
+        .editor-code-menu button:hover,
+        .editor-code-menu button:focus-visible {
+            background: var(--btn-hover);
+            color: var(--primary);
+        }
         .editor {border-top: none !important;  padding-top: 10px !important;} /* 调整原来的 .editor 样式，去掉上边框（因为有了工具栏） */
         /* --- 编辑器颜色下拉菜单样式 --- */
         .color-dropdown-wrapper {position: relative;}
@@ -3345,6 +3381,13 @@
                         </button>
                         <button class="edit-btn" data-cmd="bold" title="加粗 (Ctrl+B)"><i class="ri-bold"></i></button>
                         <button class="edit-btn" data-cmd="italic" title="斜体 (Ctrl+I)"><i class="ri-italic"></i></button>
+                        <div class="editor-code-dropdown">
+                            <button class="edit-btn" id="btn-insert-code-block" type="button" title="插入代码块" aria-label="插入代码块" aria-haspopup="menu" aria-expanded="false" aria-controls="editorCodeMenu">
+                                <i class="ri-code-s-slash-line" aria-hidden="true"></i>
+                                <i class="ri-arrow-down-s-fill editor-code-arrow" aria-hidden="true"></i>
+                            </button>
+                            <div class="editor-code-menu" id="editorCodeMenu" role="menu" aria-label="代码块语言"></div>
+                        </div>
                         <div class="divider"></div>
 
                         <!-- ▼▼▼ 修改开始：新的颜色下拉菜单结构 ▼▼▼ -->

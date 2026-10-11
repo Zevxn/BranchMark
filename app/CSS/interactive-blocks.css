@@ -114,7 +114,7 @@
     display: none;
 }
 
-/* 放大窗口沿用 Mermaid 的关闭按钮样式，顶部和右侧均留出 5px。 */
+/* 放大窗口关闭按钮顶部和右侧均留出 5px。 */
 .interactive-block-surface.is-expanded .interactive-block-toolbar {
     height: 40px;
     padding: 5px;
@@ -123,10 +123,10 @@
 .interactive-block-close {
     width: 30px;
     height: 30px;
-    border: 1px solid var(--toolbar-border);
+    border: 0;
     border-radius: 50%;
-    background: var(--toolbar-bg);
-    color: var(--text-color);
+    background: transparent;
+    color: #ff4d4f;
     font-size: 18px;
     transition: transform 0.3s ease;
     transform-origin: center;

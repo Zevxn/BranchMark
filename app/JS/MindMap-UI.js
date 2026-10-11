@@ -2341,6 +2341,7 @@ function initializeEditorToolbar() {
             }
         }
         $('#editorModal').classList.remove('active'); 
+        setCodeMenuOpen(false);
         state.editingNode = null;
         state.editingEntityKind = 'node';
     };
@@ -2363,11 +2364,82 @@ function initializeEditorToolbar() {
 
     const colorMenu = $('#editorColorMenu');
     const toggleBtn = $('#btn-toggle-color');
+    const codeMenu = $('#editorCodeMenu');
+    const codeButton = $('#btn-insert-code-block');
+    const codeLanguages = [
+        ['Python', 'python'], ['Mermaid', 'mermaid'], ['Interactive', 'interactive'],
+        ['MATLAB', 'matlab'], ['JavaScript', 'javascript'], ['TypeScript', 'typescript'],
+        ['HTML', 'html'], ['CSS', 'css'], ['JSON', 'json'], ['SQL', 'sql'],
+        ['Bash', 'bash'], ['PowerShell', 'powershell'], ['C', 'c'], ['C++', 'cpp'],
+        ['Java', 'java'], ['Go', 'go'], ['Rust', 'rust'], ['YAML', 'yaml'],
+        ['XML', 'xml'], ['纯文本', '']
+    ];
+
+    function setCodeMenuOpen(open) {
+        codeMenu.classList.toggle('show', open);
+        codeButton.setAttribute('aria-expanded', String(open));
+        if (open) {
+            colorMenu.classList.remove('show');
+            codeMenu.scrollTop = 0;
+        }
+    }
+
+    codeLanguages.forEach(([label, language]) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.textContent = label;
+        item.setAttribute('role', 'menuitem');
+        item.tabIndex = -1;
+        item.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setCodeMenuOpen(false);
+            insertEditorCodeBlock(language);
+        };
+        codeMenu.appendChild(item);
+    });
+
+    codeButton.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setCodeMenuOpen(!codeMenu.classList.contains('show'));
+    };
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.editor-code-dropdown')) setCodeMenuOpen(false);
+    });
+    document.addEventListener('keydown', (event) => {
+        if (!codeMenu.classList.contains('show')) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            setCodeMenuOpen(false);
+            codeButton.focus({ preventScroll: true });
+            return;
+        }
+        if (event.key === 'Tab') {
+            setCodeMenuOpen(false);
+            return;
+        }
+        if (!event.target.closest('.editor-code-dropdown')) return;
+        const items = Array.from(codeMenu.children);
+        const index = items.indexOf(document.activeElement);
+        let next;
+        if (event.key === 'ArrowDown') next = (index + 1) % items.length;
+        if (event.key === 'ArrowUp') next = (index <= 0 ? items.length : index) - 1;
+        if (event.key === 'Home') next = 0;
+        if (event.key === 'End') next = items.length - 1;
+        if (next === undefined) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        items[next].focus({ preventScroll: true });
+        items[next].scrollIntoView({ block: 'nearest' });
+    }, true);
 
     // 点击按钮切换菜单显示
     toggleBtn.onclick = (e) => {
         e.stopPropagation(); // 防止冒泡
         e.preventDefault();  // 防止焦点丢失
+        setCodeMenuOpen(false);
         const isShow = colorMenu.classList.contains('show');
         
         // 关闭其他可能存在的弹窗（可选）
@@ -2501,6 +2573,35 @@ function initializeEditorToolbar() {
 
 
 // Markdown 源码格式化
+
+function insertEditorCodeBlock(language) {
+    const textarea = $('#editorTextarea');
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const selection = text.slice(start, end);
+    const oldScrollTop = textarea.scrollTop;
+    // 源码含有反引号时，使用更长的围栏，避免提前结束代码块。
+    const fenceLength = Math.max(3, ...(selection.match(/`+/g) || []).map(run => run.length + 1));
+    const fence = '`'.repeat(fenceLength);
+    const prefix = (start > 0 && text[start - 1] !== '\n' ? '\n' : '') + fence + language + '\n';
+    const suffix = (selection.endsWith('\n') ? '' : '\n') + fence
+        + (end < text.length && text[end] !== '\n' ? '\n' : '');
+
+    isSyncingPreview = true;
+    isSyncingEditor = true;
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(start, end);
+    document.execCommand('insertText', false, prefix + selection + suffix);
+    const contentStart = start + prefix.length;
+    textarea.setSelectionRange(contentStart, contentStart + selection.length);
+    textarea.dispatchEvent(new Event('input'));
+    textarea.scrollTop = oldScrollTop;
+    setTimeout(() => {
+        isSyncingPreview = false;
+        isSyncingEditor = false;
+    }, 100);
+}
 
 function insertTextFormat(prefix, suffix, restoreFocus = true) {
     const textarea = $('#editorTextarea');
