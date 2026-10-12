@@ -1,0 +1,42 @@
+/* SECTION Markdown 源码编辑器 */
+.markdown-source-editor {
+    --md-heading: #0451a5;
+    --md-link: #0969da;
+    --md-keyword: #0000ff;
+    --md-string: #a31515;
+    --md-comment: #008000;
+    --md-number: #098658;
+    --md-property: #001080;
+    --md-function: #795e26;
+    --md-invalid: #cd3131;
+    --md-selection: #add6ff80;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--modal-bg);
+    color: var(--text-color);
+}
+:root[data-theme="dark"] .markdown-source-editor {
+    --md-heading: #569cd6;
+    --md-link: #4fc1ff;
+    --md-keyword: #c586c0;
+    --md-string: #ce9178;
+    --md-comment: #6a9955;
+    --md-number: #b5cea8;
+    --md-property: #9cdcfe;
+    --md-function: #dcdcaa;
+    --md-invalid: #f48771;
+    --md-selection: #264f78;
+}
+.markdown-source-editor .cm-editor { height: 100%; }
+.markdown-source-editor .cm-editor.cm-focused { outline: none; }
+.markdown-source-editor .cm-scroller { overflow: auto; font: 15px/1.6 monospace; }
+.markdown-source-editor .cm-content { padding: 10px 0 20px; caret-color: var(--text-color); }
+.markdown-source-editor .cm-line { padding: 0 20px; }
+.markdown-source-editor .cm-cursor { border-left-color: var(--text-color); }
+/* 覆盖 CodeMirror 默认聚焦选区的高优先级选择器，选区颜色随页面主题切换。 */
+.markdown-source-editor .cm-editor .cm-selectionBackground,
+.markdown-source-editor .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground { background: var(--md-selection); }
+.markdown-source-editor .cm-placeholder { color: var(--text-color-secondary); }
+/* !SECTION Markdown 源码编辑器 */

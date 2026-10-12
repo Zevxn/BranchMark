@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from 'node:util';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const paths = [
     'package.json',
+    'package-lock.json',
     'app/version.json',
     'desktop/package.json',
     'desktop/package-lock.json',

@@ -82,6 +82,7 @@ const context = vm.createContext({
     console, document, state, isSpacePressed: true,
     window: { innerWidth: 1200, getSelection: () => ({ removeAllRanges() {}, addRange() {} }) },
     $: selector => elements[selector.slice(1)],
+    getMindMapSourceEditor: () => elements.editorTextarea,
     findNode: (data, id) => data.find(node => node.id === id),
     commitMindMapInlineEditor() {}, hideMindMapContentPreview() {}, closeMapSearch() {}, saveMindMapData() {},
     openMindMapEditor: (...args) => edited.push(args),

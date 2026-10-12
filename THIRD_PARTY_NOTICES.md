@@ -10,6 +10,7 @@ BranchMark 自有代码由 Zevxn 编写，并由作者自己的 DeepConvo 项目
 | --- | --- | --- | --- |
 | Marked | `app/libs/marked.min.js`，15.0.12 | [Marked](https://github.com/markedjs/marked/tree/v15.0.12)，MIT，保留其附带 Markdown 声明 | [原文](docs/licenses/marked-LICENSE.md) |
 | Highlight.js | `highlight.min.js`，11.9.0；`atom-one-light.min.css` 主题 | [Highlight.js](https://github.com/highlightjs/highlight.js/tree/11.9.0)，BSD-3-Clause | [原文](docs/licenses/highlightjs-LICENSE.txt) |
+| CodeMirror 6 | `app/libs/codemirror.bundle.js`；view 6.43.14、state 6.7.6、Markdown 6.5.2，全部版本见根目录 `package-lock.json` | [CodeMirror](https://codemirror.net/)，MIT；包含 Lezer 解析器与各语言支持，许可随组件保留 | [捆绑组件及许可正文](docs/licenses/codemirror-bundled-notices.txt) |
 | KaTeX | `katex.min.js`，0.16.9；CSS 与 auto-render | [KaTeX](https://github.com/KaTeX/KaTeX/tree/v0.16.9)，MIT | [原文](docs/licenses/katex-LICENSE.txt) |
 | KaTeX 字体 | `app/libs/fonts/KaTeX_*` | [katex-fonts](https://github.com/KaTeX/katex-fonts)，MIT | [原文](docs/licenses/katex-fonts-LICENSE.txt) |
 | Mermaid | `app/libs/mermaid.min.js`，代码内版本 12.0.0 | [Mermaid](https://github.com/mermaid-js/mermaid/tree/mermaid%4012.0.0)，MIT | [原文](docs/licenses/mermaid-LICENSE.txt)、[捆绑声明](docs/licenses/mermaid-bundled-notices.txt) |

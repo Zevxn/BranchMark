@@ -12,6 +12,7 @@ const paths = [
     'desktop-tauri/package.json', 'desktop-tauri/package-lock.json',
     'desktop-tauri/src-tauri/tauri.conf.json', 'desktop-tauri/src-tauri/Cargo.toml',
     'desktop-tauri/src-tauri/Cargo.lock',
+    'package-lock.json',
 ];
 const snapshot = () => Promise.all(paths.map(path => readFile(join(root, path), 'utf8')));
 const run = (...args) => spawnSync(process.execPath, [join(root, 'scripts/sync-version.mjs'), ...args], {
@@ -53,7 +54,7 @@ try {
     const sync = run();
     assert.equal(sync.status, 0, sync.stderr);
     assert.equal(JSON.parse(await readFile(join(root, 'app/version.json'), 'utf8')).version, '9.8.8');
-    assert.match(sync.stdout, /更新 8 个文件/, '无参数时从根目录同步所有其他文件');
+    assert.match(sync.stdout, /更新 9 个文件/, '无参数时从根目录同步所有其他文件');
     const synced = await snapshot();
     for (const invalid of ['v1.2.3', '1.02.3', '1.2.3-01', '1.2', '1.2.3\n']) {
         assert.notEqual(run(invalid).status, 0, `拒绝无效版本 ${JSON.stringify(invalid)}`);

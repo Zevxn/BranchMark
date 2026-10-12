@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 const MINDMAP_SOURCE_FILES = [
     'app/JS/MindMap.js',
+    'app/JS/MindMap-Editor.js',
     'app/JS/MindMap-UI.js',
     'app/JS/MindMap-Relations.js',
     'app/JS/MindMap-SummariesSearch.js',

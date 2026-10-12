@@ -771,7 +771,7 @@ function initializeMapContextMenu() {
 // SECTION Markdown 编辑器右键菜单
 function initializeEditorContextMenu() {
     const menu = document.getElementById('editorContextMenu');
-    const textarea = document.getElementById('editorTextarea');
+    const textarea = getMindMapSourceEditor();
     // 定义存储 Key (与上传模块保持一致)
     const IMG_STORAGE_KEY = 'MindMap_ImgBB_Key'; 
 
@@ -779,6 +779,7 @@ function initializeEditorContextMenu() {
 
     let savedSelection = { start: 0, end: 0 };
     let savedTextSnapshot = '';
+    let savedEditorState = null;
     let ctxMenuTextSnapshot = null;
 
     // --- 1. 监听右键呼出 ---
@@ -787,6 +788,7 @@ function initializeEditorContextMenu() {
         savedSelection.start = textarea.selectionStart;
         savedSelection.end = textarea.selectionEnd;
         savedTextSnapshot = textarea.value;
+        savedEditorState = textarea.view?.state;
         textarea.focus({ preventScroll: true });
 
         positionMindMapContextMenu(menu, e.clientX, e.clientY);
@@ -817,8 +819,7 @@ function initializeEditorContextMenu() {
             try {
                 await navigator.clipboard.writeText(selectedText);
                 if (cmd === 'cut') {
-                    document.execCommand('delete');
-                    textarea.dispatchEvent(new Event('input'));
+                    replaceMindMapEditorSelection(textarea, '');
                 }
             } catch (err) { console.log('Clipboard write failed:', err); }
         } 
@@ -879,7 +880,7 @@ function initializeEditorContextMenu() {
                      // 如果没处理图片，我们显式调用一次 readText
                      const text = await navigator.clipboard.readText();
                      if (text) {
-                        document.execCommand('insertText', false, text);
+                        replaceMindMapEditorSelection(textarea, text);
                         showTopToast('✅ 文本粘贴成功1');
                      }
                 }
@@ -891,7 +892,7 @@ function initializeEditorContextMenu() {
                 try {
                     const text = await navigator.clipboard.readText();
                     if (text) {
-                        document.execCommand('insertText', false, text);
+                        replaceMindMapEditorSelection(textarea, text);
                         showTopToast('✅ 文本粘贴成功2');
                     }
                 } catch (e2) {
@@ -939,13 +940,13 @@ function initializeEditorContextMenu() {
         customInput.addEventListener('mousedown', (e) => e.stopPropagation());
         customInput.addEventListener('input', (e) => {
             if (!ctxMenuTextSnapshot) ctxMenuTextSnapshot = savedTextSnapshot;
-            textarea.value = ctxMenuTextSnapshot;
+            restoreMindMapSourceEditorSnapshot(textarea, ctxMenuTextSnapshot, savedEditorState);
             textarea.setSelectionRange(savedSelection.start, savedSelection.end);
             insertTextFormat(`<span style="color:${e.target.value}">`, '</span>', false);
         });
         customInput.addEventListener('change', (e) => {
             menu.classList.remove('active');
-            textarea.value = ctxMenuTextSnapshot || savedTextSnapshot;
+            restoreMindMapSourceEditorSnapshot(textarea, ctxMenuTextSnapshot || savedTextSnapshot, savedEditorState);
             textarea.setSelectionRange(savedSelection.start, savedSelection.end);
             insertTextFormat(`<span style="color:${e.target.value}">`, '</span>', true);
             e.target.blur();
@@ -1088,16 +1089,17 @@ function openMindMapEditor(node, readOnly = false, focusSource = false) {
     $('#modalWin').className = readOnly ? 'modal-win narrow' : 'modal-win';
     $('#modalTopicInput').value = entityKind === 'summary' ? (node.topic ?? '总结') : (node.topic || '');
     $('#modalTopicInput').disabled = readOnly;
-    const sourceEditor = $('#editorTextarea');
+    const sourceEditor = getMindMapSourceEditor();
     const content = entityKind === 'summary' ? getMindMapSummaryContent(node) : (node.content || '');
-    sourceEditor.value = content;
-    sourceEditor.parentElement.style.display = readOnly ? 'none' : 'flex';
+    loadMindMapSourceEditor(content);
+    $('#editorTextarea').parentElement.style.display = readOnly ? 'none' : 'flex';
     $('#previewContent').innerHTML = renderMarkdown(content);
     processRichContent($('#previewContent'));
     $('#btn-close-modal').innerText = readOnly ? '关闭' : '完成';
     if (focusSource && !readOnly) {
         sourceEditor.focus();
         sourceEditor.setSelectionRange(sourceEditor.value.length, sourceEditor.value.length);
+        sourceEditor.view?.dispatch({ scrollIntoView: true });
     }
 }
 
@@ -2536,7 +2538,7 @@ function initializeMindMapInternalLinkPreview() {
 
 // SECTION Markdown 编辑器
 function insertMindMapLinkIntoEditor(href) {
-    const editor = $('#editorTextarea');
+    const editor = getMindMapSourceEditor();
     const target = parseMindMapInternalLink(href);
     if (!editor || !target) {
         showTopToast('⚠️ 剪贴板中没有有效的导图内链接');
@@ -2561,14 +2563,10 @@ function insertMindMapLinkIntoEditor(href) {
     const oldScrollTop = editor.scrollTop;
     editor.focus({ preventScroll: true });
     editor.setSelectionRange(start, end);
-    if (typeof document.execCommand === 'function') {
-        document.execCommand('insertText', false, replacement);
-    } else {
-        editor.value = editor.value.slice(0, start) + replacement + editor.value.slice(end);
-    }
+    replaceMindMapEditorSelection(editor, replacement);
     editor.setSelectionRange(start, start + replacement.length);
     editor.scrollTop = oldScrollTop;
-    editor.dispatchEvent(new Event('input'));
+    notifyMindMapSourceEditorInput(editor);
     showTopToast(`🔗 已为“${selectedText}”添加导图内链接`);
     return true;
 }
@@ -2705,11 +2703,12 @@ function initializeEditorPreviewResizer() {
 // !SECTION Markdown 编辑器预览区宽度调整
 
 function initializeEditorToolbar() {
+    initializeMindMapSourceEditor();
     initializeEditorPreviewResizer();
     $('#editorModal').onmousedown = (e) => { if(e.target===$('#editorModal')) $('#btn-close-modal').click(); };
-    $('#editorTextarea').oninput = (e) => { $('#previewContent').innerHTML=renderMarkdown(e.target.value); processRichContent($('#previewContent')); };
     $('#btn-fullscreen').onclick = () => $('#modalWin').classList.toggle('fullscreen');
-    const editor = $('#editorTextarea'), preview = $('#previewContent');
+    const editor = getMindMapSourceEditor(), preview = $('#previewContent');
+    editor.addEventListener('input', () => { preview.innerHTML = renderMarkdown(editor.value); processRichContent(preview); });
 
     editor.addEventListener('paste', event => {
         const pastedText = event.clipboardData?.getData('text/plain') || '';
@@ -2730,13 +2729,13 @@ function initializeEditorToolbar() {
         void insertMindMapLinkFromClipboard();
     });
 
-    editor.addEventListener('scroll', () => { if(!isSyncingEditor) { isSyncingPreview=true; const p=editor.scrollTop/(editor.scrollHeight-editor.clientHeight); preview.scrollTop=p*(preview.scrollHeight-preview.clientHeight); setTimeout(()=>isSyncingPreview=false,10); } });
-    preview.addEventListener('scroll', () => { if(!isSyncingPreview) { isSyncingEditor=true; const p=preview.scrollTop/(preview.scrollHeight-preview.clientHeight); editor.scrollTop=p*(editor.scrollHeight-editor.clientHeight); setTimeout(()=>isSyncingEditor=false,10); } });
+    editor.addEventListener('scroll', () => { if(!isSyncingEditor) { isSyncingPreview=true; const p=editor.scrollTop/Math.max(1,editor.scrollHeight-editor.clientHeight); preview.scrollTop=p*(preview.scrollHeight-preview.clientHeight); setTimeout(()=>isSyncingPreview=false,10); } });
+    preview.addEventListener('scroll', () => { if(!isSyncingPreview) { isSyncingEditor=true; const p=preview.scrollTop/Math.max(1,preview.scrollHeight-preview.clientHeight); editor.scrollTop=p*(editor.scrollHeight-editor.clientHeight); setTimeout(()=>isSyncingEditor=false,10); } });
     $('#btn-close-modal').onclick = () => {
         let splitReaderBody = null;
         if(!state.isReadOnly && state.editingNode) {
             const t = $('#modalTopicInput').value;
-            const c = $('#editorTextarea').value;
+            const c = getMindMapSourceEditor().value;
             const editingKind = state.editingEntityKind || 'node';
             const previousContent = editingKind === 'summary'
                 ? getMindMapSummaryContent(state.editingNode)
@@ -2912,12 +2911,13 @@ function initializeEditorToolbar() {
     let colorDragSnapshot = null;
 
     $('#editorCustomColor').oninput = (e) => {
-        const textarea = $('#editorTextarea');
+        const textarea = getMindMapSourceEditor();
         
         // 1. 建立快照：仅在拖拽开始的第一刻记录“干净”的文本和选区
         if (!colorDragSnapshot) {
             colorDragSnapshot = {
                 text: textarea.value,
+                editorState: textarea.view?.state,
                 start: textarea.selectionStart,
                 end: textarea.selectionEnd,
                 scrollTop: textarea.scrollTop
@@ -2925,7 +2925,7 @@ function initializeEditorToolbar() {
         }
 
         // 2. ▼▼▼ 关键修复：每次预览前，先强制还原到干净状态 ▼▼▼
-        textarea.value = colorDragSnapshot.text;
+        restoreMindMapSourceEditorSnapshot(textarea, colorDragSnapshot.text, colorDragSnapshot.editorState);
         textarea.setSelectionRange(colorDragSnapshot.start, colorDragSnapshot.end);
         
         // 3. 在干净的文本上应用颜色 (预览模式)
@@ -2938,11 +2938,11 @@ function initializeEditorToolbar() {
     $('#editorCustomColor').onchange = (e) => {
          $('#editorColorMenu').classList.remove('show');
         
-        const textarea = $('#editorTextarea');
+        const textarea = getMindMapSourceEditor();
         
-        // 5. 提交前，再次回滚到干净状态，确保 execCommand 的历史记录是基于原始文本的
+        // 5. 提交前恢复原始文本，确保正式替换可以完整撤销。
         if (colorDragSnapshot) {
-            textarea.value = colorDragSnapshot.text;
+            restoreMindMapSourceEditorSnapshot(textarea, colorDragSnapshot.text, colorDragSnapshot.editorState);
             textarea.setSelectionRange(colorDragSnapshot.start, colorDragSnapshot.end);
             textarea.scrollTop = colorDragSnapshot.scrollTop;
             colorDragSnapshot = null; // 释放快照
@@ -2977,7 +2977,7 @@ function initializeEditorToolbar() {
             // 防止按钮获取焦点导致编辑器失焦（可选）
             e.preventDefault(); 
             
-            const content = $('#editorTextarea').value;
+            const content = getMindMapSourceEditor().value;
             
             if (!content) {
                 showTopToast('⚠️ 内容为空，无需复制');
@@ -3010,7 +3010,7 @@ function initializeEditorToolbar() {
 // Markdown 源码格式化
 
 function insertEditorCodeBlock(language) {
-    const textarea = $('#editorTextarea');
+    const textarea = getMindMapSourceEditor();
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const text = textarea.value;
@@ -3027,10 +3027,10 @@ function insertEditorCodeBlock(language) {
     isSyncingEditor = true;
     textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(start, end);
-    document.execCommand('insertText', false, prefix + selection + suffix);
+    replaceMindMapEditorSelection(textarea, prefix + selection + suffix);
     const contentStart = start + prefix.length;
     textarea.setSelectionRange(contentStart, contentStart + selection.length);
-    textarea.dispatchEvent(new Event('input'));
+    notifyMindMapSourceEditorInput(textarea);
     textarea.scrollTop = oldScrollTop;
     setTimeout(() => {
         isSyncingPreview = false;
@@ -3039,7 +3039,7 @@ function insertEditorCodeBlock(language) {
 }
 
 function insertTextFormat(prefix, suffix, restoreFocus = true) {
-    const textarea = $('#editorTextarea');
+    const textarea = getMindMapSourceEditor();
     
     // 1. 记录状态
     const start = textarea.selectionStart;
@@ -3082,20 +3082,19 @@ function insertTextFormat(prefix, suffix, restoreFocus = true) {
     if (restoreFocus) {
         textarea.focus({ preventScroll: true });
         textarea.setSelectionRange(start, end);
-        document.execCommand('insertText', false, replacement);
+        replaceMindMapEditorSelection(textarea, replacement);
         textarea.setSelectionRange(start, newEnd);
     } else {
         // 预览模式
         textarea.value = text.substring(0, start) + replacement + text.substring(end);
-        textarea.selectionStart = start;
-        textarea.selectionEnd = newEnd;
+        textarea.setSelectionRange(start, newEnd);
     }
 
     // 5. 恢复滚动
     textarea.scrollTop = oldScrollTop;
 
     // 6. 触发预览更新
-    textarea.dispatchEvent(new Event('input'));
+    notifyMindMapSourceEditorInput(textarea);
 
     setTimeout(() => {
         isSyncingPreview = false;

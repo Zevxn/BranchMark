@@ -292,7 +292,7 @@ async function pasteNodesToSelection() {
 // SECTION 编辑器图片上传
 
 function initializeImageUpload() {
-    const textarea = document.getElementById('editorTextarea');
+    const textarea = getMindMapSourceEditor();
     const settingsBtn = document.getElementById('btn-img-settings');
     const settingsModal = document.getElementById('imageUploadSettingsModal');
     const apiKeyInput = document.getElementById('imageUploadApiKey');
@@ -463,20 +463,7 @@ async function uploadToImgBB(file, apiKey) {
  * 辅助：在光标处插入文本 (兼容撤销/重做)
  */
 function insertTextToEditor(textarea, text) {
-    if (document.execCommand) {
-        // 使用 execCommand 支持浏览器原生撤销
-        textarea.focus();
-        document.execCommand('insertText', false, text);
-    } else {
-        // 降级方案
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const val = textarea.value;
-        textarea.value = val.substring(0, start) + text + val.substring(end);
-        textarea.selectionStart = textarea.selectionEnd = start + text.length;
-    }
-    // 触发 input 事件以更新预览
-    textarea.dispatchEvent(new Event('input')); 
+    replaceMindMapEditorSelection(textarea, text);
 }
 
 /**
@@ -489,20 +476,22 @@ function replaceTextInEditor(textarea, originalText, newText) {
     if (val.includes(originalText)) {
         // 保存当前滚动位置
         const scrollTop = textarea.scrollTop;
-        const selectionStart = textarea.selectionStart;
-        
-        // 替换
-        textarea.value = val.replace(originalText, newText);
+        // 精确替换占位符，让 CodeMirror 自动映射用户当前的选区。
+        if (textarea.view) {
+            const from = val.indexOf(originalText);
+            textarea.view.dispatch({ changes: { from, to: from + originalText.length, insert: newText } });
+        } else {
+            textarea.value = val.replace(originalText, newText);
+        }
         
         // 恢复状态
         textarea.scrollTop = scrollTop;
-        // 如果光标在替换区域之后，需要调整光标位置 (可选优化，简单起见可忽略)
         
         // 触发 input 事件以更新预览
-        textarea.dispatchEvent(new Event('input'));
+        notifyMindMapSourceEditorInput(textarea);
         
         // 如果正在同步预览，强制刷新一次
-        if(typeof processRichContent === 'function') {
+        if(!textarea.view && typeof processRichContent === 'function') {
             const preview = document.getElementById('previewContent');
             if(preview) {
                 preview.innerHTML = renderMarkdown(textarea.value);
