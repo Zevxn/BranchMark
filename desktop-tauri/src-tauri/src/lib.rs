@@ -630,6 +630,19 @@ fn open_local_file(url: String) -> Result<(), String> {
     open_system_target(target)
 }
 
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let target = tauri::Url::parse(&url).map_err(|_| "网址无效".to_string())?;
+    if !matches!(target.scheme(), "http" | "https")
+        || target.host_str().is_none()
+        || !target.username().is_empty()
+        || target.password().is_some()
+    {
+        return Err("仅支持打开 HTTP 或 HTTPS 链接".to_string());
+    }
+    open_system_target(target.as_str())
+}
+
 #[cfg(all(test, target_os = "windows"))]
 mod local_file_tests {
     use super::*;
@@ -748,6 +761,7 @@ pub fn run() {
             write_mindmap_json,
             open_branchmark_url,
             open_local_file,
+            open_external_url,
             set_window_theme,
             toggle_window_fullscreen,
             updater::check_branchmark_update,

@@ -298,8 +298,15 @@ function initializeImageUpload() {
     const apiKeyInput = document.getElementById('imageUploadApiKey');
     const settingsError = document.getElementById('imageUploadSettingsError');
     const saveSettingsBtn = document.getElementById('saveImageUploadSettings');
+    const apiHelpLink = settingsModal.querySelector('#imageUploadSettingsHelp a[href]');
     // 定义存储的 Key
     const STORAGE_KEY = 'MindMap_ImgBB_Key';
+
+    apiHelpLink?.addEventListener('click', event => {
+        if (!window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && !window.__DEEPCONVO_NATIVE_TAURI_HOST__) return;
+        event.preventDefault();
+        void openMarkdownExternalUrl(apiHelpLink.href);
+    });
 
     const closeSettings = () => {
         hideMindMapTabModal(settingsModal);

@@ -855,6 +855,33 @@ async function openMarkdownLinkWithQuicker(href) {
     }
 }
 
+async function openMarkdownExternalUrl(href) {
+    const normalized = normalizeMarkdownLinkTarget(href);
+    if (normalized?.kind !== 'url') {
+        showTopToast('❌ 仅支持打开 HTTP 或 HTTPS 链接');
+        return false;
+    }
+
+    if (window.__DEEPCONVO_NATIVE_QUICKER_HOST__) {
+        return openMarkdownLinkWithQuicker(normalized.target);
+    }
+
+    const tauriCore = getMarkdownTauriCore();
+    if (!tauriCore) {
+        window.open(normalized.target, '_blank', 'noopener,noreferrer');
+        return true;
+    }
+
+    try {
+        await tauriCore.invoke('open_external_url', { url: normalized.target });
+        return true;
+    } catch (error) {
+        console.warn('[Markdown] 打开外部网址失败:', error);
+        showTopToast(`❌ 打开失败：${error?.message || String(error)}`);
+        return false;
+    }
+}
+
 // !SECTION 页面初始化与 Markdown 解析
 
 // SECTION Mermaid 原生主题与渲染
