@@ -61,6 +61,7 @@ function createInteractiveBlockDocument(source, owner = '') {
     return `<!doctype html><script>
         (() => {
         let pending = false;
+        let pendingMeasureRequestId = null;
         let forwardingSpace = false;
         let themeReady = false;
         let themeRevision = 0;
@@ -79,6 +80,8 @@ function createInteractiveBlockDocument(source, owner = '') {
             pending = false;
             const body = document.body;
             if (!body) return;
+            const measureRequestId = pendingMeasureRequestId;
+            pendingMeasureRequestId = null;
             const style = getComputedStyle(body);
             let right = 0;
             let bottom = 0;
@@ -100,10 +103,11 @@ function createInteractiveBlockDocument(source, owner = '') {
             const horizontalScrollbar = Math.max(0, innerHeight - document.documentElement.clientHeight);
             const height = Math.ceil(bottom + (parseFloat(style.paddingBottom) || 0) + (parseFloat(style.marginBottom) || 0) + horizontalScrollbar);
             parent.postMessage({ type: 'branchmark-interactive-size', width, height,
-                viewportWidth: innerWidth, ready: themeReady }, '*');
+                viewportWidth: innerWidth, measureRequestId, ready: themeReady }, '*');
             reportScroll();
         }
-        function scheduleSize() {
+        function scheduleSize(measureRequestId = null) {
+            if (Number.isSafeInteger(measureRequestId)) pendingMeasureRequestId = measureRequestId;
             if (pending) return;
             pending = true;
             requestAnimationFrame(reportSize);
@@ -148,7 +152,7 @@ function createInteractiveBlockDocument(source, owner = '') {
         });
         addEventListener('message', event => {
             if (event.source !== parent) return;
-            if (event.data?.type === 'branchmark-interactive-measure') scheduleSize();
+            if (event.data?.type === 'branchmark-interactive-measure') scheduleSize(event.data.requestId);
             if (event.data?.type === 'branchmark-interactive-expanded') {
                 const root = document.documentElement;
                 // 留白位于网页自身，参与滚动范围；还原时保留控件原有的 padding。
@@ -246,6 +250,8 @@ function renderInteractiveBlocks(element) {
         let scrollMax = 0;
         let thumbTravel = 0;
         let dragOffset = null;
+        let measureRequestId = 0;
+        let pendingMeasureRequest = null;
         function handleInteraction(event, fromFrame = false) {
             const card = wrapper.closest('.node-card, .summary-editor');
             const action = getInteractiveBlockEventAction(event, {
@@ -365,8 +371,19 @@ function renderInteractiveBlocks(element) {
             if (event.data?.type === 'branchmark-interactive-size') {
                 const { width, height, viewportWidth } = event.data;
                 if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
-                // 放大或还原前排队的旧测量不能覆盖新视口的布局。
-                if (viewportWidth !== frame.clientWidth) return;
+                // 宽度变化后，旧测量不能覆盖新布局；请求一次基于当前栏宽的新测量。
+                const currentFrameWidth = frame.clientWidth;
+                const isRequestedMeasurement = pendingMeasureRequest?.id === event.data.measureRequestId
+                    && pendingMeasureRequest.width === currentFrameWidth;
+                if (viewportWidth !== currentFrameWidth && !isRequestedMeasurement) {
+                    if (!pendingMeasureRequest || pendingMeasureRequest.width !== currentFrameWidth) {
+                        pendingMeasureRequest = { id: ++measureRequestId, width: currentFrameWidth };
+                        frame.contentWindow?.postMessage({ type: 'branchmark-interactive-measure',
+                            requestId: pendingMeasureRequest.id }, '*');
+                    }
+                    return;
+                }
+                pendingMeasureRequest = null;
                 const surfaceHeight = Math.max(120, height + toolbar.offsetHeight);
                 if (expanded) {
                     const frameStyle = getComputedStyle(frame);
