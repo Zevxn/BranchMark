@@ -50,6 +50,37 @@ app.whenReady().then(async () => {
         assert.ok(appearance.titleColor && appearance.titleColor !== appearance.plainColor, 'Markdown 标题应着色');
         assert.ok(appearance.keywordColor && appearance.keywordColor !== appearance.plainColor, '代码块应按语言着色：' + JSON.stringify(appearance.spans));
 
+        // 使用实际编辑器确认行内、块公式分色，内部空行与等号不影响解析。
+        const mathSample = '参数 $\\alpha=a\\tau$。\n\n$$\nf_Y(y)\n=\n\\frac{\\beta^\\alpha}{\\Gamma(\\alpha)}\n\ny^{\\alpha-1}\n$$';
+        const mathAppearance = await evaluate(`(async () => {
+            loadMindMapSourceEditor(${JSON.stringify(mathSample)});
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            const editor = getMindMapSourceEditor();
+            const spans = [...editor.view.dom.querySelectorAll('.cm-line span')];
+            const color = text => {
+                const span = spans.find(span => span.textContent === text);
+                return span && getComputedStyle(span).color;
+            };
+            const originalTheme = document.documentElement.getAttribute('data-theme');
+            const themes = ['light', 'dark'].map(theme => {
+                document.documentElement.setAttribute('data-theme', theme);
+                return { command: color('\\\\frac'), inline: color('\\\\alpha'), number: color('1'),
+                    plain: getComputedStyle(editor.view.dom).color };
+            });
+            if (originalTheme === null) document.documentElement.removeAttribute('data-theme');
+            else document.documentElement.setAttribute('data-theme', originalTheme);
+            return { source: editor.value, themes,
+                equationWeight: getComputedStyle([...editor.view.dom.querySelectorAll('.cm-line')].find(line => line.textContent === '=')).fontWeight };
+        })()`);
+        assert.equal(mathAppearance.source, mathSample);
+        for (const theme of mathAppearance.themes) {
+            assert.ok(theme.command && theme.inline && theme.number, '行内及块公式必须生成着色节点');
+            assert.notEqual(theme.command, theme.plain);
+            assert.notEqual(theme.command, theme.number);
+        }
+        assert.notEqual(mathAppearance.themes[0].command, mathAppearance.themes[1].command, '公式配色必须跟随明暗主题');
+        assert.ok(Number(mathAppearance.equationWeight) < 600, '独立等号不得将公式误识别为标题');
+
         // 使用真实输入路径，确认 CodeMirror 输入会驱动右侧预览。
         await evaluate(`loadMindMapSourceEditor('正文'); getMindMapSourceEditor().focus(); getMindMapSourceEditor().setSelectionRange(0, 0);`);
         await window.webContents.insertText('中文');
@@ -112,7 +143,7 @@ app.whenReady().then(async () => {
             return { saved, undone, readOnly: document.getElementById('editorTextarea').parentElement.style.display };
         })()`);
         assert.deepEqual(saved, { saved: '保存正文', undone: false, readOnly: 'none' });
-        console.log('CodeMirror 编辑器校验通过：源码着色、离线代码语言、输入预览、格式撤销、取色历史、图片粘贴、选区映射、保存及历史隔离。');
+        console.log('CodeMirror 编辑器校验通过：源码着色、数学公式与明暗配色、离线代码语言、输入预览、格式撤销、取色历史、图片粘贴、选区映射、保存及历史隔离。');
     } catch (error) {
         console.error(error);
         process.exitCode = 1;

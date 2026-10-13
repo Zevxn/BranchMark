@@ -20,7 +20,8 @@ function initializeMindMapSourceEditor() {
         cm.drawSelection(),
         cm.highlightSpecialChars(),
         cm.keymap.of([...cm.historyKeymap, ...cm.defaultKeymap, cm.indentWithTab]),
-        cm.markdown({ codeLanguages: cm.languages }),
+        cm.markdown({ codeLanguages: cm.languages, extensions: cm.markdownMath }),
+        cm.syntaxHighlighting(cm.mathHighlightStyle),
         cm.syntaxHighlighting(cm.HighlightStyle.define([
             { tag: tags.heading, color: 'var(--md-heading)', fontWeight: 'bold' },
             { tag: tags.strong, fontWeight: 'bold' },

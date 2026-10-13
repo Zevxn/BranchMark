@@ -6,4 +6,5 @@ export { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 export { markdown } from '@codemirror/lang-markdown';
 export { languages } from '@codemirror/language-data';
 export { tags } from '@lezer/highlight';
+export { markdownMath, mathHighlightStyle } from '../app/JS/markdown-math.mjs';
 // !SECTION CodeMirror 本地依赖入口
