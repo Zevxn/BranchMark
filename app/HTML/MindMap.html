@@ -973,6 +973,13 @@
             line-height: 20px;
         }
         .mindmap-tab-modal-error:empty { display: none; }
+        .mindmap-tab-rename-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
         /* SECTION 软件更新窗口 */
         #branchMarkUpdateModal .modal-content {
             width: min(480px, calc(100vw - 32px));
@@ -3256,6 +3263,10 @@
                     <input type="text" id="mindMapTabRenameInput" maxlength="80" autocomplete="off">
                     <div class="mindmap-tab-modal-error" id="mindMapTabRenameError" role="alert"></div>
                 </div>
+                <label class="mindmap-tab-rename-option">
+                    <input type="checkbox" id="mindMapTabRenameRoot">
+                    同时重命名根节点
+                </label>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="cancelMindMapTabRename" type="button">取消</button>

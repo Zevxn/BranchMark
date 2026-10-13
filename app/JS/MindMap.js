@@ -1675,6 +1675,7 @@ function renameMindMapTab(tabId) {
     if (!modal || !input) return;
     mindMapTabRenameTargetId = tabId;
     input.value = tab.name;
+    $('#mindMapTabRenameRoot').checked = false;
     if (error) error.textContent = '';
     showMindMapTabModal(modal);
     requestAnimationFrame(() => {
@@ -1691,17 +1692,38 @@ function confirmMindMapTabRename() {
         cancelMindMapTabRename();
         return;
     }
-    const normalizedName = input.value.trim();
+    const normalizedName = input.value.trim().slice(0, 80);
     if (!normalizedName) {
         if (error) error.textContent = '页面名称不能为空';
         input.focus();
         return;
     }
-    if (normalizedName === tab.name) {
+    const renameRoot = $('#mindMapTabRenameRoot').checked;
+    if (renameRoot) commitCurrentMindMapTabEdits();
+    const rootChanged = renameRoot && tab.data.topic !== normalizedName;
+    if (normalizedName === tab.name && !rootChanged) {
         cancelMindMapTabRename();
         return;
     }
-    tab.name = normalizedName.slice(0, 80);
+    tab.name = normalizedName;
+    if (rootChanged) {
+        if (tab.id === mindMapWorkbook.activeTabId) {
+            tab.data.topic = normalizedName;
+            renderTree();
+            recordHistory();
+        } else {
+            // 非当前页面也保留根节点改名前后的撤销记录，不切换页面。
+            const runtime = mindMapTabRuntime.get(tab.id) || {
+                history: [JSON.stringify(tab.data)],
+                historyIndex: 0
+            };
+            const history = runtime.history.slice(0, runtime.historyIndex + 1);
+            tab.data.topic = normalizedName;
+            history.push(JSON.stringify(tab.data));
+            if (history.length > 50) history.shift();
+            mindMapTabRuntime.set(tab.id, { history, historyIndex: history.length - 1 });
+        }
+    }
     renderMindMapTabs();
     persistMindMapWorkbookSession();
     saveStorage();
