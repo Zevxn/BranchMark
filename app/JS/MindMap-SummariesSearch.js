@@ -881,7 +881,7 @@ function updateMindMapSummarySelectionAction() {
     if (!action) return;
     const nodeIds = Array.from(state.selectedIds);
     const selection = getMindMapSummarySelection();
-    const canSplit = nodeIds.length === 2 || nodeIds.length === 3;
+    const canSplit = nodeIds.length >= 2 && nodeIds.length <= 4;
     const canRelate = nodeIds.length === 2;
     $('#summarySelectionAction').style.display = selection ? '' : 'none';
     $('#splitSelectionAction').style.display = canSplit ? '' : 'none';

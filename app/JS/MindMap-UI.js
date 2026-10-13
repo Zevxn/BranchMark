@@ -574,7 +574,7 @@ function initializeMapContextMenu() {
         // 右击双选中的任一卡片时保留双选，并提供与工具栏一致的关联入口。
         const canAddRelation = state.selectedIds.size === 2;
         addRelationItem.style.display = canAddRelation ? '' : 'none';
-        setActionVisibility('split-read', state.selectedIds.size === 2 || state.selectedIds.size === 3);
+        setActionVisibility('split-read', state.selectedIds.size >= 2 && state.selectedIds.size <= 4);
         setActionVisibility('paste', state.selectedIds.size === 1);
         createTabItem.style.display = state.selectedIds.size === 1 ? '' : 'none';
         setActionVisibility('copy-mindmap-link', true);
@@ -1320,6 +1320,7 @@ function updateMindMapSplitReaderNode(node, contentChanged) {
     const title = pane.querySelector('.split-reader-title');
     title.textContent = String(node.topic || '').trim() || '未命名卡片';
     title.title = title.textContent;
+    pane.querySelector('.split-reader-pane-head').hidden = !String(node.topic || '').trim();
     const body = pane.querySelector('.split-reader-content');
     if (contentChanged) {
         const scrollTop = body.scrollTop;
@@ -1336,13 +1337,13 @@ function updateMindMapSplitReaderNode(node, contentChanged) {
 
 function openMindMapSplitReader() {
     const ids = Array.from(state.selectedIds);
-    if (ids.length !== 2 && ids.length !== 3) return;
+    if (ids.length < 2 || ids.length > 4) return;
     const nodes = ids.map(id => findNode(state.data, id));
     if (nodes.some(node => !node)) return;
     mindMapSplitReaderState.returnFocus = document.activeElement;
     commitMindMapInlineEditor();
     mindMapSplitReaderState.nodes = nodes;
-    mindMapSplitReaderState.layout = window.innerWidth < nodes.length * 280 + (nodes.length - 1) * 10 ? 'rows' : 'columns';
+    mindMapSplitReaderState.layout = window.innerWidth < nodes.length * 280 + (nodes.length - 1) * 10 + 24 ? 'rows' : 'columns';
     isSpacePressed = false;
     document.body.classList.remove('space-mode');
     hideMindMapContentPreview();
@@ -1375,10 +1376,14 @@ function openMindMapSplitReader() {
         body.innerHTML = String(node.content || '').trim()
             ? renderMarkdown(node.content)
             : '<p class="split-reader-empty">这张卡片暂无正文内容。</p>';
-        pane.append(title, body);
+        const header = document.createElement('div');
+        header.className = 'split-reader-pane-head';
+        header.hidden = !String(node.topic || '').trim();
+        header.appendChild(title);
+        pane.append(header, body);
         grid.appendChild(pane);
     });
-    $('#splitReaderHeading').textContent = `分屏阅读 · ${nodes.length} 张卡片`;
+    $('#splitReaderHeading').innerHTML = `分屏阅读 <span class="split-reader-count">${nodes.length} 张卡片</span>`;
     const reader = $('#mindMapSplitReader');
     reader.classList.add('active');
     reader.setAttribute('aria-hidden', 'false');
@@ -1477,7 +1482,7 @@ function initializeMindMapSplitReader() {
     }).observe(grid);
     chrome.storage.local.get({ [MINDMAP_SPLIT_READER_WIDTHS_KEY]: {} }).then(result => {
         const saved = result?.[MINDMAP_SPLIT_READER_WIDTHS_KEY];
-        [2, 3].forEach(count => {
+        [2, 3, 4].forEach(count => {
             const weights = saved?.[count];
             if (!mindMapSplitReaderState.ratios.columns[count] && Array.isArray(weights) && weights.length === count
                 && weights.every(value => Number.isFinite(value) && value > 0 && value <= 1)) {
@@ -2595,7 +2600,7 @@ function initializeEditorPreviewResizer() {
     let dragStartWidth = 0;
 
     function getAvailableWidth() {
-        return Math.max(0, modalBody.clientWidth);
+        return Math.max(0, modalBody.clientWidth - resizer.offsetWidth);
     }
 
     function getWidthLimits() {

@@ -111,9 +111,9 @@ for (const available of [0, 100, 600, 1200]) {
 run('openMindMapSplitReader()');
 assert.equal(run('isMindMapSplitReaderOpen()'), true);
 assert.equal(grid.children.length, 3);
-assert.equal(grid.children[0].children[0].textContent, '<原始标题>', '标题应通过纯文本写入');
+assert.equal(grid.children[0].querySelector('.split-reader-title').textContent, '<原始标题>', '标题应通过纯文本写入');
 assert.match(grid.children[0].children[1].innerHTML, /正文 A/, '折叠卡片应显示完整正文');
-assert.equal(grid.children[2].children[0].textContent, '未命名卡片');
+assert.equal(grid.children[2].querySelector('.split-reader-title').textContent, '未命名卡片');
 assert.match(grid.children[2].children[1].innerHTML, /暂无正文/);
 assert.equal(rendered.length, 2);
 vm.runInContext(source.slice(source.indexOf('function initializeMapClickEvents()'),
@@ -190,7 +190,7 @@ const closeStart = source.indexOf("$('#btn-close-modal').onclick = () => {");
 vm.runInContext(source.slice(closeStart, source.indexOf('\n    };', closeStart) + 7), context);
 elements['btn-close-modal'].onclick();
 assert.equal(nodes[0].content, '# 修订正文', '完成编辑应保存原卡片');
-assert.equal(grid.children[0].children[0].textContent, '修订标题');
+assert.equal(grid.children[0].querySelector('.split-reader-title').textContent, '修订标题');
 assert.match(firstBody.innerHTML, /修订正文/, '保存后应刷新对应分屏栏');
 assert.equal(grid.children[2].children[1], secondBody, '其他分屏栏不得重建');
 assert.equal(secondBody.scrollTop, 45);

@@ -2271,25 +2271,92 @@
 
         /* !SECTION 卡片折叠按钮 */
         /* SECTION 分屏阅读 */
-        .split-reader.active { display: flex; flex-direction: column; align-items: stretch; background: var(--card-bg); backdrop-filter: none; }
-        .split-reader-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--toolbar-border); background: var(--header-bg-bottom); color: var(--text-color); flex-shrink: 0; }
+        .split-reader.active {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            padding: 0 12px 12px;
+            background: var(--bg-color);
+            backdrop-filter: none;
+        }
+        .split-reader-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 12px;
+            color: var(--text-color);
+            flex-shrink: 0;
+        }
+        #splitReaderHeading { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 500; }
+        .split-reader-count { color: var(--text-color-secondary); font-size: 12px; font-weight: 400; }
         .split-reader-grid { display: grid; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
-        .split-reader-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-        .split-reader-title { flex-shrink: 0; margin: 0; padding: 12px 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; color: var(--text-color); border-bottom: 1px solid var(--toolbar-border); }
-        .split-reader-content { flex: 1; min-height: 0; padding: 20px; overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; color: var(--text-color); user-select: text; cursor: auto; }
+        .split-reader-pane {
+            --split-reader-inset: 24px;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+            background: var(--card-bg);
+            border: 1px solid color-mix(in srgb, var(--toolbar-border) 65%, transparent);
+            border-radius: 12px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.025);
+            container-type: inline-size;
+        }
+        .split-reader-pane-head {
+            flex-shrink: 0;
+            padding: 12px var(--split-reader-inset) 8px;
+        }
+        .split-reader-title {
+            flex-shrink: 0;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            margin: 0;
+            max-height: 52px;
+            overflow: hidden;
+            overflow-wrap: anywhere;
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 26px;
+            color: var(--text-color);
+        }
+        .split-reader-content {
+            flex: 1;
+            min-height: 0;
+            padding: 12px var(--split-reader-inset) 24px;
+            overflow: auto;
+            overscroll-behavior: contain;
+            overflow-wrap: anywhere;
+            color: var(--text-color);
+            user-select: text;
+            cursor: auto;
+        }
         .split-reader-content > :first-child { margin-top: 0; }
         .split-reader-empty { color: var(--text-color-secondary); }
-        .split-reader-resizer { display: flex; align-items: center; justify-content: center; cursor: col-resize; touch-action: none; background: var(--card-bg); outline-offset: -2px; }
-        .split-reader-resizer::before { content: ''; width: 2px; height: 100%; background: var(--toolbar-border); }
+        .split-reader-resizer { display: flex; align-items: center; justify-content: center; cursor: col-resize; touch-action: none; outline-offset: -2px; }
+        .split-reader-resizer::before { content: ''; width: 3px; height: 32px; border-radius: 999px; background: color-mix(in srgb, var(--text-color-secondary) 40%, transparent); }
         .split-reader[data-layout="rows"] .split-reader-resizer { cursor: row-resize; }
-        .split-reader[data-layout="rows"] .split-reader-resizer::before { width: 100%; height: 2px; }
-        .split-reader-resizer:hover::before, .split-reader-resizer:focus-visible::before { background: var(--primary); }
+        .split-reader[data-layout="rows"] .split-reader-resizer::before { width: 32px; height: 3px; }
+        .split-reader-resizer:hover::before, .split-reader-resizer:focus-visible::before,
+        .split-reader.is-resizing .split-reader-resizer:focus::before { background: var(--primary); }
         .split-reader.is-resizing, .split-reader.is-resizing * { cursor: col-resize !important; user-select: none !important; }
         .split-reader[data-layout="rows"].is-resizing, .split-reader[data-layout="rows"].is-resizing * { cursor: row-resize !important; }
         body.split-reader-open .mindmap-link-preview { z-index: 2100; }
+        @container (min-width: 640px) {
+            .split-reader-pane-head { padding-inline: 28px; }
+            .split-reader-content { padding-inline: 28px; }
+        }
+        @container (max-width: 360px) {
+            .split-reader-pane-head { padding-inline: 16px; }
+            .split-reader-content { padding-inline: 16px; }
+        }
         @media (max-width: 480px) {
+            .split-reader.active { padding: 0 8px 8px; }
             .split-reader-head { padding: 8px; gap: 6px; font-size: 13px; }
-            .split-reader-content { padding: 12px; }
+            .split-reader-pane { --split-reader-inset: 16px; }
+            .split-reader-content { padding-bottom: 16px; }
         }
         /* !SECTION 分屏阅读 */
         /* SECTION 模态框 */
@@ -2318,32 +2385,19 @@
             flex: 0 0 12px;
             align-items: center;
             justify-content: center;
-            margin: 0 -6px;
+            margin: 0;
             cursor: col-resize;
             touch-action: none;
             outline: none;
         }
-        .editor-preview-resizer::before {
-            width: 2px;
-            height: 100%;
-            background: var(--toolbar-border);
-            content: '';
-            transition: background-color 0.15s ease, width 0.15s ease;
-        }
         .editor-preview-resizer::after {
             position: absolute;
-            width: 5px;
+            width: 3px;
             height: 32px;
             border-radius: 4px;
-            background: var(--toolbar-border);
+            background: color-mix(in srgb, var(--text-color-secondary) 40%, transparent);
             content: '';
             transition: background-color 0.15s ease;
-        }
-        .editor-preview-resizer:hover::before,
-        .editor-preview-resizer:focus-visible::before,
-        .modal-body.is-resizing-preview .editor-preview-resizer::before {
-            width: 3px;
-            background: var(--primary);
         }
         .editor-preview-resizer:hover::after,
         .editor-preview-resizer:focus-visible::after,
@@ -2356,6 +2410,30 @@
             user-select: none !important;
         }
         .preview-content { flex: 1; padding: 30px; overflow-y: auto; color: var(--text-color); }
+
+        /* 编辑窗口以留白区分源码与预览，标题和工具栏不再使用贯穿分隔线。 */
+        #editorModal .modal-win { background: var(--bg-color); }
+        #editorModal .modal-head { border-bottom: none; background: transparent; }
+        #editorModal .modal-body { margin: 0 12px 12px; }
+        #editorModal .editor-pane,
+        #editorModal .preview-pane {
+            min-height: 0;
+            background: var(--card-bg);
+            border: 1px solid color-mix(in srgb, var(--toolbar-border) 65%, transparent);
+            border-radius: 12px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.025);
+        }
+        #editorModal .editor-toolbar {
+            padding: 12px 16px 6px;
+            border-bottom: none;
+            background: transparent;
+        }
+        #editorModal .markdown-source-editor,
+        #editorModal .editor { background: var(--card-bg); border-radius: 0 0 12px 12px; }
+        #editorModal .preview-content { min-height: 0; padding: 24px; }
+        #editorModal .preview-content > :first-child { margin-top: 0; }
+        #editorModal .modal-win.narrow .editor-preview-resizer { display: none; }
+        #editorModal .modal-win.narrow .preview-pane { flex-grow: 1; }
 
         /* 卡片与总结共用：按钮悬浮在卡片正上方，悬停或键盘聚焦时显示。 */
         .card-floating-tools {
