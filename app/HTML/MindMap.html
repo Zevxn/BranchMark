@@ -69,7 +69,7 @@
             --shadow-color-hover: rgba(0, 0, 0, 0.219);
             --shadow-color-active: rgba(24,144,255,0.15);
             --node-default-color: rgba(0,0,0,0.15);
-            --node-card-min-width: 100px;
+            --node-card-min-width: 60px;
             --node-card-max-width: 600px;
             --node-card-max-body-height: 600px;
             --node-card-topic-only-min-height: 43px;
@@ -1649,7 +1649,24 @@
             border-radius: var(--node-card-inner-radius) var(--node-card-inner-radius) 0 0;
         }
         .node-card.has-content .card-header { border-bottom-color: var(--header-border-bottom); }
-        .content-indicator { color: var(--primary); margin-right: 6px; font-size: 16px; pointer-events: none; mix-blend-mode: multiply; }
+        .content-indicator {
+            display: inline-flex; align-items: center; justify-content: center;
+            color: var(--primary); margin: 0 6px 0 0; padding: 0; font-size: 16px; line-height: 1;
+            border: 0; border-radius: 4px; background: transparent; cursor: pointer;
+            pointer-events: auto; mix-blend-mode: multiply;
+            transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .content-indicator:hover { transform: scale(1.08); }
+        }
+        .content-indicator:active { transform: scale(0.94); }
+        @media (prefers-reduced-motion: reduce) {
+            .content-indicator,
+            .content-indicator:hover,
+            .content-indicator:active { transform: none; transition: none; }
+            .content-indicator:active { opacity: 0.75; }
+        }
+        .content-indicator:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
         .node-topic { outline:none; cursor:text; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; user-select: text; pointer-events: auto; }
         /* 标准卡片的标题必须允许在手动缩窄后收缩，否则长文本会按最小内容宽度溢出卡片。 */
         .node-card:not(.simple) .topic-wrapper {

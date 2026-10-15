@@ -998,11 +998,12 @@ async function renderRichContent(element) {
     const useQuickerSubprogram = Boolean(
         window.__DEEPCONVO_NATIVE_QUICKER_HOST__ && getMarkdownQuickerSubprogram(),
     );
-    const useTauriFileOpen = Boolean(getMarkdownTauriCore());
+    const useTauriOpen = Boolean(getMarkdownTauriCore());
     element.querySelectorAll('a[href]').forEach(link => {
         const normalizedTarget = normalizeMarkdownLinkTarget(link.getAttribute('href'));
         const isMindMapInternalLink = normalizedTarget?.kind === 'mindmap-card';
         const isLocalFile = normalizedTarget?.kind === 'file';
+        const isExternalUrl = normalizedTarget?.kind === 'url' && /^https?:/i.test(normalizedTarget.target);
         link.classList.toggle('md-internal-link', isMindMapInternalLink);
         link.classList.toggle('md-file-link', isLocalFile);
 
@@ -1019,7 +1020,7 @@ async function renderRichContent(element) {
             link.dataset.fileLinkDecorated = 'true';
         }
 
-        if (isMindMapInternalLink || useQuickerSubprogram || (isLocalFile && useTauriFileOpen)) {
+        if (isMindMapInternalLink || useQuickerSubprogram || (useTauriOpen && (isLocalFile || isExternalUrl))) {
             link.removeAttribute('target');
             link.removeAttribute('rel');
         } else {
@@ -1043,12 +1044,17 @@ async function renderRichContent(element) {
                     if (event.detail === 0) {
                         if (useQuickerSubprogram) {
                             await openMarkdownLinkWithQuicker(link.getAttribute('href'));
-                        } else if (useTauriFileOpen) {
+                        } else if (useTauriOpen) {
                             await openMarkdownFileWithTauri(link.getAttribute('href'));
                         } else {
                             window.open(link.href, '_blank', 'noopener,noreferrer');
                         }
                     }
+                    return;
+                }
+                if (isExternalUrl && useTauriOpen) {
+                    event.preventDefault();
+                    await openMarkdownExternalUrl(link.getAttribute('href'));
                     return;
                 }
                 if (!useQuickerSubprogram) return;
@@ -1064,7 +1070,7 @@ async function renderRichContent(element) {
                     await openMarkdownLinkWithQuicker(link.getAttribute('href'));
                     return;
                 }
-                if (useTauriFileOpen) {
+                if (useTauriOpen) {
                     await openMarkdownFileWithTauri(link.getAttribute('href'));
                     return;
                 }

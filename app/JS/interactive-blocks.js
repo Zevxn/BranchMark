@@ -36,6 +36,8 @@ function updateInteractiveBlockTheme() {
 
 // iframe 与外层容器共用事件归属规则；新增导图操作只需在这里决定归属。
 function getInteractiveBlockEventAction(event, context) {
+    if (event.type === 'keydown' && (event.ctrlKey || event.metaKey)
+        && (event.key === 's' || event.key === 'S')) return 'save';
     if (event.type === 'keyup' && event.code === 'Space' && context.spacePressed) return 'space';
     if (event.type === 'keydown' && event.key === 'Escape' && !event.defaultPrevented && context.expanded) return 'escape';
     if (event.type === 'contextmenu') return context.owner && !context.expanded ? 'contextmenu' : '';
@@ -56,7 +58,7 @@ function getInteractiveBlockEventAction(event, context) {
 }
 
 function createInteractiveBlockDocument(source, owner = '') {
-    // iframe 内的键盘事件不会冒泡到导图，显式转发卡片导航键和未被组件消费的 Esc。
+    // iframe 内的键盘事件不会冒泡到导图，显式转发保存、卡片导航键和未被组件消费的 Esc。
     // 前置 doctype 保持标准模式，后续完整 HTML 或 HTML 片段均由浏览器解析。
     return `<!doctype html><script>
         (() => {
@@ -130,7 +132,7 @@ function createInteractiveBlockDocument(source, owner = '') {
                 spacePressed: forwardingSpace, activeElement: document.activeElement
             });
             // 选中只通知宿主，控件继续获得焦点；Esc 留到冒泡阶段让控件先处理。
-            if (event.type === 'contextmenu' || action === 'space' || action === 'tab') {
+            if (event.type === 'contextmenu' || action === 'space' || action === 'tab' || action === 'save') {
                 event.preventDefault();
                 event.stopImmediatePropagation();
             }
@@ -271,6 +273,11 @@ function renderInteractiveBlocks(element) {
                 activeElement: fromFrame ? null : document.activeElement
             });
             switch (action) {
+                case 'save':
+                    if (!fromFrame) event.preventDefault();
+                    if (typeof syncCurrentInput === 'function') syncCurrentInput();
+                    saveMindMapData(true);
+                    break;
                 case 'select': {
                     clearSelectedMindMapRelation();
                     clearSelectedMindMapSummary();

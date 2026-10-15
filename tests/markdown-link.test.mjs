@@ -172,9 +172,14 @@ for (const href of pythonTargets) {
 const nativeCallsAfterFiles = nativeCalls.length;
 
 const externalLink = await bindLink('https://example.com/paper');
-assert.equal(externalLink.target, '_blank', '普通网址保留原有行为');
-assert.equal((await externalLink.dispatch('click')).prevented, false);
-assert.equal(nativeCalls.length, nativeCallsAfterFiles);
+assert.equal(externalLink.target, undefined, 'Tauri 外部网址应交给系统默认浏览器');
+assert.equal((await externalLink.dispatch('click')).prevented, true);
+assert.equal(nativeCalls.length, nativeCallsAfterFiles + 1);
+assert.equal(nativeCalls.at(-1).command, 'open_external_url');
+assert.equal(nativeCalls.at(-1).args.url, 'https://example.com/paper');
+assert.deepEqual(browserCalls, [], 'Tauri 外部网址不得交给 window.open');
+await externalLink.dispatch('click', 0);
+assert.equal(nativeCalls.length, nativeCallsAfterFiles + 2, '外部网址键盘激活也应调用原生命令');
 
 window.__TAURI__.core.invoke = async () => { throw '文件或目录不存在'; };
 await tauriLink.dispatch('dblclick', 2);
@@ -190,6 +195,9 @@ assert.equal(calls.at(-1).args.target, normalizedFile.target);
 const quickerPythonLink = await bindLink(`${pythonPath}:418:12`);
 await quickerPythonLink.dispatch('dblclick', 2);
 assert.equal(calls.at(-1).args.target, expectedPythonPath, 'Quicker 接收去掉位置后缀的实际路径');
+const quickerExternalLink = await bindLink('https://example.com/paper');
+await quickerExternalLink.dispatch('click');
+assert.equal(calls.at(-1).args.target, 'https://example.com/paper', 'Quicker 外部网址继续使用打开链接子程序');
 
 window.__DEEPCONVO_NATIVE_QUICKER_HOST__ = false;
 delete window.__TAURI__;
@@ -197,6 +205,9 @@ const browserLink = await bindLink(renderedHref);
 await browserLink.dispatch('dblclick', 2);
 assert.equal(browserCalls.length, 1, '普通浏览器保留原有文件打开方式');
 assert.equal(browserCalls[0][0], renderedHref);
+const browserExternalLink = await bindLink('https://example.com/paper');
+assert.equal(browserExternalLink.target, '_blank', '普通浏览器外部网址保留新标签打开行为');
+assert.equal((await browserExternalLink.dispatch('click')).prevented, false);
 // !SECTION 文件链接交互与宿主分流
 
 console.log('Markdown 链接校验通过：Tauri 双击/键盘原生打开、错误提示及 Quicker/浏览器分流完整。');

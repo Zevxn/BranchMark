@@ -1223,7 +1223,7 @@ document.addEventListener('keydown', (e) => {
     // 2. 处理空格键
     if (e.code === 'Space') {
         // 如果正在打字，直接返回，允许输入空格
-        if (isTyping) return;
+        if (isTyping || activeEl?.closest?.('[data-action="preview-content"]')) return;
 
         // 【核心修复】：
         // 必须在检查 !e.repeat 之前调用 preventDefault
@@ -1326,6 +1326,7 @@ function persistMindMapWorkbookSession(captureScroll = true) {
 
 function resetMindMapTabTransientState(options = {}) {
     closeMindMapSplitReader(false);
+    if (mindMapInternalLinkPreviewState.target) closeMindMapInternalLinkPreview();
     state.selectedIds.clear();
     state.selectedRelationId = null;
     state.selectedSummaryId = null;
@@ -2273,7 +2274,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasSelection = window.getSelection() && window.getSelection().toString().length > 0;
 
         // 预览气泡内的文字应完整保留浏览器原生快捷键（尤其是复制与全选）。
-        if (activeEl?.closest?.('.card-content-preview, .mindmap-link-preview')) return;
+        if (activeEl?.closest?.('.card-content-preview, .mindmap-link-preview, [data-action="preview-content"]')) return;
 
         // 搜索定位优先于浏览器页面查找，但编辑器打开时仍保留编辑器自身行为。
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !isModalActive) {

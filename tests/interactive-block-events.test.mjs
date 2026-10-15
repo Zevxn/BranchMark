@@ -14,6 +14,15 @@ const action = (event, context = {}) => host.getInteractiveBlockEventAction(even
 const tab = { type: 'keydown', key: 'Tab', code: 'Tab' };
 const space = { type: 'keydown', key: ' ', code: 'Space' };
 const click = { type: 'mousedown', button: 0 };
+const save = { type: 'keydown', key: 's', code: 'KeyS', ctrlKey: true };
+
+for (const context of [{}, { expanded: true }, { owner: '' }, { owner: 'summary' },
+    { expanded: true, activeElement: { tagName: 'TEXTAREA' } }]) {
+    assert.equal(action(save, context), 'save');
+    assert.equal(action({ ...save, key: 'S', ctrlKey: false, metaKey: true }, context), 'save');
+}
+assert.equal(action({ ...save, ctrlKey: false }), '');
+assert.equal(action({ ...save, type: 'keyup' }), '');
 
 assert.equal(action(click), 'select');
 assert.equal(action(click, { mode: 'SELECTING' }), '');
@@ -99,6 +108,17 @@ dispatch({ type: 'keydown', key: 'Escape', defaultPrevented: true });
 assert.equal(messages.length, 0);
 dispatch({ type: 'keydown', key: 'Escape' });
 assert.equal(messages[0].event.key, 'Escape');
+// 输入框和放大预览内也应在捕获阶段转发保存，阻止浏览器保存 iframe 页面。
+document.activeElement = { tagName: 'TEXTAREA' };
+for (const previewExpanded of [false, true]) {
+    expanded = previewExpanded;
+    const event = dispatch(save);
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(event.stopped, true);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].event.key, 's');
+    assert.equal(messages[0].event.ctrlKey, true);
+}
 assert.equal(dispatch({ type: 'contextmenu' }).defaultPrevented, true);
 assert.equal(messages.length, 0);
 // !SECTION 实际 iframe 桥接检查

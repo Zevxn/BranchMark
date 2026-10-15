@@ -1154,6 +1154,20 @@ function initializeMapClickEvents() {
         if (!t.closest('[data-action="navigate-relation"]') && !t.closest('#relationNavigationMenu')) {
             closeMindMapRelationNavigationMenu();
         }
+        const contentPreviewTrigger = t.closest('[data-action="preview-content"]');
+        if (contentPreviewTrigger) {
+            const card = contentPreviewTrigger.closest('.node-card');
+            if (!card || !findNode(state.data, card.dataset.nodeId)) return;
+            syncCurrentInput();
+            syncActiveMindMapTab(false);
+            openMindMapInternalLinkPreview({
+                documentId: mindMapWorkbook.documentId,
+                tabId: mindMapWorkbook.activeTabId,
+                nodeId: card.dataset.nodeId,
+            });
+            e.stopPropagation();
+            return;
+        }
         const foldBtn = t.closest('.fold-btn');
         if(foldBtn) {
             const action = foldBtn.dataset.action;
@@ -1203,6 +1217,7 @@ function initializeMapClickEvents() {
     });
     document.addEventListener('dblclick', (e) => {
         const t = e.target;
+        if (t.closest('[data-action="preview-content"]')) return;
         if (t.closest('.md-content a')) {
             e.preventDefault();
             e.stopPropagation();
@@ -1888,6 +1903,7 @@ function getMindMapContentPreviewDescriptor(card) {
 
     const body = card.querySelector('.card-body');
     if (card.classList.contains('simple') || !body) {
+        if ($('#mindMapLinkPreview')?.classList.contains('is-open')) return null;
         return mindMapSettings.cardContentHover ? { mode: 'content', node, headings: [] } : null;
     }
 
@@ -2075,7 +2091,7 @@ function initializeMapMouseEvents() {
     document.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; 
         // 预览气泡位于画布外；在其中选择、复制文字时不能触发画布平移或卡片操作。
-        if (e.target.closest('.card-content-preview, .mindmap-link-preview, .md-content a')) return;
+        if (e.target.closest('.card-content-preview, .mindmap-link-preview, .md-content a, [data-action="preview-content"]')) return;
          // ▼▼▼ [新增功能] 空格键按下时，强制进入平移模式 (优先级最高) ▼▼▼
         if (isSpacePressed) {
             state.mode = 'PANNING';
@@ -2368,6 +2384,17 @@ function closeMindMapInternalLinkPreview() {
     mindMapInternalLinkPreviewState.resolution = null;
 }
 
+function closeMindMapInvalidLinkPreview() {
+    const target = mindMapInternalLinkPreviewState.target;
+    if (!target) return;
+    // 当前页以运行中的树为准，撤销/重做后 Tab 快照可能尚未同步。
+    const node = target.documentId === mindMapWorkbook.documentId
+        && (target.tabId === mindMapWorkbook.activeTabId
+            ? findNode(state.data, target.nodeId)
+            : resolveMindMapInternalLink(target).node);
+    if (!node) closeMindMapInternalLinkPreview();
+}
+
 function getMindMapInternalLinkPreviewError(resolution) {
     if (resolution?.reason === 'document') return '该链接属于其他导图，当前页面无法预览。';
     if (resolution?.reason === 'tab') return '链接指向的页面已不存在。';
@@ -2504,7 +2531,7 @@ function openMindMapInternalLinkPreview(targetOrHref) {
     const resolution = resolveMindMapInternalLink(target);
     suspendMindMapDocumentPreview();
     panel.dataset.previewMode = 'link';
-    panel.setAttribute('aria-label', '导图内链接预览');
+    panel.setAttribute('aria-label', '卡片内容预览');
     const title = $('#mindMapLinkPreviewTitle');
     const body = $('#mindMapLinkPreviewBody');
     const jumpButton = $('#btn-mindmap-link-jump');
@@ -2514,6 +2541,7 @@ function openMindMapInternalLinkPreview(targetOrHref) {
     mindMapInternalLinkPreviewState.target = resolution.target;
     mindMapInternalLinkPreviewState.resolution = resolution;
     body.replaceChildren();
+    body.scrollTop = 0;
 
     if (resolution.node && resolution.tab) {
         title.textContent = String(resolution.node.topic || '').trim() || '未命名卡片';

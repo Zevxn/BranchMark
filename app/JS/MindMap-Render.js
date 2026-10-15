@@ -614,7 +614,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null, includeChildren = t
         <div class="${cardClass}" style="${cardStyle}" data-node-id="${node.id}" id="card-${node.id}" ${dataColorAttr}>
             <div class="card-header" style="${headerStyle}">
                 <div class="topic-wrapper">
-                    ${hasContent && isContentCollapsed ? '<i class="ri-file-list-2-line content-indicator"></i>' : ''}
+                    ${hasContent && isContentCollapsed ? '<button class="content-indicator" type="button" data-action="preview-content" title="预览卡片内容" aria-label="预览卡片内容"><i class="ri-file-list-2-line" aria-hidden="true"></i></button>' : ''}
                     <span class="node-topic" contenteditable="true">${escapeHtml(node.topic)}</span>
                 </div>
             </div>
@@ -633,6 +633,7 @@ function createNodeHTML(node, isLeft, inheritedColor = null, includeChildren = t
 }
 function renderTree() {
     hideMindMapContentPreview();
+    closeMindMapInvalidLinkPreview();
     closeMindMapRelationNavigationMenu();
     if (skipNextGlobalScrollCapture) skipNextGlobalScrollCapture = false;
     else saveGlobalScrolls();
@@ -732,6 +733,7 @@ function isDescendantOfLeft(id) {
 };
 
 function updateChildrenDOM(nodeId) {
+    closeMindMapInvalidLinkPreview();
     if(nodeId === state.data.id) { renderTree(); return; }
 
     saveGlobalScrolls();
