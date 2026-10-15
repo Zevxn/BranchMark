@@ -39,6 +39,15 @@
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
 
+.interactive-block-surface.is-expanded.is-fullscreen {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+}
+
 .interactive-block-surface::backdrop {
     background: rgba(0, 0, 0, 0.6);
 }

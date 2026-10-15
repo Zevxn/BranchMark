@@ -207,6 +207,15 @@ function renderInteractiveBlocks(element) {
         expandButton.setAttribute('aria-expanded', 'false');
         expandButton.innerHTML = '<i class="ri-fullscreen-line" aria-hidden="true"></i>';
 
+        const fullscreenButton = document.createElement('button');
+        fullscreenButton.type = 'button';
+        fullscreenButton.className = 'interactive-block-action interactive-block-fullscreen';
+        fullscreenButton.title = '铺满应用内容区域';
+        fullscreenButton.setAttribute('aria-label', '全屏预览交互内容');
+        fullscreenButton.setAttribute('aria-pressed', 'false');
+        fullscreenButton.innerHTML = '<i class="ri-fullscreen-line" aria-hidden="true"></i>';
+        fullscreenButton.hidden = true;
+
         const closeButton = document.createElement('button');
         closeButton.type = 'button';
         closeButton.className = 'interactive-block-action interactive-block-close';
@@ -214,7 +223,7 @@ function renderInteractiveBlocks(element) {
         closeButton.setAttribute('aria-label', '关闭放大视图');
         closeButton.innerHTML = '<i class="ri-close-line" aria-hidden="true"></i>';
         closeButton.hidden = true;
-        toolbar.append(expandButton, closeButton);
+        toolbar.append(expandButton, fullscreenButton, closeButton);
 
         const frame = document.createElement('iframe');
         frame.className = 'interactive-block-frame is-loading';
@@ -252,6 +261,8 @@ function renderInteractiveBlocks(element) {
         let dragOffset = null;
         let measureRequestId = 0;
         let pendingMeasureRequest = null;
+        let pendingScrollTop = null;
+        let fullscreenAnimation = null;
         function handleInteraction(event, fromFrame = false) {
             const card = wrapper.closest('.node-card, .summary-editor');
             const action = getInteractiveBlockEventAction(event, {
@@ -295,7 +306,7 @@ function renderInteractiveBlocks(element) {
                     break;
                 case 'escape':
                     if (!fromFrame) event.preventDefault();
-                    restore();
+                    dismiss();
                     break;
             }
             return action;
@@ -385,23 +396,70 @@ function renderInteractiveBlocks(element) {
                 }
                 pendingMeasureRequest = null;
                 const surfaceHeight = Math.max(120, height + toolbar.offsetHeight);
-                if (expanded) {
+                if (expanded && !surface.classList.contains('is-fullscreen') && !fullscreenAnimation) {
                     const frameStyle = getComputedStyle(frame);
                     const sideSpacing = (parseFloat(frameStyle.marginLeft) || 0) + (parseFloat(frameStyle.marginRight) || 0);
                     surface.style.setProperty('--interactive-width', `${Math.max(320, width + sideSpacing)}px`);
                     surface.style.setProperty('--interactive-height', `${surfaceHeight}px`);
-                } else {
+                } else if (!expanded) {
                     wrapper.style.setProperty('--interactive-inline-height', `${surfaceHeight}px`);
                 }
                 // 隐藏期间仍参与布局；只在主题就绪且尺寸匹配当前视口后显示。
                 if (event.data.ready === true) frame.classList.remove('is-loading');
                 if (!expanded) wrapper.dispatchEvent(new CustomEvent('branchmark-content-resize', { bubbles: true }));
+                if (pendingScrollTop !== null) {
+                    frame.contentWindow?.postMessage({ type: 'branchmark-interactive-scroll-to', top: pendingScrollTop }, '*');
+                    pendingScrollTop = null;
+                }
             }
         };
+
+        function setFullscreen(fullscreen, animate = false) {
+            // 连续切换从当前可见尺寸接续，不从上一动画的起点重播。
+            const previousBounds = expanded && animate ? surface.getBoundingClientRect() : null;
+            fullscreenAnimation?.cancel();
+            fullscreenAnimation = null;
+            // 仅改变同一预览窗口的尺寸，保留 iframe 和普通预览的尺寸记录。
+            surface.classList.toggle('is-fullscreen', fullscreen);
+            fullscreenButton.title = fullscreen ? '还原预览尺寸（Esc）' : '铺满应用内容区域';
+            fullscreenButton.setAttribute('aria-label', fullscreen ? '还原预览尺寸' : '全屏预览交互内容');
+            fullscreenButton.setAttribute('aria-pressed', String(fullscreen));
+            fullscreenButton.innerHTML = `<i class="${fullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'}" aria-hidden="true"></i>`;
+            closeButton.title = fullscreen ? '关闭放大视图' : '关闭放大视图（Esc）';
+            if (!expanded) return;
+            if (previousBounds) {
+                const bounds = surface.getBoundingClientRect();
+                const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                // 先完成布局，再用 transform 衔接尺寸，避免逐帧改变 iframe 宽高。
+                const animation = surface.animate(reduceMotion
+                    ? [{ opacity: 0.9 }, { opacity: 1 }]
+                    : [{ transform: `scale(${previousBounds.width / bounds.width}, ${previousBounds.height / bounds.height})` },
+                        { transform: 'none' }], {
+                    duration: reduceMotion ? 160 : 240,
+                    easing: 'cubic-bezier(0.77, 0, 0.175, 1)'
+                });
+                fullscreenAnimation = animation;
+                animation.onfinish = () => {
+                    if (fullscreenAnimation !== animation) return;
+                    fullscreenAnimation = null;
+                    frame.contentWindow?.postMessage({ type: 'branchmark-interactive-measure' }, '*');
+                };
+            }
+            pendingScrollTop = scrollTop;
+            frame.contentWindow?.postMessage({ type: 'branchmark-interactive-measure' }, '*');
+        }
+
+        function dismiss() {
+            if (surface.classList.contains('is-fullscreen')) setFullscreen(false);
+            else restore();
+        }
 
         function restore(restoreFocus = true) {
             if (!expanded) return;
             expanded = false;
+            setFullscreen(false);
+            pendingScrollTop = null;
+            fullscreenButton.hidden = true;
             scrollbar.hidden = true;
             frame.contentWindow?.postMessage({ type: 'branchmark-interactive-expanded', expanded: false }, '*');
             observer.disconnect();
@@ -428,6 +486,7 @@ function renderInteractiveBlocks(element) {
             expandButton.hidden = true;
             expandButton.setAttribute('aria-expanded', 'true');
             closeButton.hidden = false;
+            fullscreenButton.hidden = false;
             surface.showModal();
             expanded = true;
             expandedInteractiveBlock = { surface, restore };
@@ -437,10 +496,13 @@ function renderInteractiveBlocks(element) {
             observer.observe(document.body, { childList: true, subtree: true });
             closeButton.focus({ preventScroll: true });
         });
+        fullscreenButton.addEventListener('click', () => {
+            setFullscreen(!surface.classList.contains('is-fullscreen'), true);
+        });
         closeButton.addEventListener('click', () => restore());
         surface.addEventListener('cancel', event => {
             event.preventDefault();
-            restore();
+            dismiss();
         });
         surface.addEventListener('close', () => {
             if (!surface.open) restore();

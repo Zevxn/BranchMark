@@ -1031,13 +1031,14 @@
             font-size: 13px;
             line-height: 1.6;
         }
+        .interactive-prompt-editor { position: relative; }
         #interactivePromptInput {
             display: block;
             box-sizing: border-box;
             width: 100%;
             height: clamp(180px, 50dvh, 480px);
             padding: 12px;
-            resize: vertical;
+            resize: none;
             color: var(--text-color);
             background: var(--bg-input);
             border: 1px solid var(--toolbar-border);
@@ -1049,6 +1050,30 @@
             outline-offset: -2px;
             background: var(--bg-input-focus);
         }
+        #interactivePromptResize {
+            position: absolute;
+            right: 1px;
+            bottom: 1px;
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            border: 0;
+            border-radius: 4px;
+            background: transparent;
+            cursor: ns-resize;
+            touch-action: none;
+        }
+        #interactivePromptResize::after {
+            content: '';
+            position: absolute;
+            right: 3px;
+            bottom: 3px;
+            width: 10px;
+            height: 10px;
+            background: repeating-linear-gradient(135deg, transparent 0 2px, var(--text-color-secondary) 2px 3px);
+            clip-path: polygon(100% 0, 100% 100%, 0 100%);
+        }
+        #interactivePromptResize:focus-visible { outline: 2px solid var(--primary); }
         #resetInteractivePrompt { margin-right: auto; }
         #interactivePromptSettingsModal .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         /* !SECTION 交互提示词设置 */
@@ -3552,7 +3577,10 @@
             </div>
             <div class="bookmark-modal-body">
                 <p id="interactivePromptHelp">复制时会自动在前面添加卡片源码，下方只需填写生成交互学习控件的要求。此设置对所有导图和页面生效。</p>
-                <textarea id="interactivePromptInput" spellcheck="false" aria-label="生成交互学习控件的提示词" aria-describedby="interactivePromptHelp interactivePromptError"></textarea>
+                <div class="interactive-prompt-editor">
+                    <textarea id="interactivePromptInput" spellcheck="false" aria-label="生成交互学习控件的提示词" aria-describedby="interactivePromptHelp interactivePromptError"></textarea>
+                    <button id="interactivePromptResize" type="button" aria-label="调整文本框高度" title="拖动或按上下方向键调整高度"></button>
+                </div>
                 <div class="mindmap-tab-modal-error" id="interactivePromptError" role="alert"></div>
             </div>
             <div class="modal-footer">

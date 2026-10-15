@@ -374,10 +374,53 @@ function applyInteractivePromptSetting(value) {
 
 function initializeInteractivePromptSettings() {
     const modal = $('#interactivePromptSettingsModal');
+    const content = modal.querySelector('.modal-content');
+    const body = modal.querySelector('.bookmark-modal-body');
     const input = $('#interactivePromptInput');
+    const resizer = $('#interactivePromptResize');
     const error = $('#interactivePromptError');
     const saveButton = $('#saveInteractivePrompt');
-    const close = () => hideMindMapTabModal(modal);
+    let resizeStart = null;
+
+    const setInputHeight = height => {
+        // 计入被正文滚动区裁切的高度，确保手柄和底部按钮始终留在窗口内。
+        const overhead = content.offsetHeight - input.offsetHeight + body.scrollHeight - body.clientHeight;
+        const max = Math.max(0, window.innerHeight - 32 - overhead);
+        input.style.height = `${Math.min(max, Math.max(Math.min(120, max), height))}px`;
+    };
+    const finishResize = event => {
+        if (!resizeStart || (event && event.pointerId !== resizeStart.pointerId)) return;
+        const { pointerId } = resizeStart;
+        resizeStart = null;
+        if (resizer.hasPointerCapture(pointerId)) resizer.releasePointerCapture(pointerId);
+    };
+    const close = () => {
+        finishResize();
+        hideMindMapTabModal(modal);
+    };
+
+    resizer.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || resizeStart) return;
+        event.preventDefault();
+        resizeStart = { pointerId: event.pointerId, y: event.clientY, height: input.offsetHeight };
+        resizer.setPointerCapture(event.pointerId);
+    });
+    resizer.addEventListener('pointermove', event => {
+        if (!resizeStart || event.pointerId !== resizeStart.pointerId) return;
+        // 居中弹窗上下各变化一半，文本框高度需按底部手柄位移的两倍调整。
+        setInputHeight(resizeStart.height + 2 * (event.clientY - resizeStart.y));
+    });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type => {
+        resizer.addEventListener(type, finishResize);
+    });
+    resizer.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        event.preventDefault();
+        setInputHeight(input.offsetHeight + (event.key === 'ArrowDown' ? 1 : -1) * (event.shiftKey ? 40 : 16));
+    });
+    window.addEventListener('resize', () => {
+        if (modal.classList.contains('show')) setInputHeight(input.offsetHeight);
+    });
 
     $('#btn-edit-interactive-prompt').onclick = () => {
         input.value = mindMapSettings.interactivePrompt || DEFAULT_INTERACTIVE_LEARNING_PROMPT;
@@ -386,6 +429,7 @@ function initializeInteractivePromptSettings() {
         // 关闭弹窗后返回仍可见的设置按钮。
         $('#btn-settings').focus();
         showMindMapTabModal(modal);
+        setInputHeight(input.offsetHeight);
         requestAnimationFrame(() => input.focus());
     };
     $('#cancelInteractivePrompt').onclick = close;
