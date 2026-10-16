@@ -800,6 +800,51 @@ function insertMindMapChildDOM(parentNode, newNode) {
     refreshVisibleMapSearchResults();
 }
 
+function removeMindMapNodesDOM(nodeIds, parentIds) {
+    hideMindMapContentPreview();
+    closeMindMapInvalidLinkPreview();
+    closeMindMapRelationNavigationMenu();
+    saveGlobalScrolls();
+    let needsFullRender = false;
+    nodeIds.forEach(id => {
+        if (id === state.data.id) return;
+        const wrapper = document.getElementById(`wrapper-${id}`);
+        if (wrapper?.parentElement?.classList.contains('child-unit')) wrapper.parentElement.remove();
+        else if (wrapper || document.getElementById(`card-${id}`)) needsFullRender = true;
+        state.scrollMap.delete(id);
+    });
+    parentIds.forEach(id => {
+        const parent = findNode(state.data, id);
+        if (!parent) return;
+        const isRoot = id === state.data.id;
+        const card = document.getElementById(`card-${id}`);
+        const wrapper = isRoot ? card?.parentElement : document.getElementById(`wrapper-${id}`);
+        // 折叠分支内的父节点本来就没有 DOM，无需为其重建已显示的卡片。
+        if (!card && !wrapper && !isRoot) return;
+        if (!card || !wrapper) { needsFullRender = true; return; }
+        const directions = isRoot ? ['left', 'right'] : [null];
+        directions.forEach(direction => {
+            const hasChildren = (parent.children || []).some(child =>
+                !isRoot || (child.dir === 'left') === (direction === 'left'));
+            if (hasChildren) return;
+            const action = isRoot ? `fold-root-${direction}` : 'fold';
+            card.querySelector(`[data-action="${action}"]`)?.remove();
+            const selector = isRoot
+                ? `:scope > .children-container${direction === 'left' ? '.left-side' : ':not(.left-side)'}`
+                : ':scope > .children-container';
+            wrapper.querySelector(selector)?.remove();
+        });
+    });
+    if (needsFullRender) { renderTree(); return; }
+    updateSelection();
+    stabilizeRoot();
+    restoreGlobalScrolls();
+    scheduleRenderMindMapRelations(true);
+    scheduleRenderMindMapSummaries();
+    updateMindMapNodeStats();
+    refreshVisibleMapSearchResults();
+}
+
 function updateChildrenDOM(nodeId) {
     closeMindMapInvalidLinkPreview();
     if(nodeId === state.data.id) { renderTree(); return; }
@@ -807,9 +852,10 @@ function updateChildrenDOM(nodeId) {
     saveGlobalScrolls();
     const node = findNode(state.data, nodeId);
     const wrapper = document.getElementById(`wrapper-${nodeId}`);
+    const card = document.getElementById(`card-${nodeId}`);
+    // 批量结构编辑后目标可能已移除，按当前数据恢复界面，避免留下旧卡片和断线。
+    if (!node || !wrapper || !card) { renderTree(); return; }
     const isLeft = isDescendantOfLeft(nodeId);
-    
-    if(!wrapper) { renderTree(); return; }
 
     // --- ▼▼▼ 修正：从 data 属性读取 HSL 颜色 ▼▼▼ ---
     let childBaseColor = null;
@@ -827,7 +873,6 @@ function updateChildrenDOM(nodeId) {
     const oldCont = wrapper.querySelector('.children-container');
     if(oldCont) oldCont.remove();
 
-    const card = document.getElementById(`card-${nodeId}`);
     let foldBtn = card.querySelector('.fold-btn');
     const areChildrenVisible = !node.folded || isMapNodeTemporarilyExpanded(node.id);
     

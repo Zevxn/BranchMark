@@ -69,7 +69,8 @@ function initializeMapToolbar() {
         }
         const parents=new Set(); 
         const deletedNodeIds = new Set();
-        state.selectedIds.forEach(id=>{
+        // 祖先先于后代删除，已随祖先移除的后代不再产生失效的父节点更新任务。
+        sortMindMapNodeIdsByTreeOrder(state.selectedIds).forEach(id=>{
             if(id!==state.data.id){
                 collectMindMapNodeIds(findNode(state.data,id), deletedNodeIds);
                 const p=findParent(state.data,id);
@@ -82,7 +83,7 @@ function initializeMapToolbar() {
         }); 
         removeMindMapRelationsForNodes(deletedNodeIds);
         removeMindMapSummariesForNodes(deletedNodeIds);
-        state.selectedIds.clear(); recordHistory(); parents.forEach(pid=>updateChildrenDOM(pid)); 
+        state.selectedIds.clear(); recordHistory(); removeMindMapNodesDOM(deletedNodeIds, parents);
     };
 
     $('#btn-color').onclick = (e) => { 
