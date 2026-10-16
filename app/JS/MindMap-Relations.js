@@ -175,7 +175,7 @@ function jumpToMindMapRelatedCard(targetId) {
         if (rootChild) {
             mapSearchState.revealedRootDirections.add(rootChild.dir === 'left' ? 'left' : 'right');
         }
-        renderTree();
+        syncMindMapChildrenDOM([state.data.id]);
     }
 
     clearSelectedMindMapRelation();

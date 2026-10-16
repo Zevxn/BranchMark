@@ -1676,7 +1676,7 @@ function renameMindMapTab(tabId) {
     if (!modal || !input) return;
     mindMapTabRenameTargetId = tabId;
     input.value = tab.name;
-    $('#mindMapTabRenameRoot').checked = false;
+    $('#mindMapTabRenameRoot').checked = true;
     if (error) error.textContent = '';
     showMindMapTabModal(modal);
     requestAnimationFrame(() => {

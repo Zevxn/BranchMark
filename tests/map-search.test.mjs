@@ -106,7 +106,7 @@ assert.match(mindMap, /document\.querySelectorAll\('#tree-root \.node-card\[data
     '可见范围应由当前树中已渲染的卡片决定，不应按屏幕视口过滤');
 assert.match(mindMap, /isMapSearchVisibleOnly\(\) \? getRenderedMapSearchNodeIds\(\) : null/,
     '开启可见范围时应将已渲染节点集合传入搜索');
-assert.match(mindMap, /if \(!isMapSearchVisibleOnly\(\)\) \{[\s\S]*?clearMapSearchReveal\(\)[\s\S]*?renderTree\(\)/,
+assert.match(mindMap, /if \(!isMapSearchVisibleOnly\(\)\) \{[\s\S]*?clearMapSearchReveal\(\)[\s\S]*?syncMindMapChildrenDOM\(\[state\.data\.id\]\)/,
     '可见范围内的结果定位不应触发折叠路径临时展开');
 assert.match(mindMap, /mapSearchState\.visibleOnly = !mapSearchState\.visibleOnly;[\s\S]*?executeMapSearch\(input\.value\)/,
     '切换搜索范围后应立即按现有关键词刷新结果');
@@ -295,11 +295,13 @@ buttons.set('#mapSearchInput', searchInput);
 const frames = [];
 const pulses = [];
 let renderCount = 0;
+let syncCount = 0;
 let commitCount = 0;
 const tabSearchContext = vm.createContext({
     MINDMAP_TABS_VERSION: 'tabs-v1',
     mindMapWorkbook: workbook, state: liveState, mapSearchState: searchRuntime,
     mindMapTabRuntime: new Map(),
+    mindMapInternalLinkPreviewState: { target: null },
     window: { innerWidth: 1200, innerHeight: 800 },
     document: { getElementById: id => ({ id }), querySelector: () => null },
     sessionStorage: { setItem() {} },
@@ -307,11 +309,13 @@ const tabSearchContext = vm.createContext({
     getRenderedMapSearchNodeIds: () => new Set(['root-a']),
     renderMapSearchResults() {},
     renderTree: () => { renderCount += 1; },
+    syncMindMapChildrenDOM: () => { syncCount += 1; },
     renderMindMapTabs() {},
     saveGlobalScrolls() {},
     sanitizeMindMapScrollMap: () => ({}),
     syncCurrentInput: () => { commitCount += 1; liveState.data.children[0].content = '提交的编辑内容'; },
     closeMindMapRelationEditor() {}, closeMindMapRelationNavigationMenu() {},
+    closeMindMapSplitReader() {},
     saveStorage() {}, scrollActiveMindMapTabIntoView() {}, updateSelection() {},
     cancelMapSearchPendingFocus() {}, clearTimeout() {},
     requestAnimationFrame: callback => frames.push(callback),
@@ -356,7 +360,8 @@ assert.equal(searchRuntime.allTabs, true, '跨页定位应保留全局模式');
 assert.deepEqual([...liveState.selectedIds], ['shared-id'], '应选中目标页中的目标卡片');
 assert.equal(searchRuntime.revealedNodeIds.has('parent-b'), true, '全局模式应临时展开目标路径');
 assert.equal(workbook.tabs[1].data.children[0].folded, true, '搜索展开不得改变保存的折叠状态');
-assert.ok(renderCount >= 2, '应加载目标页并重绘临时展开路径');
+assert.equal(renderCount, 1, '跨页定位仅在加载目标页时重建整图');
+assert.equal(syncCount, 1, '临时展开目标路径应使用增量同步');
 const snapshot = tabSearchContext.getMindMapWorkbookSnapshot(false);
 assert.equal(JSON.stringify(snapshot).includes('allTabs'), false, '搜索范围不得写入导图数据');
 tabSearchContext.navigateMapSearch(1);

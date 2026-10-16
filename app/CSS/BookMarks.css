@@ -37,8 +37,8 @@
     --bookmark-thumb-hover: #d4d4d4;
 
 
-    /* --- Z-Index 暴力层级系统 (保持最高) --- */
-    --z-container: 2147483640;
+    /* --- 收藏夹层级：外层低于页面编辑弹窗（2000），内部层级保持独立 --- */
+    --z-container: 1500;
     --z-panel:     2147483641;
     --z-selection: 2147483642;
     --z-trigger:   2147483643;

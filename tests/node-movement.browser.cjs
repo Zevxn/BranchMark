@@ -42,6 +42,12 @@ async function reset(options = {}) {
         const options = ${JSON.stringify(options)};
         if (options.folded) state.data.children[1].folded = true;
         if (options.rootFolded) state.data.foldedRight = true;
+        if (options.revealTargets) {
+            state.data.children[0].children[0].folded = true;
+            state.data.children[0].children[0].children[0].topic = '定位甲';
+            state.data.children[1].children[0].topic = '定位乙';
+            state.data.children[0].children[1].topic = '定位丙';
+        }
         const addContent = node => { node.content = ${JSON.stringify(content)}; (node.children || []).forEach(addContent); };
         addContent(state.data);
         state.rainbowMode = options.rainbow !== false; state.mode = 'IDLE'; state.activeDockIndex = -1;
@@ -78,7 +84,8 @@ async function check(label, mayReload = []) {
             const root = node === state.data;
             return (root ? ['left', 'right'] : [isLeft ? 'left' : 'right']).every(side => {
                 const children = (node.children || []).filter(child => !root || (child.dir === 'left') === (side === 'left'));
-                const visible = root ? !node[side === 'left' ? 'foldedLeft' : 'foldedRight'] : !node.folded || isMapNodeTemporarilyExpanded(node.id);
+                const visible = root ? !node[side === 'left' ? 'foldedLeft' : 'foldedRight'] || isMapRootDirectionTemporarilyExpanded(side)
+                    : !node.folded || isMapNodeTemporarilyExpanded(node.id);
                 const wrapper = root ? card.parentElement : card.parentElement;
                 const selector = root ? ':scope > .children-container' + (side === 'left' ? '.left-side' : ':not(.left-side)') : ':scope > .children-container';
                 const container = wrapper.querySelector(selector);
@@ -111,7 +118,43 @@ async function check(label, mayReload = []) {
 }
 // !SECTION 移动与粘贴页面环境
 
-// SECTION 移动与批量插入回归
+// SECTION 节点操作回归
+async function checkReveals() {
+    await reset({ folded: true, revealTargets: true });
+    await evaluate('mapSearchState.allTabs = false; mapSearchState.visibleOnly = false; void 0;');
+    for (const query of ['定位甲', '定位甲', '定位乙', '定位丙']) {
+        if (query === '定位乙') await evaluate('oldCards.delete("a1"); oldFrames.delete("a1"); void 0;');
+        await evaluate(`executeMapSearch('${query}'); locateMapSearchResult(0); void 0;`);
+        await check('搜索定位 ' + query);
+        assert.equal(await evaluate(`(() => {
+            const id = '${query}' === '定位甲' ? 'a1' : '${query}' === '定位乙' ? 'd' : 'b';
+            return document.getElementById('card-' + id)?.classList.contains('selected')
+                && findNode(state.data, 'a').folded && findNode(state.data, 'q').folded
+                && Boolean(document.getElementById('card-a1')) === ('${query}' === '定位甲')
+                && Boolean(document.getElementById('card-d')) === ('${query}' === '定位乙');
+        })()`), true, '定位应显示目标、收起旧路径并保留持久化折叠状态');
+        if (query === '定位甲') {
+            await evaluate(`const card = document.getElementById('card-a1'); const frame = card.querySelector('iframe');
+                oldCards.set('a1', card); oldFrames.set('a1', { frame, source: frame.contentWindow }); void 0;`);
+        }
+    }
+    for (const target of ['a1', 'a1', 'd']) {
+        if (target === 'd') await evaluate('oldCards.delete("a1"); oldFrames.delete("a1"); void 0;');
+        await evaluate(`jumpToMindMapRelatedCard('${target}'); void 0;`);
+        await check('关联跳转 ' + target);
+        assert.equal(await evaluate(`document.getElementById('card-${target}')?.classList.contains('selected')`), true, '关联跳转选中目标');
+        if (target === 'a1') {
+            await evaluate(`const card = document.getElementById('card-a1'); const frame = card.querySelector('iframe');
+                oldCards.set('a1', card); oldFrames.set('a1', { frame, source: frame.contentWindow }); void 0;`);
+        }
+    }
+    await reset({ rootFolded: true });
+    await evaluate('jumpToMindMapRelatedCard("d"); void 0;');
+    await check('关联跳转展开根分支');
+    assert.equal(await evaluate('state.data.foldedRight && document.getElementById("card-d") !== null'), true, '根分支临时展开不修改持久化状态');
+    console.log('搜索与关联定位检查通过：重复定位、路径切换和折叠根分支展开保留无关卡片及 iframe。');
+}
+
 async function run() {
     console.log('开始节点移动与粘贴页面检查');
     window = new BrowserWindow({ show: false, webPreferences: {
@@ -127,6 +170,7 @@ async function run() {
             if (event.data?.type === 'movement-ready') frameRuns.set(event.source, (frameRuns.get(event.source) || 0) + 1);
         });`);
     assert.equal(await evaluate('typeof nativeMoveBefore'), 'function', '当前 Electron 应支持保留 iframe 的原子搬移');
+    if (process.argv.includes('--reveal-only')) { await checkReveals(); return; }
     const cases = [
         { ids: ['a'], target: 'c', type: 'AFTER', expected: ['b', 'c', 'a'] },
         { ids: ['c', 'a'], target: 'b', type: 'AFTER', expected: ['b', 'a', 'c'] },
@@ -216,8 +260,9 @@ async function run() {
         await check('展开后自适应 ' + action);
     }
     console.log('单卡与折叠检查通过：根卡片和父卡片局部更新保留后代 iframe，左右及普通分支折叠保留无关卡片和连接线。');
+    await checkReveals();
 }
-// !SECTION 移动与批量插入回归
+// !SECTION 节点操作回归
 
 app.whenReady().then(async () => {
     try { await run(); app.exit(0); }

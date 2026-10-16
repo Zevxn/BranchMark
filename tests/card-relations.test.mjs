@@ -63,7 +63,7 @@ const relationJumpSource = mindMap.slice(
     mindMap.indexOf('function jumpToMindMapRelatedCard'),
     mindMap.indexOf('function getMindMapNodeLabel'),
 );
-assert.match(relationJumpSource, /clearMapSearchReveal\(\)[\s\S]*?revealedNodeIds\.add[\s\S]*?revealedRootDirections\.add[\s\S]*?renderTree\(\)/,
+assert.match(relationJumpSource, /clearMapSearchReveal\(\)[\s\S]*?revealedNodeIds\.add[\s\S]*?revealedRootDirections\.add[\s\S]*?syncMindMapChildrenDOM\(\[state\.data\.id\]\)/,
     '跳转到折叠卡片时应只临时展开完整祖先路径');
 assert.doesNotMatch(relationJumpSource, /\.folded\s*=/,
     '关联跳转不得修改卡片持久化折叠状态');

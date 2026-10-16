@@ -1874,7 +1874,7 @@ function locateMapSearchResult(index) {
             if (id !== state.data.id) mapSearchState.revealedNodeIds.add(id);
         });
         if (result.rootDirection) mapSearchState.revealedRootDirections.add(result.rootDirection);
-        renderTree();
+        syncMindMapChildrenDOM([state.data.id]);
     }
 
     state.selectedRelationId = null;
