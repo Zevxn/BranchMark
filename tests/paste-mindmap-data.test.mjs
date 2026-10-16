@@ -52,7 +52,7 @@ const context = vm.createContext({
     findNode,
     invalidateMindMapNodeIndex: () => {},
     recordHistory: () => { historyCount += 1; },
-    updateChildrenDOM: id => { updatedParentId = id; },
+    syncMindMapChildrenDOM: ids => { [updatedParentId] = ids; },
     updateSelection: () => {},
     showTopToast: message => { toast = message; },
     navigator: {

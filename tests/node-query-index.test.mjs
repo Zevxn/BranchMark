@@ -13,7 +13,7 @@ const between = (source, start, end) => source.slice(source.indexOf(start), sour
 const querySource = between(render, '// SECTION 节点查询索引', '// !SECTION 节点查询索引');
 const helperSource = [
     querySource,
-    between(render, 'function isDescendantOfLeft(', 'function updateChildrenDOM('),
+    between(render, 'function isDescendantOfLeft(', 'function insertMindMapChildDOM('),
     between(render, 'function getMindMapNodeStats(', 'function updateMindMapNodeStats('),
     between(render, 'function isDescendant(', '// ---防止 XSS'),
     between(relations, 'function collectMindMapNodeIds(', 'function removeMindMapRelationsForNodes('),
@@ -42,6 +42,7 @@ function createRuntime(tree = makeTree()) {
         addSummaryForSelectedCards() {}, removeMindMapRelationsForNodes() {}, removeMindMapSummariesForNodes() {}, showTopToast() {},
         recordHistory: () => historyIndexes.push(context.getMindMapNodeIndex()),
         updateChildrenDOM() {},
+        insertMindMapChildDOM() {}, removeMindMapNodesDOM() {}, syncMindMapChildrenDOM() {},
     });
     vm.runInContext(helperSource, context);
     vm.runInContext(between(render, 'function onMouseUp(', 'function syncCurrentInput('), context);

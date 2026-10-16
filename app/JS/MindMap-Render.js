@@ -50,12 +50,21 @@ function onMouseUp(e) {
                 const nodes = getMindMapDragProcessingOrder(selectedNodes, state.drag.dropType);
                 let changed = false;
                 const parentsToUpdate = new Set();
+                const movedIds = new Set();
+                const previousParents = new Map();
+                const parentStructure = node => JSON.stringify([
+                    node.folded, node.foldedLeft, node.foldedRight,
+                    (node.children || []).map(child => [child.id, child.dir])
+                ]);
                 const isCopy = e.ctrlKey || e.altKey;
 
                 nodes.forEach(id => {
                     if(id!==state.drag.targetId && !isDescendant(state.data, id, state.drag.targetId)) {
                         const p = findParent(state.data, id), t = findNode(state.data, state.drag.targetId), tp = findParent(state.data, state.drag.targetId);
                         if(p) {
+                            [p, t, tp].filter(Boolean).forEach(parent => {
+                                if (!previousParents.has(parent.id)) previousParents.set(parent.id, parentStructure(parent));
+                            });
                             if(isCopy) {
                                 const cloned = deepCopyNode(findNode(state.data, id));
                                 if(state.drag.targetId === state.data.id) cloned.dir = newDir;
@@ -68,6 +77,7 @@ function onMouseUp(e) {
                                 
                                 if(state.drag.dropType==='CHILD') { 
                                     if(!t.children)t.children=[]; t.children.push(cloned); t.folded=false; 
+                                    if (t === state.data) t[newDir === 'left' ? 'foldedLeft' : 'foldedRight'] = false;
                                     parentsToUpdate.add(t.id); 
                                 } else { 
                                     const ti=tp.children.findIndex(c=>c.id===state.drag.targetId); 
@@ -80,6 +90,7 @@ function onMouseUp(e) {
                                 const idx = p.children.findIndex(c=>c.id===id);
                                 if(idx>-1) {
                                     const [mv] = p.children.splice(idx,1);
+                                    movedIds.add(mv.id);
                                     invalidateMindMapNodeIndex();
                                     if(state.drag.targetId === state.data.id) mv.dir = newDir;
                                     else {
@@ -92,6 +103,7 @@ function onMouseUp(e) {
                                     parentsToUpdate.add(p.id);
                                     if(state.drag.dropType==='CHILD') { if(!t.children)t.children=[]; t.children.push(mv); t.folded=false; parentsToUpdate.add(t.id); }
                                     else { const ti=tp.children.findIndex(c=>c.id===state.drag.targetId); tp.children.splice(state.drag.dropType==='BEFORE'?ti:ti+1, 0, mv); parentsToUpdate.add(tp.id); }
+                                    if (t === state.data && state.drag.dropType === 'CHILD') t[newDir === 'left' ? 'foldedLeft' : 'foldedRight'] = false;
                                     invalidateMindMapNodeIndex();
                                     changed = true;
                                 }
@@ -99,7 +111,9 @@ function onMouseUp(e) {
                         }
                     }
                 });
-                if(changed) { recordHistory(); parentsToUpdate.forEach(pid => updateChildrenDOM(pid)); }
+                if (changed && [...parentsToUpdate].some(id => previousParents.get(id) !== parentStructure(findNode(state.data, id)))) {
+                    recordHistory(); syncMindMapChildrenDOM(parentsToUpdate, movedIds);
+                }
             } else {
                 let target = findNode(state.data, state.drag.targetId);
                 let parent = findParent(state.data, state.drag.targetId);
@@ -113,7 +127,8 @@ function onMouseUp(e) {
                     target.children.push(newNode);
                     invalidateMindMapNodeIndex();
                     target.folded = false;
-                    recordHistory(); updateChildrenDOM(target.id);
+                    if (target === state.data) target[newDir === 'left' ? 'foldedLeft' : 'foldedRight'] = false;
+                    recordHistory(); syncMindMapChildrenDOM([target.id]);
                 } else {
                     const idx = parent.children.findIndex(c => c.id === state.drag.targetId);
                     // 修复：Dock 兄弟节点继承方向
@@ -122,7 +137,7 @@ function onMouseUp(e) {
                     
                     parent.children.splice(state.drag.dropType === 'BEFORE' ? idx : idx + 1, 0, newNode);
                     invalidateMindMapNodeIndex();
-                    recordHistory(); updateChildrenDOM(parent.id);
+                    recordHistory(); syncMindMapChildrenDOM([parent.id]);
                 }
                 // 判断：没按 Ctrl 且有选中的 Dock 索引
                 if (!e.ctrlKey && state.activeDockIndex !== -1) {
@@ -791,6 +806,131 @@ function insertMindMapChildDOM(parentNode, newNode) {
         });
         unit.querySelectorAll('.card-body').forEach(processRichContent);
     });
+    updateSelection();
+    stabilizeRoot();
+    restoreGlobalScrolls();
+    scheduleRenderMindMapRelations(true);
+    scheduleRenderMindMapSummaries();
+    updateMindMapNodeStats();
+    refreshVisibleMapSearchResults();
+}
+
+function syncMindMapChildrenDOM(parentIds, movedIds = new Set()) {
+    hideMindMapContentPreview();
+    closeMindMapInvalidLinkPreview();
+    closeMindMapRelationNavigationMenu();
+    saveGlobalScrolls();
+    // 先收集旧子树，等全部搬移完成再清理，避免跨父节点移动时提前销毁 iframe。
+    const units = new Map([...document.querySelectorAll('.child-unit > .node-wrapper')]
+        .map(wrapper => [wrapper.id.slice('wrapper-'.length), wrapper.parentElement]));
+    const parents = new Set(parentIds);
+    const roots = sortMindMapNodeIdsByTreeOrder(parents).filter(id => {
+        let parent = findParent(state.data, id);
+        while (parent) {
+            if (parents.has(parent.id)) return false;
+            parent = findParent(state.data, parent.id);
+        }
+        return true;
+    });
+    const cleanup = [];
+    const newCards = [];
+    let needsFullRender = false;
+    const sync = (node, isLeft, inheritedColor) => {
+        const isRoot = node.id === state.data.id;
+        const card = document.getElementById(`card-${node.id}`);
+        const wrapper = isRoot ? card?.parentElement : document.getElementById(`wrapper-${node.id}`);
+        if (!card || !wrapper) { needsFullRender = true; return; }
+        wrapper.classList.toggle('left-side', isLeft);
+        card.classList.toggle('left-side', isLeft);
+        const color = state.rainbowMode ? (isRoot ? null : inheritedColor || node.color) : node.color;
+        if (state.rainbowMode) card.style.setProperty('--node-color', color || 'var(--node-default-color)');
+        (isRoot ? ['left', 'right'] : [isLeft ? 'left' : 'right']).forEach(direction => {
+            const left = direction === 'left';
+            const children = (node.children || []).filter(child => !isRoot || (child.dir === 'left') === left);
+            const visible = isRoot
+                ? !node[left ? 'foldedLeft' : 'foldedRight'] || isMapRootDirectionTemporarilyExpanded(direction)
+                : !node.folded || isMapNodeTemporarilyExpanded(node.id);
+            const action = isRoot ? `fold-root-${direction}` : 'fold';
+            let button = card.querySelector(`[data-action="${action}"]`);
+            if (children.length) {
+                if (!button) {
+                    button = document.createElement('div');
+                    button.dataset.action = action;
+                    card.appendChild(button);
+                }
+                button.className = `fold-btn${visible ? ' has-children' : ''}${isRoot ? ` root-${direction}` : left ? ' left-side' : ''}`;
+                const icon = visible ? 'ri-subtract-line' : 'ri-add-line';
+                if (!button.firstElementChild?.classList.contains(icon)) button.innerHTML = `<i class="${icon}"></i>`;
+            } else button?.remove();
+            const selector = isRoot
+                ? `:scope > .children-container${left ? '.left-side' : ':not(.left-side)'}`
+                : ':scope > .children-container';
+            let container = wrapper.querySelector(selector);
+            if (!visible || !children.length) {
+                if (container) cleanup.push([container, new Set()]);
+                return;
+            }
+            if (!container) {
+                container = document.createElement('div');
+                container.className = `children-container${left ? ' left-side' : ''}`;
+                if (isRoot) {
+                    if (left) card.before(container);
+                    else card.after(container);
+                } else {
+                    container.id = `children-${node.id}`;
+                    wrapper.appendChild(container);
+                }
+            }
+            container.classList.toggle('left-side', left);
+            const expected = new Set();
+            let reference = null;
+            // 从后向前放置新增或移动的节点，原有兄弟只作为锚点，避免旧宿主重载它们的 iframe。
+            [...children].reverse().forEach(child => {
+                const childColor = state.rainbowMode
+                    ? isRoot ? `hsl(${getStableHue(child.id)}, 85%, 88%)` : color ? darkenHSL(color, 5) : null
+                    : null;
+                let unit = units.get(child.id);
+                if (!unit) {
+                    unit = document.createElement('div');
+                    unit.className = 'child-unit';
+                    // 只生成当前卡片，后代递归复用，避免展开分支时重复创建搬入的卡片。
+                    unit.innerHTML = `<div class="child-cross-line"></div>${createNodeHTML(child, left, childColor, false)}`;
+                    units.set(child.id, unit);
+                    const newCard = unit.querySelector('.node-card');
+                    newCard.dataset.contentHash = child.content || '';
+                    newCards.push(newCard);
+                }
+                unit.classList.toggle('left-side', left);
+                if (unit.parentElement !== container || (movedIds.has(child.id) && unit.nextElementSibling !== reference)) {
+                    // 支持原子搬移的宿主保留 iframe 上下文；旧宿主仅重新挂载实际移动的子树。
+                    if (typeof container.moveBefore === 'function' && unit.isConnected) container.moveBefore(unit, reference);
+                    else container.insertBefore(unit, reference);
+                }
+                reference = unit;
+                expected.add(unit);
+                sync(child, left, childColor);
+            });
+            cleanup.push([container, expected]);
+        });
+    };
+    roots.forEach(id => {
+        const node = findNode(state.data, id);
+        if (!node) return;
+        if (!document.getElementById(`card-${id}`)) { needsFullRender = true; return; }
+        const parent = findParent(state.data, id);
+        const color = state.rainbowMode && parent
+            ? parent.id === state.data.id ? `hsl(${getStableHue(id)}, 85%, 88%)`
+                : darkenHSL(document.getElementById(`card-${parent.id}`)?.dataset.rainbowColor, 5)
+            : null;
+        sync(node, isDescendantOfLeft(id), color);
+        if (state.rainbowMode) updateTreeStyle(node, !parent, color);
+    });
+    cleanup.forEach(([container, expected]) => {
+        [...container.children].forEach(unit => { if (!expected.has(unit)) unit.remove(); });
+        if (!container.childElementCount) container.remove();
+    });
+    if (needsFullRender) { renderTree(); return; }
+    newCards.forEach(card => card.querySelectorAll('.card-body').forEach(processRichContent));
     updateSelection();
     stabilizeRoot();
     restoreGlobalScrolls();

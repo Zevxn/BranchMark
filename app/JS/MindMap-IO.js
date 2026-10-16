@@ -192,11 +192,11 @@ function pasteMindMapNodesToSelection(nodesToPaste) {
 
     invalidateMindMapNodeIndex();
     targetNode.folded = false;
+    if (isRoot) targetNode.foldedRight = false;
     recordHistory();
-    updateChildrenDOM(targetNode.id);
     state.selectedIds.clear();
     nodesToPaste.forEach(node => state.selectedIds.add(node.id));
-    updateSelection();
+    syncMindMapChildrenDOM([targetNode.id]);
     showTopToast(`📋 已粘贴 ${totalCount} 个节点`);
     return true;
 }
@@ -772,6 +772,7 @@ function initializeNativeDragDrop() {
                     const rRect = card.getBoundingClientRect();
                     const direction = (e.clientX < rRect.left + rRect.width / 2) ? 'left' : 'right';
                     newNodes.forEach(node => { node.dir = direction; });
+                    targetNode[direction === 'left' ? 'foldedLeft' : 'foldedRight'] = false;
                 } else {
                     // 如果不是根节点，且有方向属性（比如在 Dock 或其他特定逻辑下），可以继承
                     // 这里通常不需要处理，因为子节点方向由布局算法自动处理
@@ -784,7 +785,7 @@ function initializeNativeDragDrop() {
                 targetNode.folded = false; 
                 
                 recordHistory();
-                updateChildrenDOM(targetId);
+                syncMindMapChildrenDOM([targetId]);
                 inserted = true;
             } 
             // --- 分支 B: 添加兄弟节点 ---
@@ -803,7 +804,7 @@ function initializeNativeDragDrop() {
                         invalidateMindMapNodeIndex();
                         
                         recordHistory();
-                        updateChildrenDOM(parent.id);
+                        syncMindMapChildrenDOM([parent.id]);
                         inserted = true;
                     }
                 }

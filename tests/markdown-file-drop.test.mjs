@@ -102,7 +102,7 @@ const integrationContext = vm.createContext({
     state: { data: rootNode },
     generateNodeId: () => 'new-node',
     recordHistory: () => { historyCount += 1; },
-    updateChildrenDOM: id => { updatedParentId = id; },
+    syncMindMapChildrenDOM: ids => { [updatedParentId] = ids; },
     showTopToast: () => {},
 });
 
