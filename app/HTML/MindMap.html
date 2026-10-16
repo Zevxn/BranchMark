@@ -2958,12 +2958,32 @@
 
         /* !SECTION Markdown 编辑器工具栏 */
         /* SECTION 无标题卡片手柄 */
+        /* 全空的标准卡片保留标题输入区，占位文字不参与尺寸计算或保存。 */
+        .node-card.topic-empty:not(.simple):not(.has-content) .card-header {
+            position: relative;
+        }
+        .node-card.topic-empty:not(.simple):not(.has-content) .node-topic {
+            min-height: 1em;
+        }
+        .node-card.topic-empty:not(.simple):not(.has-content) .card-header:not(:focus-within)::after {
+            content: '输入标题';
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-color-secondary);
+            font-size: 12px;
+            font-weight: 400;
+            pointer-events: none;
+        }
         /* =========================================================
-        卡片没有标题时的隐形手柄模式 (Ghost Handle)
+        标准卡片有正文、无标题时使用隐形手柄，便利贴沿用原有规则。
         ========================================================= */
 
         /* 1. 基础容器设置 */
-        .node-card.topic-empty {
+        .node-card.topic-empty.simple,
+        .node-card.topic-empty.has-content:not(.simple) {
             position: relative;
             /* 顶部留白，防止 Body 内容顶格 */
             padding-top: 10px !important; 
@@ -2980,7 +3000,8 @@
 
         /* 2. 实体 Header：作为“隐形抓手” (永远存在，位置固定，不可见) */
         /* 它的作用仅仅是：占位、接收点击、接收拖拽 */
-        .node-card.topic-empty .card-header {
+        .node-card.topic-empty.simple .card-header,
+        .node-card.topic-empty.has-content:not(.simple) .card-header:not(:focus-within) {
             position: absolute;
             top: -8px;           /* 向上延伸，覆盖边缘，方便抓取 */
             left: 0;
@@ -3001,12 +3022,14 @@
         }
 
         /* 隐藏内部文字输入框等杂物 */
-        .node-card.topic-empty .card-header * {
+        .node-card.topic-empty.simple .card-header *,
+        .node-card.topic-empty.has-content:not(.simple) .card-header:not(:focus-within) * {
             display: none !important;
         }
 
         /* 3. 视觉装饰条：使用 CSS 变量 (完美解决选中变色问题) */
-        .node-card.topic-empty::before {
+        .node-card.topic-empty.simple::before,
+        .node-card.topic-empty.has-content:not(.simple)::before {
             content: '';
             position: absolute;
             top: 0;
@@ -3029,8 +3052,10 @@
         }
 
         /* 4. 触发显示机制 (保持不变) */
-        .node-card.topic-empty:hover::before,
-        .node-card.topic-empty.selected::before {
+        .node-card.topic-empty.simple:hover::before,
+        .node-card.topic-empty.simple.selected::before,
+        .node-card.topic-empty.has-content:not(.simple):hover::before,
+        .node-card.topic-empty.has-content:not(.simple).selected::before {
             /* 选中时，条依然显示原本的颜色（半透明），不会变蓝 */
             opacity: 0.6; 
         }

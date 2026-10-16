@@ -509,11 +509,11 @@ function createNodeHTML(node, isLeft, inheritedColor = null, includeChildren = t
         else if (inheritedColor) displayColor = inheritedColor; 
     }
 
-    const hasContent = !!node.content;
+    const hasContent = Boolean(node.content?.trim());
     const hasChildren = node.children && node.children.length > 0;
     const areChildrenVisible = !node.folded || isMapNodeTemporarilyExpanded(node.id);
     const isCompactCollapsed = isTemporarilyCollapsed(node);
-    const isContentCollapsed = Boolean(node.contentCollapsed || isCompactCollapsed);
+    const isContentCollapsed = !isTopicEmpty && Boolean(node.contentCollapsed || isCompactCollapsed);
     const relationCount = getMindMapRelatedCardItems(node.id).length;
     // const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''}`;
     const cardClass = `node-card ${isSelected?'selected':''} ${hasContent?'has-content':''} ${isContentCollapsed?'content-collapsed':''} ${isSimple?'simple':''} ${isLeft?'left-side':''} ${isRoot?'is-root':''} ${isTopicEmpty?'topic-empty':''}`;
@@ -521,7 +521,8 @@ function createNodeHTML(node, isLeft, inheritedColor = null, includeChildren = t
     let cardStyle = '';
     
     // 宽度
-    if (!isContentCollapsed && node.widthMode === 'manual' && node.width) {
+    // 无正文的标准卡片按标题收缩，保留手动尺寸供恢复正文时使用。
+    if ((isSimple || hasContent) && !isContentCollapsed && node.widthMode === 'manual' && node.width) {
         cardStyle += `width:${node.width}px; `;
     } else {
         cardStyle += `width:fit-content; `; // 标准模式自动宽度
@@ -615,14 +616,14 @@ function createNodeHTML(node, isLeft, inheritedColor = null, includeChildren = t
             <div class="card-header" style="${headerStyle}">
                 <div class="topic-wrapper">
                     ${hasContent && isContentCollapsed ? '<button class="content-indicator" type="button" data-action="preview-content" title="预览卡片内容" aria-label="预览卡片内容"><i class="ri-file-list-2-line" aria-hidden="true"></i></button>' : ''}
-                    <span class="node-topic" contenteditable="true">${escapeHtml(node.topic)}</span>
+                    <span class="node-topic" contenteditable="true" aria-label="标题">${escapeHtml(node.topic)}</span>
                 </div>
             </div>
             ${hasFloatingTools ? `<div class="header-tools card-floating-tools">
                 <button class="tool-icon relation-navigation-trigger" type="button" data-action="navigate-relation" title="查看关联卡片（${relationCount}）" aria-label="查看关联卡片" ${relationCount > 0 ? '' : 'hidden'}><i class="ri-links-line" aria-hidden="true"></i></button>
                 ${!isRoot ? `<i class="tool-icon ${toggleIcon}" data-action="toggle-simple" title="${toggleTitle}"></i>` : ''}
                 ${hasContent && !isContentCollapsed && !isSimple ? `<i class="ri-aspect-ratio-line tool-icon" data-action="auto-height" title="自适应尺寸"></i>` : ''}
-                ${hasContent && !isSimple && !isCompactCollapsed ? `<i class="tool-icon ${node.contentCollapsed?'ri-arrow-down-s-line':'ri-arrow-up-s-line'}" data-action="toggle-content"></i>` : ''}
+                ${hasContent && !isSimple && !isCompactCollapsed && !isTopicEmpty ? `<i class="tool-icon ${node.contentCollapsed?'ri-arrow-down-s-line':'ri-arrow-up-s-line'}" data-action="toggle-content"></i>` : ''}
             </div>` : ''}
             ${bodyContent}
             ${resizeHandles}

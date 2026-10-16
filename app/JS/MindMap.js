@@ -2196,10 +2196,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const n = findNode(state.data, c.dataset.nodeId); 
                 // 1. 获取新文本
                 const newText = e.target.textContent;
+                const wasTopicEmpty = c.classList.contains('topic-empty');
+                const isTopicEmpty = !newText || newText.trim() === '';
 
                 // 2. 核心修复：实时切换 class
                 // 如果没字了，加上 topic-empty；有字了，移除 topic-empty
-                if (!newText || newText.trim() === '') {
+                if (isTopicEmpty) {
                     c.classList.add('topic-empty');
                 } else {
                     c.classList.remove('topic-empty');
@@ -2210,6 +2212,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     n.topic = newText; 
                     recordHistory(); 
                 } 
+                // 失焦后再切换空标题结构，避免清空重输时打断光标。
+                if (n && !n.isSimple && wasTopicEmpty !== isTopicEmpty) updateNodeDOM(n.id);
             } 
         } 
     });
