@@ -38,19 +38,32 @@ function updateInteractiveBlockTheme() {
 function getInteractiveBlockEventAction(event, context) {
     if (event.type === 'keydown' && (event.ctrlKey || event.metaKey)
         && (event.key === 's' || event.key === 'S')) return 'save';
+    if (event.type === 'keydown' && event.key === 'F11' && context.nativeFullscreen
+        && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) return 'fullscreen';
     if (event.type === 'keyup' && event.code === 'Space' && context.spacePressed) return 'space';
     if (event.type === 'keydown' && event.key === 'Escape' && !event.defaultPrevented && context.expanded) return 'escape';
     if (event.type === 'contextmenu') return context.owner && !context.expanded ? 'contextmenu' : '';
     if (context.owner !== 'node' || context.expanded) return '';
     if (event.type === 'keydown') {
+        const active = context.activeElement;
+        const typing = active && (active.isContentEditable || ['TEXTAREA', 'SELECT'].includes(active.tagName)
+            || (active.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color'].includes(active.type))
+            || active.closest?.('[role="textbox"], [role="combobox"], [role="spinbutton"]'));
         if (event.code === 'Space') {
-            const active = context.activeElement;
-            const typing = active && (active.isContentEditable || active.tagName === 'TEXTAREA'
-                || (active.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color'].includes(active.type)));
             return typing ? '' : 'space';
         }
-        if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
-            && context.mode === 'IDLE') return 'tab';
+        if (context.mode !== 'IDLE' || event.defaultPrevented || event.isComposing
+            || event.keyCode === 229 || context.hasSelection || event.altKey || event.shiftKey) return '';
+        // 对齐主页面已有的卡片快捷键；输入状态保留控件的剪贴板、全选和撤销行为。
+        if (event.ctrlKey || event.metaKey) {
+            return !typing && (['a', 'c', 'v', 'x', 'z', 'y', 'f'].includes(event.key?.toLowerCase())
+                || event.key === 'Enter') ? 'node-key' : '';
+        }
+        const control = typing || (active && (['INPUT', 'BUTTON', 'A', 'SUMMARY'].includes(active.tagName)
+            || active.closest?.('[role="button"], [role="slider"]')));
+        if (control) return '';
+        if (event.key === 'Tab') return 'tab';
+        if (['Enter', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(event.key)) return 'node-key';
     }
     if (context.spacePressed && (event.type === 'mousedown' || event.type === 'wheel')) return 'canvas';
     if (event.type === 'mousedown' && event.button === 0 && context.mode === 'IDLE') return 'select';
@@ -58,7 +71,7 @@ function getInteractiveBlockEventAction(event, context) {
 }
 
 function createInteractiveBlockDocument(source, owner = '', linkBridgeToken = '', hostOrigin = window.location?.origin || '') {
-    // iframe 内的键盘事件不会冒泡到导图，显式转发保存、卡片导航键和未被组件消费的 Esc。
+    // iframe 内的键盘事件不会冒泡到导图，统一转发宿主全局操作和未被控件消费的卡片快捷键。
     // 前置 doctype 保持标准模式，后续完整 HTML 或 HTML 片段均由浏览器解析。
     return `<!doctype html><script>
         (() => {
@@ -125,14 +138,17 @@ function createInteractiveBlockDocument(source, owner = '', linkBridgeToken = ''
         addEventListener('load', scheduleSize, true);
         addEventListener('resize', scheduleSize);
         addEventListener('scroll', reportScroll, { passive: true });
-        function forwardEvent(event) {
+        function forwardEvent(event, capture = false) {
             const action = getEventAction(event, {
                 owner: ${JSON.stringify(owner)}, mode: 'IDLE',
+                nativeFullscreen: ${typeof window.__TAURI__?.core?.invoke === 'function' && !window.__DEEPCONVO_NATIVE_QUICKER_HOST__},
                 expanded: document.documentElement.hasAttribute('data-branchmark-expanded'),
-                spacePressed: forwardingSpace, activeElement: document.activeElement
+                spacePressed: forwardingSpace, activeElement: document.activeElement,
+                hasSelection: Boolean(globalThis.getSelection?.()?.toString())
             });
-            // 选中只通知宿主，控件继续获得焦点；Esc 留到冒泡阶段让控件先处理。
-            if (event.type === 'contextmenu' || action === 'space' || action === 'tab' || action === 'save') {
+            // 按动作决定事件阶段，新增卡片快捷键自动沿用控件优先规则。
+            if (capture && ['tab', 'node-key', 'escape'].includes(action)) return;
+            if (event.type === 'contextmenu' || ['space', 'tab', 'node-key', 'save', 'fullscreen'].includes(action)) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
             }
@@ -157,11 +173,11 @@ function createInteractiveBlockDocument(source, owner = '', linkBridgeToken = ''
         });
         ['mousedown', 'contextmenu', 'keydown', 'keyup'].forEach(type => {
             addEventListener(type, event => {
-                if (event.key !== 'Escape') forwardEvent(event);
+                forwardEvent(event, true);
             }, true);
         });
         addEventListener('keydown', event => {
-            if (event.key === 'Escape') forwardEvent(event);
+            forwardEvent(event);
         });
         addEventListener('message', event => {
             if (event.source !== parent) return;
@@ -284,6 +300,7 @@ function renderInteractiveBlocks(element) {
             const action = getInteractiveBlockEventAction(event, {
                 owner: wrapper.isConnected && card ? (card.matches('.node-card') ? 'node' : 'summary') : '',
                 expanded, mode: state.mode, spacePressed: isSpacePressed,
+                nativeFullscreen: typeof window.__TAURI__?.core?.invoke === 'function' && !window.__DEEPCONVO_NATIVE_QUICKER_HOST__,
                 activeElement: fromFrame ? null : document.activeElement
             });
             switch (action) {
@@ -293,6 +310,8 @@ function renderInteractiveBlocks(element) {
                     saveMindMapData(true);
                     break;
                 case 'select': {
+                    // iframe 获得焦点后，主页面残留的文字选区不应拦截卡片快捷键。
+                    if (fromFrame) window.getSelection()?.removeAllRanges();
                     clearSelectedMindMapRelation();
                     clearSelectedMindMapSummary();
                     const id = card.dataset.nodeId;
@@ -307,10 +326,15 @@ function renderInteractiveBlocks(element) {
                     break;
                 }
                 case 'tab':
+                case 'node-key':
+                case 'fullscreen':
                     // 复用导图快捷键入口的选中节点、编辑状态等判断。
                     if (!fromFrame) event.preventDefault();
-                    window.dispatchEvent(new KeyboardEvent('keydown', {
-                        key: 'Tab', code: 'Tab', bubbles: true, cancelable: true
+                    document.body.dispatchEvent(new KeyboardEvent('keydown', {
+                        key: event.key, code: event.code, repeat: event.repeat === true,
+                        ctrlKey: event.ctrlKey === true, metaKey: event.metaKey === true,
+                        altKey: event.altKey === true, shiftKey: event.shiftKey === true,
+                        bubbles: true, cancelable: true
                     }));
                     break;
                 case 'space':
