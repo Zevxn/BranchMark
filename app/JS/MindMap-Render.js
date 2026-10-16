@@ -748,6 +748,16 @@ function isDescendantOfLeft(id) {
     return false;
 };
 
+function finishMindMapDOMUpdate() {
+    // 选择更新会经由工具栏同步节点统计，局部操作统一在此完成布局和线路刷新。
+    updateSelection();
+    stabilizeRoot();
+    restoreGlobalScrolls();
+    scheduleRenderMindMapRelations(true);
+    scheduleRenderMindMapSummaries();
+    refreshVisibleMapSearchResults();
+}
+
 function insertMindMapChildDOM(parentNode, newNode) {
     closeMindMapInvalidLinkPreview();
     const isRoot = parentNode.id === state.data.id;
@@ -806,13 +816,7 @@ function insertMindMapChildDOM(parentNode, newNode) {
         });
         unit.querySelectorAll('.card-body').forEach(processRichContent);
     });
-    updateSelection();
-    stabilizeRoot();
-    restoreGlobalScrolls();
-    scheduleRenderMindMapRelations(true);
-    scheduleRenderMindMapSummaries();
-    updateMindMapNodeStats();
-    refreshVisibleMapSearchResults();
+    finishMindMapDOMUpdate();
 }
 
 function syncMindMapChildrenDOM(parentIds, movedIds = new Set()) {
@@ -931,13 +935,7 @@ function syncMindMapChildrenDOM(parentIds, movedIds = new Set()) {
     });
     if (needsFullRender) { renderTree(); return; }
     newCards.forEach(card => card.querySelectorAll('.card-body').forEach(processRichContent));
-    updateSelection();
-    stabilizeRoot();
-    restoreGlobalScrolls();
-    scheduleRenderMindMapRelations(true);
-    scheduleRenderMindMapSummaries();
-    updateMindMapNodeStats();
-    refreshVisibleMapSearchResults();
+    finishMindMapDOMUpdate();
 }
 
 function removeMindMapNodesDOM(nodeIds, parentIds) {
@@ -976,89 +974,25 @@ function removeMindMapNodesDOM(nodeIds, parentIds) {
         });
     });
     if (needsFullRender) { renderTree(); return; }
-    updateSelection();
-    stabilizeRoot();
-    restoreGlobalScrolls();
-    scheduleRenderMindMapRelations(true);
-    scheduleRenderMindMapSummaries();
-    updateMindMapNodeStats();
-    refreshVisibleMapSearchResults();
+    finishMindMapDOMUpdate();
 }
 
 function updateChildrenDOM(nodeId) {
-    closeMindMapInvalidLinkPreview();
-    if(nodeId === state.data.id) { renderTree(); return; }
-
-    saveGlobalScrolls();
-    const node = findNode(state.data, nodeId);
-    const wrapper = document.getElementById(`wrapper-${nodeId}`);
-    const card = document.getElementById(`card-${nodeId}`);
-    // 批量结构编辑后目标可能已移除，按当前数据恢复界面，避免留下旧卡片和断线。
-    if (!node || !wrapper || !card) { renderTree(); return; }
-    const isLeft = isDescendantOfLeft(nodeId);
-
-    // --- ▼▼▼ 修正：从 data 属性读取 HSL 颜色 ▼▼▼ ---
-    let childBaseColor = null;
-    if (state.rainbowMode) {
-        const parentCard = document.getElementById(`card-${nodeId}`);
-        if (parentCard && parentCard.dataset.rainbowColor) {
-            // 读取父级的 HSL
-            const parentHsl = parentCard.dataset.rainbowColor;
-            // 关键：因为是传给子节点，所以要先降低一次亮度！
-            childBaseColor = darkenHSL(parentHsl, 5);
-        }
-    }
-    // ----------------------------------------------
-
-    const oldCont = wrapper.querySelector('.children-container');
-    if(oldCont) oldCont.remove();
-
-    let foldBtn = card.querySelector('.fold-btn');
-    const areChildrenVisible = !node.folded || isMapNodeTemporarilyExpanded(node.id);
-    
-    if(node.children && node.children.length > 0) {
-        if(!foldBtn) {
-            foldBtn = document.createElement('div');
-            foldBtn.className = `fold-btn ${areChildrenVisible?'has-children':''} ${isLeft?'left-side':''}`;
-            foldBtn.dataset.action = 'fold';
-            foldBtn.innerHTML = `<i class="${areChildrenVisible?'ri-subtract-line':'ri-add-line'}"></i>`;
-            card.appendChild(foldBtn);
-        } else {
-            foldBtn.className = `fold-btn ${areChildrenVisible?'has-children':''} ${isLeft?'left-side':''}`;
-            foldBtn.innerHTML = `<i class="${areChildrenVisible?'ri-subtract-line':'ri-add-line'}"></i>`;
-        }
-        if(areChildrenVisible) {
-            const childrenHTML = `<div class="children-container ${isLeft?'left-side':''}" id="children-${node.id}">
-                ${node.children.map(child => `
-                    <div class="child-unit ${isLeft?'left-side':''}">
-                        <div class="child-cross-line"></div>
-                        ${createNodeHTML(child, isLeft, childBaseColor)} 
-                    </div>
-                `).join('')}
-            </div>`;
-            
-            wrapper.insertAdjacentHTML('beforeend', childrenHTML);
-            const newCont = wrapper.querySelector('.children-container');
-            newCont.querySelectorAll('.card-body').forEach(processRichContent);
-        }
-    } else if(foldBtn) { foldBtn.remove(); }
-    
-    stabilizeRoot();
-    restoreGlobalScrolls();
-    scheduleRenderMindMapRelations(true);
-    scheduleRenderMindMapSummaries();
-    updateMindMapNodeStats();
-    refreshVisibleMapSearchResults();
+    // 保留原入口和失效目标兜底，子树统一使用增量同步。
+    if (!findNode(state.data, nodeId)) { renderTree(); return; }
+    syncMindMapChildrenDOM([nodeId]);
 };
 
 function updateNodeDOM(nodeId) {
     if (mindMapContentPreviewState.card?.dataset.nodeId === nodeId) hideMindMapContentPreview();
-    if(nodeId === state.data.id) { renderTree(); return; }
     
     saveGlobalScrolls();
     const node = findNode(state.data, nodeId);
     const card = document.getElementById(`card-${nodeId}`); 
-    if(!node || !card) return;
+    if (!node || !card) {
+        if (nodeId === state.data.id) renderTree();
+        return;
+    }
     
     // 1. 生成新虚拟节点
     let selfColor = null;
@@ -1079,9 +1013,11 @@ function updateNodeDOM(nodeId) {
     if (oldSimple !== newSimple || oldHasBody !== newHasBody) {
          // 结构大变，直接替换 DOM
          const parent = card.parentElement;
-         const childrenCont = parent.querySelector('.children-container');
+         // 根卡片的左右折叠按钮由分支维护；替换单卡时保留按钮及两侧子树。
+         if (nodeId === state.data.id) {
+             card.querySelectorAll(':scope > .fold-btn').forEach(button => newCard.appendChild(button));
+         }
          parent.replaceChild(newCard, card);
-         if(childrenCont) parent.appendChild(childrenCont); 
          newCard.querySelectorAll('.card-body').forEach(processRichContent);
          
          const finalCard = document.getElementById(`card-${nodeId}`);
@@ -1156,10 +1092,7 @@ function updateNodeDOM(nodeId) {
             }
         }
     }
-    stabilizeRoot();
-    restoreGlobalScrolls();
-    scheduleRenderMindMapRelations(true);
-    scheduleRenderMindMapSummaries();
+    finishMindMapDOMUpdate();
 }
 // 修复：暴力清除高亮后重新添加，防止高亮卡死
 function updateSelection() {

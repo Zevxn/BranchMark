@@ -44,7 +44,7 @@ async function reset(options = {}) {
         if (options.rootFolded) state.data.foldedRight = true;
         const addContent = node => { node.content = ${JSON.stringify(content)}; (node.children || []).forEach(addContent); };
         addContent(state.data);
-        state.rainbowMode = true; state.mode = 'IDLE'; state.activeDockIndex = -1;
+        state.rainbowMode = options.rainbow !== false; state.mode = 'IDLE'; state.activeDockIndex = -1;
         state.selectedIds = new Set(); state.selectedRelationId = null; state.selectedSummaryId = null;
         state.history = []; state.historyIndex = -1;
         mapSearchState.revealedNodeIds.clear(); mapSearchState.revealedRootDirections.clear();
@@ -74,7 +74,7 @@ async function check(label, mayReload = []) {
         const walk = (node, isLeft = false, color = null) => {
             const card = document.getElementById('card-' + node.id);
             if (!card || card.classList.contains('left-side') !== isLeft) return false;
-            if (color && (card.dataset.rainbowColor !== color || card.style.getPropertyValue('--node-color') !== color)) return false;
+            if (state.rainbowMode && color && (card.dataset.rainbowColor !== color || card.style.getPropertyValue('--node-color') !== color)) return false;
             const root = node === state.data;
             return (root ? ['left', 'right'] : [isLeft ? 'left' : 'right']).every(side => {
                 const children = (node.children || []).filter(child => !root || (child.dir === 'left') === (side === 'left'));
@@ -170,6 +170,52 @@ async function run() {
         onMouseUp({ ctrlKey: true, clientX: 0 }); void 0;`);
     await check('Dock 拖入');
     console.log('节点移动与粘贴检查通过：排序、跨父节点及左右移动、折叠展开、复制拖动、批量粘贴、旧宿主回退和 Dock 插入。');
+
+    const updates = [
+        { id: 'p', change: 'node.contentCollapsed = true', replace: true },
+        { id: 'p', change: 'node.isSimple = true', replace: true },
+        { id: 'p', change: 'node.content = ""', replace: true },
+        { id: 'r', change: 'node.contentCollapsed = true', replace: true },
+        { id: 'r', change: 'node.content = ""', replace: true },
+        { id: 'r', change: 'node.color = "#aabbcc"' },
+        { id: 'r', change: 'node.topic = "新的根标题"' },
+        { id: 'r', change: 'autoFitMindMapEntity(node);', autoFit: true }
+    ];
+    for (const item of updates) {
+        await reset({ rainbow: false });
+        await evaluate(`
+            window.oldRootButtons = [...document.getElementById('card-r').querySelectorAll('.fold-btn')];
+            const node = findNode(state.data, '${item.id}');
+            if (${Boolean(item.replace)}) { oldCards.delete('${item.id}'); oldFrames.delete('${item.id}'); }
+            ${item.change};
+            ${item.autoFit ? '' : `updateNodeDOM('${item.id}');`}
+            void 0;
+        `);
+        await check('单卡更新 ' + item.id + ' ' + item.change);
+        assert.equal(await evaluate('oldRootButtons.every(button => document.getElementById("card-r").contains(button))'), true, '根卡片更新保留两侧折叠按钮');
+    }
+    for (const action of ['fold-root-left', 'fold-root-right', 'fold']) {
+        await reset();
+        await evaluate(`
+            const root = state.data;
+            const branch = action => action === 'fold-root-right' ? findNode(root, 'q') : findNode(root, 'p');
+            const hidden = collectMindMapNodeIds(branch('${action}'));
+            if ('${action}' === 'fold') hidden.delete('p');
+            hidden.forEach(id => { oldCards.delete(id); oldFrames.delete(id); });
+            document.getElementById('${action === 'fold' ? 'card-p' : 'card-r'}').querySelector('[data-action="${action}"]').click();
+            void 0;
+        `);
+        await check('收起分支 ' + action);
+        await evaluate(`document.getElementById('${action === 'fold' ? 'card-p' : 'card-r'}').querySelector('[data-action="${action}"]').click(); void 0;`);
+        await check('展开分支 ' + action);
+        assert.equal(await evaluate(`
+            [...document.querySelectorAll('.node-card')].every(card =>
+                card.dataset.contentHash === (findNode(state.data, card.dataset.nodeId).content || ''))
+        `), true, '展开后的卡片初始化正文指纹');
+        await evaluate('autoFitMindMapEntity(findNode(state.data, "a")); void 0;');
+        await check('展开后自适应 ' + action);
+    }
+    console.log('单卡与折叠检查通过：根卡片和父卡片局部更新保留后代 iframe，左右及普通分支折叠保留无关卡片和连接线。');
 }
 // !SECTION 移动与批量插入回归
 

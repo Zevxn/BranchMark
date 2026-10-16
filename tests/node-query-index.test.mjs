@@ -13,7 +13,7 @@ const between = (source, start, end) => source.slice(source.indexOf(start), sour
 const querySource = between(render, '// SECTION 节点查询索引', '// !SECTION 节点查询索引');
 const helperSource = [
     querySource,
-    between(render, 'function isDescendantOfLeft(', 'function insertMindMapChildDOM('),
+    between(render, 'function isDescendantOfLeft(', 'function finishMindMapDOMUpdate('),
     between(render, 'function getMindMapNodeStats(', 'function updateMindMapNodeStats('),
     between(render, 'function isDescendant(', '// ---防止 XSS'),
     between(relations, 'function collectMindMapNodeIds(', 'function removeMindMapRelationsForNodes('),

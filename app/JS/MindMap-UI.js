@@ -1177,11 +1177,11 @@ function initializeMapClickEvents() {
             const action = foldBtn.dataset.action;
             if(action === 'fold-root-left') {
                 mapSearchState.revealedRootDirections.delete('left');
-                state.data.foldedLeft = !state.data.foldedLeft; recordHistory(); renderTree(); return;
+                state.data.foldedLeft = !state.data.foldedLeft; recordHistory(); updateChildrenDOM(state.data.id); return;
             }
             if(action === 'fold-root-right') {
                 mapSearchState.revealedRootDirections.delete('right');
-                state.data.foldedRight = !state.data.foldedRight; recordHistory(); renderTree(); return;
+                state.data.foldedRight = !state.data.foldedRight; recordHistory(); updateChildrenDOM(state.data.id); return;
             }
             if(action === 'fold') {
                 syncCurrentInput();

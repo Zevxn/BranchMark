@@ -1710,7 +1710,7 @@ function confirmMindMapTabRename() {
     if (rootChanged) {
         if (tab.id === mindMapWorkbook.activeTabId) {
             tab.data.topic = normalizedName;
-            renderTree();
+            updateNodeDOM(tab.data.id);
             recordHistory();
         } else {
             // 非当前页面也保留根节点改名前后的撤销记录，不切换页面。

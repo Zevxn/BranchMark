@@ -16,8 +16,8 @@ assert.match(html, /id="nodeStats"[\s\S]*?id="nodeStatsTotal"[\s\S]*?id="nodeSta
     '节点统计应提供总节点、直接子节点和兄弟节点三个简洁字段');
 assert.match(mindMap, /function updateToolbar\(\)[\s\S]*?updateMindMapNodeStats\(\);/,
     '选择状态刷新时应同步刷新节点统计');
-assert.match(mindMap, /function updateChildrenDOM\(nodeId\)[\s\S]*?updateMindMapNodeStats\(\);/,
-    '节点局部增删后应同步刷新节点统计');
+assert.match(mindMap, /function finishMindMapDOMUpdate\(\)[\s\S]*?updateSelection\(\);/,
+    '局部节点更新统一通过选择和工具栏刷新节点统计');
 
 const statsSource = mindMap.slice(
     mindMap.indexOf('function getMindMapNodeStats'),
