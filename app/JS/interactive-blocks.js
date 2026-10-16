@@ -57,7 +57,7 @@ function getInteractiveBlockEventAction(event, context) {
     return '';
 }
 
-function createInteractiveBlockDocument(source, owner = '') {
+function createInteractiveBlockDocument(source, owner = '', linkBridgeToken = '', hostOrigin = window.location?.origin || '') {
     // iframe 内的键盘事件不会冒泡到导图，显式转发保存、卡片导航键和未被组件消费的 Esc。
     // 前置 doctype 保持标准模式，后续完整 HTML 或 HTML 片段均由浏览器解析。
     return `<!doctype html><script>
@@ -144,6 +144,17 @@ function createInteractiveBlockDocument(source, owner = '') {
                 repeat: event.repeat, clientX: event.clientX, clientY: event.clientY
             } }, '*');
         }
+        addEventListener('click', event => {
+            if (!event.isTrusted || event.defaultPrevented) return;
+            const link = event.target?.closest?.('a[href]');
+            if (!link || link.hasAttribute('download')) return;
+            let target;
+            try { target = new URL(link.href, document.baseURI); } catch { return; }
+            if (!['http:', 'https:'].includes(target.protocol) || target.origin === ${JSON.stringify(hostOrigin)}) return;
+            event.preventDefault();
+            parent.postMessage({ type: 'branchmark-interactive-open-external-link', href: target.href,
+                token: ${JSON.stringify(linkBridgeToken)} }, '*');
+        });
         ['mousedown', 'contextmenu', 'keydown', 'keyup'].forEach(type => {
             addEventListener(type, event => {
                 if (event.key !== 'Escape') forwardEvent(event);
@@ -182,6 +193,8 @@ function createInteractiveBlockDocument(source, owner = '') {
                 }));
             }
         });
+        // 控件源码运行前移除启动脚本文本，避免它读出宿主外链桥接令牌。
+        document.currentScript?.remove();
         })();
     <\/script>\n${source}`;
 }
@@ -233,12 +246,13 @@ function renderInteractiveBlocks(element) {
         // 仅允许交互脚本；不授予对父页面的同源访问、弹窗或顶层导航能力。
         frame.setAttribute('sandbox', 'allow-scripts');
         frame.setAttribute('referrerpolicy', 'no-referrer');
+        const linkBridgeToken = Array.from(window.crypto.getRandomValues(new Uint32Array(4)), value => value.toString(36)).join('-');
         // 异步加载期间也可能切换主题，加载完成后以页面的当前主题为准。
         frame.addEventListener('load', () => {
             frame.contentWindow?.postMessage({ type: 'branchmark-interactive-theme', css: getInteractiveBlockThemeStyle() }, '*');
         });
         const owner = code.closest('.node-card') ? 'node' : code.closest('.summary-editor') ? 'summary' : '';
-        frame.srcdoc = createInteractiveBlockDocument(code.textContent, owner);
+        frame.srcdoc = createInteractiveBlockDocument(code.textContent, owner, linkBridgeToken, location.origin);
         const viewport = document.createElement('div');
         viewport.className = 'interactive-block-viewport';
         const scrollbar = document.createElement('div');
@@ -358,6 +372,11 @@ function renderInteractiveBlocks(element) {
         });
         const handleMessage = event => {
             if (event.source !== frame.contentWindow) return;
+            if (event.data?.type === 'branchmark-interactive-open-external-link') {
+                if (event.data.token !== linkBridgeToken || typeof event.data.href !== 'string') return;
+                if (typeof openMarkdownExternalUrl === 'function') void openMarkdownExternalUrl(event.data.href);
+                return;
+            }
             if (event.data?.type === 'branchmark-interactive-event') {
                 const input = event.data.event;
                 if (!input || !['mousedown', 'contextmenu', 'keydown', 'keyup'].includes(input.type)) return;
