@@ -733,6 +733,73 @@ function isDescendantOfLeft(id) {
     return false;
 };
 
+function insertMindMapChildDOM(parentNode, newNode) {
+    closeMindMapInvalidLinkPreview();
+    const isRoot = parentNode.id === state.data.id;
+    const card = document.getElementById(`card-${parentNode.id}`);
+    const wrapper = isRoot ? card?.parentElement : document.getElementById(`wrapper-${parentNode.id}`);
+    if (!card || !wrapper) { renderTree(); return; }
+    const isLeft = isRoot ? newNode.dir === 'left' : isDescendantOfLeft(parentNode.id);
+    const direction = isLeft ? 'left' : 'right';
+    const visible = isRoot
+        ? !parentNode[isLeft ? 'foldedLeft' : 'foldedRight'] || isMapRootDirectionTemporarilyExpanded(direction)
+        : !parentNode.folded || isMapNodeTemporarilyExpanded(parentNode.id);
+    if (!visible) { updateChildrenDOM(parentNode.id); return; }
+
+    saveGlobalScrolls();
+    const selector = isRoot
+        ? `:scope > .children-container${isLeft ? '.left-side' : ':not(.left-side)'}`
+        : ':scope > .children-container';
+    let container = wrapper.querySelector(selector);
+    // 已显示的分支只追加新节点；展开折叠分支时补建此前不存在的子树。
+    const children = container ? [newNode] : (parentNode.children || []).filter(child =>
+        !isRoot || (child.dir === 'left') === isLeft);
+    if (!container) {
+        container = document.createElement('div');
+        container.className = `children-container${isLeft ? ' left-side' : ''}`;
+        if (isRoot) {
+            if (isLeft) card.before(container);
+            else card.after(container);
+        } else {
+            container.id = `children-${parentNode.id}`;
+            wrapper.appendChild(container);
+        }
+    }
+
+    const action = isRoot ? `fold-root-${direction}` : 'fold';
+    let foldBtn = card.querySelector(`[data-action="${action}"]`);
+    if (!foldBtn) {
+        foldBtn = document.createElement('div');
+        foldBtn.dataset.action = action;
+        card.appendChild(foldBtn);
+    }
+    foldBtn.className = `fold-btn has-children${isRoot ? ` root-${direction}` : isLeft ? ' left-side' : ''}`;
+    foldBtn.innerHTML = '<i class="ri-subtract-line"></i>';
+
+    children.forEach(child => {
+        let color = null;
+        if (state.rainbowMode) {
+            if (isRoot) color = `hsl(${getStableHue(child.id)}, 85%, 88%)`;
+            else if (card.dataset.rainbowColor) color = darkenHSL(card.dataset.rainbowColor, 5);
+        }
+        const unit = document.createElement('div');
+        unit.className = `child-unit${isLeft ? ' left-side' : ''}`;
+        unit.innerHTML = `<div class="child-cross-line"></div>${createNodeHTML(child, isLeft, color)}`;
+        container.appendChild(unit);
+        unit.querySelectorAll('.node-card').forEach(element => {
+            element.dataset.contentHash = findNode(state.data, element.dataset.nodeId)?.content || '';
+        });
+        unit.querySelectorAll('.card-body').forEach(processRichContent);
+    });
+    updateSelection();
+    stabilizeRoot();
+    restoreGlobalScrolls();
+    scheduleRenderMindMapRelations(true);
+    scheduleRenderMindMapSummaries();
+    updateMindMapNodeStats();
+    refreshVisibleMapSearchResults();
+}
+
 function updateChildrenDOM(nodeId) {
     closeMindMapInvalidLinkPreview();
     if(nodeId === state.data.id) { renderTree(); return; }

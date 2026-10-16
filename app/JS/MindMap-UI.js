@@ -24,11 +24,14 @@ function initializeMapToolbar() {
         if(n){ 
             if(!n.children)n.children=[]; n.folded=false; 
             const newNode = {id:generateNodeId(), topic:'New', widthMode:'auto', heightMode:'auto'};
-            if(n.id === state.data.id) newNode.dir = 'right';
+            if(n.id === state.data.id) {
+                newNode.dir = 'right';
+                n.foldedRight = false;
+            }
             n.children.push(newNode); 
             invalidateMindMapNodeIndex();
             state.selectedIds.clear(); state.selectedIds.add(newNode.id); 
-            recordHistory(); updateChildrenDOM(n.id);
+            recordHistory(); insertMindMapChildDOM(n, newNode);
             focusMindMapNodeTopic(newNode.id);
         } 
     };
@@ -45,7 +48,7 @@ function initializeMapToolbar() {
             p.children.push(newNode); 
             invalidateMindMapNodeIndex();
             state.selectedIds.clear(); state.selectedIds.add(newNode.id); 
-            recordHistory(); updateChildrenDOM(p.id);
+            recordHistory(); insertMindMapChildDOM(p, newNode);
             focusMindMapNodeTopic(newNode.id);
         } 
     };
