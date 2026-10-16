@@ -2190,6 +2190,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     document.addEventListener('focusout', (e) => { 
+        // 退出标题编辑时同时释放标题选区，避免失焦后仍被全局快捷键判为文字选择状态。
+        if (e.target.matches('.node-topic, .summary-topic')) {
+            const selection = window.getSelection();
+            if (selection?.anchorNode && e.target.contains(selection.anchorNode) && e.target.contains(selection.focusNode)) {
+                selection.removeAllRanges();
+            }
+        }
         if(e.target.classList.contains('node-topic')) { 
             const c = e.target.closest('.node-card'); 
             if(c) { 
@@ -2221,6 +2228,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('keydown', (e) => { 
         // 判断当前事件源是否为节点标题，且按下的是 Enter 键
         if(e.target.classList.contains('node-topic') && e.key==='Enter' && !(e.ctrlKey || e.metaKey)) {
+            if (e.isComposing || e.keyCode === 229) {
+                e.stopPropagation();
+                return;
+            }
             
             // 1. 获取当前所在的卡片 DOM
             const card = e.target.closest('.node-card');
@@ -2238,7 +2249,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 阻止默认换行，改为“完成编辑”
                 e.preventDefault(); 
                 e.stopPropagation(); 
-                e.target.blur(); // 失去焦点，触发保存
+                if (!e.repeat) e.target.blur(); // 首次按下完成编辑，长按不重复提交
             }
         }
     });
@@ -2388,6 +2399,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // 重做 (Ctrl + Y)
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
             e.preventDefault(); redo(); return;
+        }
+
+        // 长按一次只创建一个节点，避免自动聚焦前的重复事件继续新增。
+        if (e.repeat && ['Tab', 'Enter'].includes(e.key)) {
+            e.preventDefault();
+            return;
         }
 
         // 新建子节点 (Tab)

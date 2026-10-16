@@ -46,6 +46,7 @@ async function run() {
         contextIsolation: true, backgroundThrottling: false, partition: `node-insertion-${Date.now()}`
     } });
     await window.loadURL(`http://127.0.0.1:${server.address().port}/HTML/MindMap.html`);
+    window.webContents.focus();
     await evaluate(`
         window.frameRuns = new Map();
         addEventListener('message', event => {
@@ -111,8 +112,42 @@ async function run() {
                     && state.history.length === 2;
             })()
         `), true, `${item.name}：保持分支方向、彩虹颜色和历史记录`);
+        await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter', code: 'Enter', bubbles: true, cancelable: true
+        }))`);
+        assert.equal(await evaluate('document.activeElement.classList.contains("node-topic")'), false, `${item.name}：默认标题可直接完成编辑`);
+        assert.equal(await evaluate('window.getSelection().toString()'), '', `${item.name}：完成编辑后清理标题选区`);
+        const count = await evaluate('document.querySelectorAll(".node-card").length');
+        for (const key of ['Enter', 'Tab']) {
+            await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+                key: ${JSON.stringify(key)}, code: ${JSON.stringify(key)}, repeat: true, bubbles: true, cancelable: true
+            }))`);
+        }
+        assert.equal(await evaluate('document.querySelectorAll(".node-card").length'), count, `${item.name}：长按不重复新建节点`);
     }
+    // 完成默认标题后，按键应能继续新建；重复按键和输入法确认不能打断新标题编辑。
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter', code: 'Enter', bubbles: true, cancelable: true
+    })); window.nextId = [...state.selectedIds][0];`);
+    await waitFor('document.activeElement === document.getElementById("card-" + nextId)?.querySelector(".node-topic")');
+    for (const options of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }]) {
+        await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter', code: 'Enter', bubbles: true, cancelable: true, ...${JSON.stringify(options)}
+        }))`);
+        assert.equal(await evaluate('document.activeElement.classList.contains("node-topic")'), true, '重复按键或输入法确认应保留编辑焦点');
+    }
+    await evaluate(`
+        document.activeElement.textContent = '修改后的标题';
+        document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+    `);
+    assert.equal(await evaluate('findNode(state.data, nextId).topic'), '修改后的标题', '修改标题后提交应保存文字');
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Tab', code: 'Tab', bubbles: true, cancelable: true
+    })); window.childId = [...state.selectedIds][0];`);
+    await waitFor('document.activeElement === document.getElementById("card-" + childId)?.querySelector(".node-topic")');
+    assert.equal(await evaluate('findParent(state.data, childId).id === nextId'), true, '提交后 Tab 应能继续创建子节点');
     console.log(`节点增量插入检查通过：${cases.length} 个场景保留已有卡片和 iframe，支持直接编辑。`);
+    console.log('标题提交检查通过：默认标题退出、连续新建、长按和输入法确认行为正常。');
 }
 // !SECTION 新建节点与已有 iframe 保留
 
