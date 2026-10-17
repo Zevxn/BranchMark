@@ -1286,12 +1286,13 @@ function prepareMindMapSummaryEditorsForMeasurement(summaries, labelLayer) {
         const isSimple = Boolean(summary.isSimple);
         const summaryTopic = String(summary.topic ?? '总结').slice(0, 200);
         const summaryContent = getMindMapSummaryContent(summary);
+        const hasContent = Boolean(summaryContent.trim());
         const topic = editor.querySelector('.summary-topic');
         const body = editor.querySelector('.summary-card-body');
         editor.classList.toggle('simple', isSimple);
-        editor.classList.toggle('topic-empty', !summaryTopic.trim());
-        editor.classList.toggle('has-content', Boolean(summaryContent));
-        editor.style.width = summary.widthMode === 'manual' && summary.width ? `${summary.width}px` : '';
+        editor.classList.toggle('topic-empty', document.activeElement !== topic && !summaryTopic.trim());
+        editor.classList.toggle('has-content', hasContent);
+        editor.style.width = (isSimple || hasContent) && summary.widthMode === 'manual' && summary.width ? `${summary.width}px` : '';
         editor.style.height = isSimple && summary.heightMode === 'manual' && summary.bodyHeight
             ? `${summary.bodyHeight}px`
             : '';
@@ -1362,14 +1363,16 @@ function renderMindMapSummaries() {
             editor.style.removeProperty('--summary-accent');
             editor.classList.remove('has-color');
         }
-        editor.style.width = summary.widthMode === 'manual' && summary.width ? `${summary.width}px` : '';
-        editor.style.height = summary.isSimple && summary.heightMode === 'manual' && summary.bodyHeight
+        const isSimple = Boolean(summary.isSimple);
+        const summaryContent = getMindMapSummaryContent(summary);
+        const hasContent = Boolean(summaryContent.trim());
+        editor.style.width = (isSimple || hasContent) && summary.widthMode === 'manual' && summary.width ? `${summary.width}px` : '';
+        editor.style.height = isSimple && summary.heightMode === 'manual' && summary.bodyHeight
             ? `${summary.bodyHeight}px`
             : '';
         const topic = editor.querySelector('.summary-topic');
         const body = editor.querySelector('.summary-card-body');
         const toggleButton = editor.querySelector('[data-summary-action="toggle-simple"]');
-        const isSimple = Boolean(summary.isSimple);
         const toggleTitle = isSimple ? '切换回卡片模式' : '切换为便利贴模式';
         toggleButton.title = toggleTitle;
         toggleButton.setAttribute('aria-label', toggleTitle);
@@ -1386,8 +1389,7 @@ function renderMindMapSummaries() {
         if (wasTopicEmpty !== isTopicEmpty && geometry.orientation === 'horizontal') {
             shouldRemeasureLayout = true;
         }
-        const summaryContent = getMindMapSummaryContent(summary);
-        editor.classList.toggle('has-content', Boolean(summaryContent));
+        editor.classList.toggle('has-content', hasContent);
         if (body.dataset.summaryContent !== summaryContent) {
             body.innerHTML = renderMarkdown(summaryContent);
             body.dataset.summaryContent = summaryContent;

@@ -1280,7 +1280,10 @@
             max-height: 600px;
             user-select: text;
         }
-        .summary-editor.topic-empty .summary-card-header { display: none; }
+        .summary-editor.topic-empty.has-content .summary-card-header,
+        .summary-editor.topic-empty.simple .summary-card-header { display: none; }
+        .summary-editor.topic-empty:not(.simple):not(.has-content) .summary-card-title > i { display: none; }
+        .summary-editor.topic-empty:not(.simple):not(.has-content) .summary-topic { flex: 1; }
         .summary-editor.topic-empty.has-content .summary-card-body {
             min-height: calc(
                 var(--node-card-topic-only-min-height)
@@ -2962,10 +2965,12 @@
         .node-card.topic-empty:not(.simple):not(.has-content) .card-header {
             position: relative;
         }
-        .node-card.topic-empty:not(.simple):not(.has-content) .node-topic {
+        .node-card.topic-empty:not(.simple):not(.has-content) .node-topic,
+        .summary-editor.topic-empty:not(.simple):not(.has-content) .summary-topic {
             min-height: 1em;
         }
-        .node-card.topic-empty:not(.simple):not(.has-content) .card-header:not(:focus-within)::after {
+        .node-card.topic-empty:not(.simple):not(.has-content) .card-header:not(:focus-within)::after,
+        .summary-editor.topic-empty:not(.simple):not(.has-content) .summary-card-header:not(:focus-within)::after {
             content: '输入标题';
             position: absolute;
             inset: 0;

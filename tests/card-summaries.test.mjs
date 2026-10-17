@@ -34,8 +34,8 @@ assert.match(html, /\.node-card\.simple,\s*\.summary-editor\.simple\s*\{\s*min-h
     '普通便利贴与总结便利贴应复用无正文普通卡片的最小高度');
 assert.match(html, /\.summary-editor\.simple \.summary-card-body\s*\{\s*display:\s*none/,
     '便利贴模式应隐藏正文并仅展示总结标题');
-assert.match(html, /\.summary-editor\.topic-empty \.summary-card-header\s*\{\s*display:\s*none/,
-    '总结标题为空时应彻底隐藏标题栏');
+assert.match(html, /\.summary-editor\.topic-empty\.has-content \.summary-card-header,[\s\S]*?display:\s*none/,
+    '标准总结仅在有正文且标题为空时隐藏标题栏');
 assert.match(html, /\.summary-editor\.topic-empty\.has-content \.summary-card-body\s*\{[\s\S]*?border-radius:\s*var\(--summary-card-inner-radius\)/,
     '无标题总结的正文应直接接管卡片顶部圆角');
 assert.match(html, /\.summary-editor\s*\{[\s\S]*?--summary-card-inner-radius:\s*max\(0px, calc\(var\(--summary-card-radius\) - var\(--summary-card-border-width\)\)\)/,
@@ -151,7 +151,7 @@ assert.match(mindMap, /function initializeMapContextMenu\(\)[\s\S]*?const summar
     '右击总结卡片时应复用脑图右键菜单并选中对应总结');
 assert.match(mindMap, /contextTargetKind = 'node'[\s\S]*?clearSelectedMindMapRelation\(\);[\s\S]*?clearSelectedMindMapSummary\(\);/,
     '从总结切换到普通卡片右键菜单时应清理旧的独立对象选中态');
-assert.match(mindMap, /\['cut', 'copy', 'paste',[^\]]*'add-relation', 'create-tab-from-node', 'expand', 'collapse'\][\s\S]*?setActionVisibility\(action, false\)/,
+assert.match(mindMap, /\['cut', 'copy', 'paste',[^\]]*'add-relation', [^\]]*'create-tab-from-node', 'expand', 'collapse'\][\s\S]*?setActionVisibility\(action, false\)/,
     '总结右键菜单应隐藏依赖树节点结构的不适用功能');
 assert.match(mindMap, /contextTargetKind === 'summary'[\s\S]*?action === 'copy-md'[\s\S]*?action === 'delete'[\s\S]*?action === 'auto-fit'[\s\S]*?action === 'to-simple'[\s\S]*?action === 'set-color'/,
     '总结右键菜单应复用复制、删除、自适应、模式切换和颜色动作');
@@ -201,6 +201,62 @@ assert.match(mindMap, /const layoutPlans = prepareMindMapSummaryLayout\(summarie
     '父子连接线应在总结分支位移求解完成后刷新');
 assert.match(mindMap, /canvasLayer\?\.getBoundingClientRect\(\)[\s\S]*?rect\.left - canvasLeft[\s\S]*?rect\.top - canvasTop/,
     '卡片坐标应根据画布实际 DOM 变换反算，避免左侧总结使用过期视图偏移');
+
+// SECTION 总结正文与尺寸回归
+const summaryClasses = new Set();
+const sizingTopic = { innerText: '' };
+const sizingBody = { style: {}, dataset: {} };
+const sizingToggle = { setAttribute() {} };
+const sizingEditor = {
+    dataset: { summaryId: 'sizing' },
+    style: { setProperty() {}, removeProperty() {} },
+    classList: {
+        toggle(name, enabled) { if (enabled) summaryClasses.add(name); else summaryClasses.delete(name); },
+        contains: name => summaryClasses.has(name),
+        add: name => summaryClasses.add(name), remove: name => summaryClasses.delete(name)
+    },
+    querySelector: selector => selector === '.summary-topic' ? sizingTopic
+        : selector === '.summary-card-body' ? sizingBody : sizingToggle,
+};
+const sizingSummary = { id: 'sizing', topic: '', content: '正文', widthMode: 'manual', width: 440, heightMode: 'manual', bodyHeight: 160 };
+const sizingLabels = { querySelector: () => sizingEditor, querySelectorAll: () => [sizingEditor] };
+const sizingContext = vm.createContext({
+    state: { mode: 'IDLE', data: {} },
+    MINDMAP_SUMMARY_SVG_NS: 'http://www.w3.org/2000/svg',
+    document: {
+        activeElement: null,
+        createElementNS: () => ({ dataset: {}, classList: { add() {}, toggle() {} }, setAttribute() {} })
+    },
+    $: selector => selector === '#summary-label-layer' ? sizingLabels : { replaceChildren() {}, appendChild() {} },
+    getMindMapSummaries: () => [sizingSummary],
+    prepareMindMapSummaryLayout: () => new Map(),
+    getMindMapSummaryGeometry: () => ({ orientation: 'vertical', side: 'right', path: 'M0 0', labelX: 0, labelY: 0 }),
+    renderMarkdown: content => content, processRichContent() {},
+    updateMindMapSummaryMemberHighlights() {}, renderMindMapTreeConnectors() {},
+    updateMindMapSummarySelectionAction() {}, updateToolbar() {}, scheduleRenderMindMapSummaries() {},
+});
+vm.runInContext([
+    mindMap.slice(mindMap.indexOf('function getMindMapSummaryContent('), mindMap.indexOf('function setMindMapSummaryContent(')),
+    mindMap.slice(mindMap.indexOf('function prepareMindMapSummaryEditorsForMeasurement('), mindMap.indexOf('function scheduleRenderMindMapSummaries(')),
+].join('\n'), sizingContext);
+for (const content of ['正文', '', ' \n ', '恢复正文']) {
+    sizingSummary.content = content;
+    sizingContext.renderMindMapSummaries();
+    assert.equal(sizingEditor.style.width, content.trim() ? '440px' : '', '测量和最终渲染均应仅在有正文时使用标准总结的手动宽度');
+    assert.equal(summaryClasses.has('has-content'), Boolean(content.trim()), '空格和换行不应使卡片进入正文模式');
+    assert.equal(summaryClasses.has('topic-empty'), true, '显式空标题应保留');
+    assert.equal(sizingSummary.width, 440, '清空正文不应删除保存的宽度');
+    assert.equal(sizingSummary.bodyHeight, 160, '清空正文不应删除保存的正文高度');
+    assert.equal(Boolean(sizingSummary.isSimple), false, '空卡片不应自动切换类型');
+}
+sizingSummary.content = '';
+sizingContext.document.activeElement = sizingTopic;
+sizingContext.renderMindMapSummaries();
+assert.equal(summaryClasses.has('topic-empty'), false, '测量与渲染期间不得隐藏正在编辑的空标题');
+sizingSummary.isSimple = true;
+sizingContext.renderMindMapSummaries();
+assert.equal(sizingEditor.style.width, '440px', '便利贴模式继续使用保存的手动宽度');
+// !SECTION 总结正文与尺寸回归
 
 const selectionSource = mindMap.slice(
     mindMap.indexOf('function getMindMapNodeBranchSide'),
